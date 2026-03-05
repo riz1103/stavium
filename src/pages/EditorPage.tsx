@@ -1,0 +1,526 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useUserStore } from '../app/store/userStore';
+import { useScoreStore } from '../app/store/scoreStore';
+import { getComposition, saveComposition } from '../services/compositionService';
+import { ScoreEditor } from '../components/editor/ScoreEditor';
+import { ScoreInfoPanel } from '../components/toolbar/ScoreInfoPanel';
+import { PlaybackControls } from '../components/playback/PlaybackControls';
+import { NoteToolbar } from '../components/toolbar/NoteToolbar';
+import { RestToolbar } from '../components/toolbar/RestToolbar';
+import { ClefSelector } from '../components/toolbar/ClefSelector';
+import { InstrumentSelector } from '../components/toolbar/InstrumentSelector';
+import { MeasureControls } from '../components/toolbar/MeasureControls';
+import { CompositionControls } from '../components/toolbar/CompositionControls';
+import { StaffControls } from '../components/toolbar/StaffControls';
+import { AccidentalToolbar } from '../components/toolbar/AccidentalToolbar';
+import { TieSlurToolbar } from '../components/toolbar/TieSlurToolbar';
+import { ArticulationToolbar } from '../components/toolbar/ArticulationToolbar';
+import { DynamicToolbar } from '../components/toolbar/DynamicToolbar';
+import { UndoRedoToolbar } from '../components/toolbar/UndoRedoToolbar';
+import { ExportToolbar } from '../components/toolbar/ExportToolbar';
+import { ChordDetectionPanel } from '../components/toolbar/ChordDetectionPanel';
+import { MeasurePropertiesPanel } from '../components/toolbar/MeasurePropertiesPanel';
+import { StaffVolumeControls } from '../components/toolbar/StaffVolumeControls';
+
+type MobileTab = 'notes' | 'expression' | 'structure' | 'settings';
+
+const TAB_CONFIG: { id: MobileTab; label: string; icon: string }[] = [
+  { id: 'notes',      label: 'Notes',      icon: '♩' },
+  { id: 'expression', label: 'Expression', icon: '♯' },
+  { id: 'structure',  label: 'Structure',  icon: '𝄞' },
+  { id: 'settings',   label: 'Score',      icon: '⚙' },
+];
+
+export const EditorPage = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const user = useUserStore((state) => state.user);
+  const composition = useScoreStore((state) => state.composition);
+  const setComposition = useScoreStore((state) => state.setComposition);
+  const resetComposition = useScoreStore((state) => state.resetComposition);
+  const selectedNote = useScoreStore((state) => state.selectedNote);
+  const [title, setTitle] = useState('Untitled Composition');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [mobileTab, setMobileTab] = useState<MobileTab>('notes');
+  const [toolbarOpen, setToolbarOpen] = useState(true);
+  // Loaded compositions start in read-only mode; new compositions start in edit mode
+  const [isReadOnly, setIsReadOnly] = useState(!!id);
+
+  // Derived permission flags (recomputed whenever composition or user changes)
+  const isOwner = !composition?.userId || composition.userId === user?.uid;
+  // Non-owners with view-only permission can never switch to edit mode
+  const canEdit = isOwner || composition?.sharePermission === 'edit';
+  const [scoreInfoOpen, setScoreInfoOpen] = useState(false);
+  const scoreInfoBtnRef = useRef<HTMLButtonElement>(null);
+  const undo = useScoreStore((state) => state.undo);
+  const redo = useScoreStore((state) => state.redo);
+  const canUndo = useScoreStore((state) => state.canUndo);
+  const canRedo = useScoreStore((state) => state.canRedo);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        if (canUndo) undo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        if (canRedo) redo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo, canUndo, canRedo]);
+
+  useEffect(() => {
+    if (!user) { navigate('/login'); return; }
+    if (id) {
+      loadComposition(id);
+    } else {
+      resetComposition();
+      setTitle('Untitled Composition');
+      setLoading(false);
+    }
+  }, [id, user, navigate, resetComposition]);
+
+  const loadComposition = async (compositionId: string) => {
+    try {
+      setLoading(true);
+      const comp = await getComposition(compositionId);
+      if (comp) {
+        setComposition(comp);
+        setTitle(comp.title);
+        setIsReadOnly(true); // Always start read-only when opening a saved composition
+      }
+    } catch (error) {
+      console.error('Error loading composition:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!user || !composition) return;
+    try {
+      setSaving(true);
+      await saveComposition({ ...composition, id: id || undefined, title, userId: user.uid }, user.uid);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    } catch (error) {
+      console.error('Error saving composition:', error);
+      alert('Failed to save composition');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleBack = () => navigate('/dashboard');
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-sv-bg gap-4">
+        <div className="w-10 h-10 border-2 border-sv-border border-t-sv-cyan rounded-full animate-spin" />
+        <p className="text-sv-text-dim text-sm">Loading composition…</p>
+      </div>
+    );
+  }
+
+  /* ── Desktop toolbar rows ─────────────────────────────────────────────── */
+  const desktopToolbar = (
+    <div className="hidden md:flex flex-col bg-sv-card border-b border-sv-border">
+      {isReadOnly ? (
+        /* Read-only mode: compact info bar with Export + Volume only */
+        <div className="flex items-center gap-3 px-3 py-2 overflow-x-auto toolbar-scroll">
+          {/* View-mode badge */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium flex-shrink-0">
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+            </svg>
+            View Only
+          </div>
+          <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+          <StaffVolumeControls />
+          <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+          <ExportToolbar />
+        </div>
+      ) : (
+        <>
+          {/* Row 1: Notes + Rests + UndoRedo */}
+          <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll border-b border-sv-border">
+            <NoteToolbar />
+            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+            <RestToolbar />
+            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+            <UndoRedoToolbar />
+          </div>
+
+          {/* Row 2: Staff / Measure / Clef / Instrument + Export */}
+          <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll border-b border-sv-border">
+            <StaffControls />
+            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+            <MeasureControls />
+            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+            <ClefSelector />
+            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+            <InstrumentSelector />
+            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+            <MeasurePropertiesPanel />
+            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+            <ExportToolbar />
+          </div>
+
+          {/* Row 3: Composition + Volume + Chord */}
+          <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll border-b border-sv-border">
+            <CompositionControls />
+            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+            <StaffVolumeControls />
+          </div>
+
+          {/* Row 4: Note expression (context tools — only show when note selected) */}
+          {selectedNote && (
+            <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+              <AccidentalToolbar />
+              <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+              <TieSlurToolbar />
+              <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+              <ArticulationToolbar />
+              <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+              <DynamicToolbar />
+              <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+              <ChordDetectionPanel />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+
+  /* ── Mobile tab panel content ─────────────────────────────────────────── */
+  const readOnlyNotice = (
+    <div className="flex flex-col items-center justify-center py-4 gap-2">
+      <div className="flex items-center gap-1.5 text-amber-400 text-xs font-medium">
+        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+        </svg>
+        View Only
+      </div>
+      {canEdit ? (
+        <button
+          onClick={() => setIsReadOnly(false)}
+          className="px-3 py-1.5 rounded-lg bg-sv-cyan text-sv-bg text-xs font-medium hover:bg-sv-cyan-dim transition-colors"
+        >
+          ✏ Enable Editing
+        </button>
+      ) : (
+        <span className="text-xs text-sv-text-muted italic">
+          You only have view permission for this composition.
+        </span>
+      )}
+    </div>
+  );
+
+  const mobileTabContent: Record<MobileTab, JSX.Element> = {
+    notes: isReadOnly ? readOnlyNotice : (
+      <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+        <NoteToolbar />
+        <RestToolbar />
+      </div>
+    ),
+    expression: isReadOnly ? readOnlyNotice : (
+      <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+        {selectedNote ? (
+          <>
+            <AccidentalToolbar />
+            <TieSlurToolbar />
+            <ArticulationToolbar />
+            <DynamicToolbar />
+          </>
+        ) : (
+          <div className="flex items-center justify-center py-4 text-sv-text-dim text-sm">
+            Select a note to edit expression
+          </div>
+        )}
+      </div>
+    ),
+    structure: isReadOnly ? readOnlyNotice : (
+      <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+        <StaffControls />
+        <MeasureControls />
+        <div className="flex flex-wrap gap-2">
+          <ClefSelector />
+          <InstrumentSelector />
+          <MeasurePropertiesPanel />
+        </div>
+        <StaffVolumeControls />
+      </div>
+    ),
+    settings: (
+      <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+        {!isReadOnly && <CompositionControls />}
+        <div className="flex gap-2 flex-wrap">
+          {!isReadOnly && <UndoRedoToolbar />}
+          <ExportToolbar />
+        </div>
+        {!isReadOnly && <ChordDetectionPanel />}
+        <StaffVolumeControls />
+      </div>
+    ),
+  };
+
+  return (
+    <div className="h-screen flex flex-col bg-sv-bg overflow-hidden">
+
+      {/* ── Top Header ─────────────────────────────────────────────────────── */}
+      <header className="flex-shrink-0 bg-sv-card border-b border-sv-border px-3 py-2 flex items-center gap-2">
+        {/* Back */}
+        <button
+          onClick={handleBack}
+          className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg
+                     text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated transition-colors"
+          title="Back to Dashboard"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        {/* Logo (desktop) */}
+        <img src="/stavium_logo.png" alt="Stavium" className="hidden md:block w-7 h-7 rounded-md object-cover flex-shrink-0" />
+
+        {/* Score Info button */}
+        <button
+          ref={scoreInfoBtnRef}
+          onClick={() => setScoreInfoOpen((v) => !v)}
+          className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium
+                      transition-all duration-150 ${
+            scoreInfoOpen
+              ? 'bg-sv-cyan/15 border-sv-cyan/50 text-sv-cyan'
+              : 'bg-sv-elevated border-sv-border text-sv-text-muted hover:text-sv-text hover:border-sv-border-lt'
+          }`}
+          title="Score info — composer, arranger, sharing"
+        >
+          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+          </svg>
+          <span className="hidden sm:inline">Score Info</span>
+        </button>
+        {/* Score Info panel rendered via portal (avoids z-index/overflow issues) */}
+        <ScoreInfoPanel
+          open={scoreInfoOpen}
+          onClose={() => setScoreInfoOpen(false)}
+          anchorRef={scoreInfoBtnRef as React.RefObject<HTMLElement>}
+          isOwner={isOwner}
+        />
+
+        {/* Read-only badge (shown when not editing) */}
+        {isReadOnly && (
+          <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md
+                          bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium">
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM12 17c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+            </svg>
+            <span className="hidden sm:inline">View Only</span>
+          </div>
+        )}
+
+        {/* Title input */}
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => { if (!isReadOnly) setTitle(e.target.value); }}
+          readOnly={isReadOnly}
+          className={`flex-1 min-w-0 px-3 py-1.5 bg-sv-elevated border border-sv-border rounded-lg
+                     text-sv-text text-sm font-medium placeholder-sv-text-dim
+                     focus:outline-none focus:border-sv-cyan/60 focus:ring-1 focus:ring-sv-cyan/20
+                     transition-colors ${isReadOnly ? 'cursor-default select-none' : ''}`}
+          placeholder="Composition Title"
+        />
+
+        {/* Edit toggle on mobile */}
+        <button
+          onClick={() => canEdit && setIsReadOnly((v) => !v)}
+          disabled={!canEdit}
+          className={`md:hidden flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+            !canEdit
+              ? 'text-sv-text-dim cursor-not-allowed opacity-40'
+              : isReadOnly
+              ? 'text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated'
+              : 'text-sv-cyan bg-sv-cyan/10'
+          }`}
+          title={!canEdit ? 'View only — you do not have edit permission' : isReadOnly ? 'Enable editing' : 'Switch to view mode'}
+        >
+          {isReadOnly ? (
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM12 17c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+            </svg>
+          )}
+        </button>
+
+        {/* Toolbar toggle on mobile */}
+        <button
+          onClick={() => setToolbarOpen((v) => !v)}
+          className="md:hidden flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg
+                     text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated transition-colors"
+          title={toolbarOpen ? 'Hide toolbar' : 'Show toolbar'}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+
+        {/* Edit / View toggle (desktop) */}
+        <button
+          onClick={() => canEdit && setIsReadOnly((v) => !v)}
+          disabled={!canEdit}
+          className={`hidden md:flex flex-shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm
+                      font-medium transition-all duration-200 border ${
+            !canEdit
+              ? 'bg-sv-elevated border-sv-border text-sv-text-dim cursor-not-allowed opacity-40'
+              : isReadOnly
+              ? 'bg-sv-elevated border-sv-border text-sv-text-muted hover:text-sv-text hover:border-sv-cyan/40'
+              : 'bg-sv-cyan/10 border-sv-cyan/40 text-sv-cyan hover:bg-sv-cyan/20'
+          }`}
+          title={!canEdit ? 'View only — you do not have edit permission' : isReadOnly ? 'Switch to edit mode' : 'Switch to view mode'}
+        >
+          {isReadOnly ? (
+            <>
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+              </svg>
+              Edit
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+              </svg>
+              Viewing
+            </>
+          )}
+        </button>
+
+        {/* Undo/Redo (desktop shortcuts, hidden in read-only) */}
+        <div className={`hidden md:flex items-center gap-1 ${isReadOnly ? 'opacity-0 pointer-events-none' : ''}`}>
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm transition-colors ${
+              canUndo ? 'text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated' : 'text-sv-text-dim cursor-not-allowed'
+            }`}
+            title="Undo (Ctrl+Z)"
+          >↶</button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm transition-colors ${
+              canRedo ? 'text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated' : 'text-sv-text-dim cursor-not-allowed'
+            }`}
+            title="Redo (Ctrl+Y)"
+          >↷</button>
+        </div>
+
+        {/* Save (hidden in read-only mode) */}
+        <button
+          onClick={handleSave}
+          disabled={saving || isReadOnly}
+          style={{ display: isReadOnly ? 'none' : undefined }}
+          className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium
+                      transition-all duration-200 ${
+            saveSuccess
+              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+              : 'bg-sv-cyan text-sv-bg border border-sv-cyan hover:bg-sv-cyan-dim shadow-glow-sm'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+          title="Save (Ctrl+S)"
+        >
+          {saving ? (
+            <>
+              <span className="w-3 h-3 border-2 border-sv-bg border-t-transparent rounded-full animate-spin" />
+              <span>Saving…</span>
+            </>
+          ) : saveSuccess ? (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+              <span>Saved!</span>
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+              </svg>
+              <span>Save</span>
+            </>
+          )}
+        </button>
+      </header>
+
+      {/* ── Desktop Toolbars ───────────────────────────────────────────────── */}
+      {desktopToolbar}
+
+      {/* ── Score Canvas ──────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-hidden bg-sv-bg">
+        <ScoreEditor isReadOnly={isReadOnly} />
+      </div>
+
+      {/* ── Playback bar (always visible) ─────────────────────────────────── */}
+      <div className="flex-shrink-0 border-t border-sv-border bg-sv-card">
+        <PlaybackControls />
+      </div>
+
+      {/* ── Mobile: Tab bar + sliding tool panel ──────────────────────────── */}
+      <div className="md:hidden flex-shrink-0 border-t border-sv-border bg-sv-card">
+        {/* Tool panel (visible when toolbarOpen) */}
+        {toolbarOpen && (
+          <div className="border-b border-sv-border bg-sv-card tool-panel-enter">
+            {mobileTabContent[mobileTab]}
+          </div>
+        )}
+
+        {/* Tab bar */}
+        <div className="flex">
+          {TAB_CONFIG.map((tab) => {
+            const isActive = mobileTab === tab.id;
+            const hasNote = tab.id === 'expression' && !!selectedNote;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  if (mobileTab === tab.id) {
+                    setToolbarOpen((v) => !v);
+                  } else {
+                    setMobileTab(tab.id);
+                    setToolbarOpen(true);
+                  }
+                }}
+                className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5
+                            transition-colors relative ${
+                  isActive && toolbarOpen
+                    ? 'text-sv-cyan bg-sv-cyan-muted'
+                    : 'text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated'
+                }`}
+              >
+                {isActive && toolbarOpen && (
+                  <span className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-sv-cyan rounded-b" />
+                )}
+                <span className="text-base leading-none">{tab.icon}</span>
+                <span className="text-[10px] font-medium leading-none">{tab.label}</span>
+                {hasNote && (
+                  <span className="absolute top-1.5 right-1/4 w-1.5 h-1.5 rounded-full bg-sv-cyan"
+                        style={{ boxShadow: '0 0 4px rgba(0,212,245,0.8)' }} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};

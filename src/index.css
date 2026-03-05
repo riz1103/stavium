@@ -1,0 +1,312 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Stavium Design System ──────────────────────────────────────────────── */
+
+:root {
+  --sv-bg:          #080b10;
+  --sv-card:        #0f1420;
+  --sv-elevated:    #161d2e;
+  --sv-panel:       #1a2235;
+  --sv-border:      #1e2a3a;
+  --sv-border-lt:   #263347;
+  --sv-cyan:        #00d4f5;
+  --sv-cyan-dim:    #00a8c2;
+  --sv-text:        #e8f0fe;
+  --sv-text-muted:  #8b9ab5;
+  --sv-text-dim:    #4a5a72;
+  color-scheme: dark;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--sv-bg);
+  color: var(--sv-text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar              { width: 6px; height: 6px; }
+::-webkit-scrollbar-track        { background: var(--sv-card); }
+::-webkit-scrollbar-thumb        { background: var(--sv-border-lt); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover  { background: var(--sv-cyan-dim); }
+*                                { scrollbar-width: thin; scrollbar-color: var(--sv-border-lt) var(--sv-card); }
+
+/* ── Reusable button / toolbar classes (plain CSS — no @apply chains) ───── */
+
+/* Base button */
+.sv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  user-select: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Ghost (inactive) */
+.sv-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: var(--sv-elevated);
+  color: var(--sv-text-muted);
+  border: 1px solid var(--sv-border);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  user-select: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sv-btn-ghost:hover {
+  background: var(--sv-panel);
+  color: var(--sv-text);
+  border-color: var(--sv-border-lt);
+}
+
+/* Active / selected */
+.sv-btn-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--sv-cyan);
+  color: var(--sv-bg);
+  border: 1px solid var(--sv-cyan);
+  box-shadow: 0 0 8px rgba(0,212,245,0.2);
+  transition: background 0.15s, box-shadow 0.15s;
+  user-select: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sv-btn-active:hover {
+  background: var(--sv-cyan-dim);
+}
+
+/* Primary action */
+.sv-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: var(--sv-cyan);
+  color: var(--sv-bg);
+  border: 1px solid var(--sv-cyan);
+  box-shadow: 0 0 8px rgba(0,212,245,0.2);
+  transition: background 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sv-btn-primary:hover:not(:disabled) {
+  background: var(--sv-cyan-dim);
+}
+.sv-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Danger */
+.sv-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: rgba(244,63,94,0.15);
+  color: #fb7185;
+  border: 1px solid rgba(244,63,94,0.35);
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sv-btn-danger:hover {
+  background: rgba(244,63,94,0.25);
+  color: #fda4af;
+}
+
+/* Success */
+.sv-btn-success {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: rgba(16,185,129,0.15);
+  color: #34d399;
+  border: 1px solid rgba(16,185,129,0.35);
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sv-btn-success:hover {
+  background: rgba(16,185,129,0.25);
+  color: #6ee7b7;
+}
+
+/* ── Toolbar strip container ─────────────────────────────────────────────── */
+.sv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--sv-card);
+  border: 1px solid var(--sv-border);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.sv-toolbar-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--sv-text-dim);
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+/* ── Form controls ───────────────────────────────────────────────────────── */
+.sv-input, .sv-select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--sv-border);
+  background: var(--sv-elevated);
+  color: var(--sv-text);
+  font-size: 0.8125rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+}
+.sv-input:focus, .sv-select:focus {
+  border-color: var(--sv-cyan);
+  box-shadow: 0 0 0 2px rgba(0,212,245,0.15);
+}
+.sv-input::placeholder {
+  color: var(--sv-text-dim);
+}
+
+/* Select with arrow */
+.sv-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b9ab5' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+/* Range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  height: 4px;
+  background: var(--sv-border);
+  border-radius: 2px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--sv-cyan);
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(0,212,245,0.4);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--sv-cyan);
+  border: none;
+  cursor: pointer;
+}
+
+/* Checkbox */
+input[type="checkbox"] {
+  accent-color: var(--sv-cyan);
+}
+
+/* ── Card ─────────────────────────────────────────────────────────────────── */
+.sv-card {
+  background: var(--sv-card);
+  border: 1px solid var(--sv-border);
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+/* ── Scrollable toolbar row (no scrollbar) ───────────────────────────────── */
+.toolbar-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.toolbar-scroll::-webkit-scrollbar { display: none; }
+
+/* ── Mobile panel entrance animation ────────────────────────────────────── */
+.tool-panel-enter {
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+/* ── Long press ring ─────────────────────────────────────────────────────── */
+@keyframes longPressRing {
+  from { stroke-dashoffset: 81.68; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* ── Panel animations ────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
