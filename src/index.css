@@ -310,3 +310,33 @@ input[type="checkbox"] {
     opacity: 1;
   }
 }
+
+/* ── Songbook page-turn transition ───────────────────────────────────────── */
+/* Applied on every route change via the AnimatedRoutes key trick in App.tsx  */
+@keyframes sv-page-enter {
+  from {
+    opacity: 0;
+    transform: perspective(1400px) rotateY(14deg) translateX(48px);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(1400px) rotateY(0deg) translateX(0);
+  }
+}
+
+.sv-page-enter {
+  animation: sv-page-enter 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: left center;
+  /* Keep the height/flex chain intact so editor/dashboard still fill screen */
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Floating musical note ambient animation ─────────────────────────────── */
+@keyframes sv-float-note {
+  0%   { transform: translateY(0)      rotate(-6deg); opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { transform: translateY(-108vh) rotate(14deg); opacity: 0; }
+}

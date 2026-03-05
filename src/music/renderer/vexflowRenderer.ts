@@ -1,6 +1,6 @@
-import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Dot, Articulation, StaveTie, RendererBackends } from 'vexflow';
+import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Dot, Articulation, StaveTie, Beam, Stem, RendererBackends } from 'vexflow';
 import { Clef, Composition, Measure, Note, Rest, NoteDuration } from '../../types/music';
-import { parsePitch, pitchToVexFlowKey, keySignatureToVexFlow, shouldShowAccidental, findMeasureAccidental, getKeySignatureAccidentals } from '../../utils/noteUtils';
+import { parsePitch, pitchToVexFlowKey, pitchToMidi, keySignatureToVexFlow, shouldShowAccidental, findMeasureAccidental, getKeySignatureAccidentals } from '../../utils/noteUtils';
 import { durationToVexFlow } from '../../utils/durationUtils';
 import { PlayingNoteRef } from '../../app/store/playbackStore';
 
@@ -325,6 +325,48 @@ export class VexFlowRenderer {
 
         if (tickables.length > 0) {
           try {
+            // ── Build beam groups BEFORE formatting ─────────────────────────────
+            // In VexFlow, Beam objects must be created before format() so the
+            // formatter knows to suppress flags on beamed notes. They are drawn
+            // after the voice is drawn.
+            const beams: Beam[] = [];
+            if (voice) {
+              let beamGroup: any[] = [];
+
+              const flushBeamGroup = () => {
+                if (beamGroup.length >= 2) {
+                  try { beams.push(new Beam(beamGroup)); } catch (_) { /* skip */ }
+                }
+                beamGroup = [];
+              };
+
+              for (let i = 0; i < voice.notes.length; i++) {
+                const element = voice.notes[i];
+                const tickableIdx = tickableDataIndices.indexOf(i);
+                if (tickableIdx < 0) { flushBeamGroup(); continue; }
+
+                const staveNote = tickables[tickableIdx];
+
+                if ('pitch' in element) {
+                  const note = element as Note;
+                  const base = note.duration.startsWith('dotted-')
+                    ? note.duration.replace('dotted-', '')
+                    : note.duration;
+                  const isBeamable = base === 'eighth' || base === 'sixteenth' || base === 'thirty-second';
+
+                  if (isBeamable) {
+                    beamGroup.push(staveNote);
+                  } else {
+                    flushBeamGroup();
+                  }
+                } else {
+                  // Rest breaks the beam group
+                  flushBeamGroup();
+                }
+              }
+              flushBeamGroup(); // flush any trailing group
+            }
+
             const vfVoice = new Voice({ num_beats: voiceBeats, beat_value: effBeatType });
             vfVoice.setStrict(false);
             vfVoice.addTickables(tickables);
@@ -333,34 +375,70 @@ export class VexFlowRenderer {
               .format([vfVoice], mw - 30);
             vfVoice.draw(this.context, measureStave);
 
-            // ── Draw ties and slurs (only if explicitly enabled) ────────────────────
+            // Draw beams after the voice so they render on top
+            beams.forEach((b) => b.setContext(this.context).draw());
+
+            // ── Draw ties and slurs (supports multi-note chains) ────────────────────
             if (voice && voice.notes.length > 1) {
-              for (let i = 0; i < voice.notes.length - 1; i++) {
-                const current = voice.notes[i];
-                const next = voice.notes[i + 1];
+              // Process ties: connect all notes in a tie chain
+              let tieStartIdx: number | null = null;
+              let tieStartNote: any = null;
+              
+              for (let i = 0; i < voice.notes.length; i++) {
+                const element = voice.notes[i];
+                if (!('pitch' in element)) {
+                  tieStartIdx = null;
+                  tieStartNote = null;
+                  continue;
+                }
                 
-                if ('pitch' in current && 'pitch' in next) {
-                  const currentNote = current as Note;
-                  
-                  // Only draw if tie or slur is explicitly set
-                  if (!currentNote.tie && !currentNote.slur) continue;
-                  
-                  // Find the corresponding StaveNote objects
-                  const currentIdx = tickableDataIndices.indexOf(i);
-                  const nextIdx = tickableDataIndices.indexOf(i + 1);
-                  
-                  if (currentIdx >= 0 && nextIdx >= 0 && currentIdx < tickables.length && nextIdx < tickables.length) {
-                    const currentStaveNote = tickables[currentIdx];
-                    const nextStaveNote = tickables[nextIdx];
-                    
+                const note = element as Note;
+                const tickableIdx = tickableDataIndices.indexOf(i);
+                if (tickableIdx < 0 || tickableIdx >= tickables.length) continue;
+                
+                const staveNote = tickables[tickableIdx];
+                
+                // Check if this note starts or continues a tie
+                if (note.tie) {
+                  if (tieStartIdx === null) {
+                    // Start of a new tie chain
+                    tieStartIdx = i;
+                    tieStartNote = staveNote;
+                  } else {
+                    // Continue tie chain - draw tie from start to current
                     try {
-                      const connection = new StaveTie({
-                        first_note: currentStaveNote,
-                        last_note: nextStaveNote,
+                      const tie = new StaveTie({
+                        first_note: tieStartNote,
+                        last_note: staveNote,
                       });
-                      connection.setContext(this.context).draw();
+                      tie.setContext(this.context).draw();
+                      // Update start for next note in chain
+                      tieStartNote = staveNote;
                     } catch (err) {
-                      console.warn('Failed to draw tie/slur:', err);
+                      console.warn('Failed to draw tie:', err);
+                    }
+                  }
+                } else {
+                  // End of tie chain
+                  tieStartIdx = null;
+                  tieStartNote = null;
+                }
+                
+                // Handle slurs (similar to ties but can span different pitches)
+                if (note.slur && i < voice.notes.length - 1) {
+                  const next = voice.notes[i + 1];
+                  if ('pitch' in next) {
+                    const nextIdx = tickableDataIndices.indexOf(i + 1);
+                    if (nextIdx >= 0 && nextIdx < tickables.length) {
+                      try {
+                        const slur = new StaveTie({
+                          first_note: staveNote,
+                          last_note: tickables[nextIdx],
+                        });
+                        slur.setContext(this.context).draw();
+                      } catch (err) {
+                        console.warn('Failed to draw slur:', err);
+                      }
                     }
                   }
                 }
@@ -556,6 +634,26 @@ export class VexFlowRenderer {
     }
   }
 
+  // ── Helper: Determine stem direction based on note position ─────────────────
+  /**
+   * Music theory rule: Notes on or above the middle line (B4 in treble, D3 in bass)
+   * should have stems down. Notes below should have stems up.
+   * For notes on the middle line, use the majority direction in the measure.
+   */
+  private getStemDirection(pitch: string, clef: 'treble' | 'bass' | 'alto' | 'tenor'): number {
+    const midi = pitchToMidi(pitch);
+    
+    // Middle line MIDI values
+    const middleLineMidi = clef === 'treble' ? 71 : // B4 for treble
+                          clef === 'bass' ? 50 :    // D3 for bass
+                          clef === 'alto' ? 67 :     // G4 for alto (approximate)
+                          69;                        // A4 for tenor (approximate)
+    
+    // Notes on or above middle line: stem down, below: stem up
+    // VexFlow uses Stem.DOWN (1) and Stem.UP (-1)
+    return midi >= middleLineMidi ? Stem.DOWN : Stem.UP;
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
   private createStaveNote(
     note: Note,
@@ -578,6 +676,11 @@ export class VexFlowRenderer {
 
     try {
       const staveNote = new StaveNote({ clef, keys: [key], duration });
+
+      // Set stem direction based on music theory rules (notes on/above middle line = down, below = up)
+      // Note: VexFlow may override this based on voice formatting, but we set it as a hint
+      const stemDir = this.getStemDirection(note.pitch, clef);
+      staveNote.setStemDirection(stemDir);
 
       // Add augmentation dot if the duration is dotted
       if (isDotted) {
