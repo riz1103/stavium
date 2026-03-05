@@ -78,8 +78,10 @@ export const Dashboard = () => {
   const sharedCompositions = compositions.filter(
     (c) => c.userId !== user?.uid && c.privacy === 'shared'
   );
-  // Public = privacy=public from anyone (including yourself, so others can discover them)
-  const publicCompositions = compositions.filter((c) => c.privacy === 'public');
+  // Public = privacy=public from other users only (your own public compositions appear in "My Compositions")
+  const publicCompositions = compositions.filter(
+    (c) => c.userId !== user?.uid && c.privacy === 'public'
+  );
 
   const displayList =
     activeTab === 'mine'   ? myCompositions     :
