@@ -94,6 +94,56 @@ export class ToneScheduler {
     return synth;
   }
 
+  // ── Instrument Preloading ────────────────────────────────────────────────────
+  /**
+   * Preload instruments used in a composition (and optionally common instruments).
+   * This is called in the background when a composition is loaded to reduce
+   * playback delay. Returns a promise that resolves when all instruments are loaded.
+   */
+  async preloadInstruments(composition: Composition, includeCommon: boolean = true): Promise<void> {
+    try {
+      // Ensure AudioContext is started (required for soundfont loading)
+      await Tone.start();
+      const ac = this.getAC();
+      if (ac.state === 'suspended') await ac.resume();
+    } catch (err) {
+      // AudioContext might not be available yet (user hasn't interacted)
+      // That's okay, we'll try again when playback starts
+      console.debug('AudioContext not available for preloading, will retry on playback:', err);
+      return;
+    }
+
+    const instrumentsToLoad = new Set<string>();
+
+    // Collect all instruments from the composition
+    composition.staves.forEach((staff) => {
+      if (staff.instrument) {
+        instrumentsToLoad.add(staff.instrument);
+      }
+    });
+
+    // Optionally preload common instruments (piano is most common)
+    if (includeCommon && !instrumentsToLoad.has('piano')) {
+      instrumentsToLoad.add('piano');
+    }
+
+    // Load all instruments in parallel (non-blocking)
+    const loadPromises = Array.from(instrumentsToLoad).map(async (name) => {
+      // Skip if already loaded
+      if (this.sfPlayers.has(name)) return;
+      
+      try {
+        await this.loadSoundfont(name);
+      } catch (err) {
+        // Silently fail - preloading is best-effort
+        console.debug(`Failed to preload instrument "${name}":`, err);
+      }
+    });
+
+    await Promise.all(loadPromises);
+    console.log(`[Soundfont] Preloaded ${instrumentsToLoad.size} instrument(s)`);
+  }
+
   // ── Note Preview ─────────────────────────────────────────────────────────────
   /**
    * Play a single note as a preview (for when user adds a note).

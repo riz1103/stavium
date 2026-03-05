@@ -19,6 +19,17 @@ export const PlaybackControls = () => {
     return () => { schedulerRef.current?.dispose(); schedulerRef.current = null; };
   }, []);
 
+  // Preload instruments when composition is loaded (background, non-blocking)
+  useEffect(() => {
+    if (!composition || !schedulerRef.current) return;
+    
+    // Preload instruments in the background (don't await, let it happen async)
+    schedulerRef.current.preloadInstruments(composition, true).catch((err) => {
+      // Silently handle errors - preloading is best-effort
+      console.debug('Instrument preloading failed:', err);
+    });
+  }, [composition]);
+
   const handlePlay = async () => {
     if (!composition || !schedulerRef.current) return;
     if (playbackState === 'paused') {
