@@ -174,7 +174,7 @@ export const Dashboard = () => {
                 <img
                   key={photoURL}
                   src={photoURL}
-                  alt={user.displayName || user.email || 'User'}
+                  alt={user?.displayName || user?.email || 'User'}
                   className="w-8 h-8 rounded-full object-cover border border-sv-border"
                   onError={() => {
                     setAvatarImageError(true);
@@ -209,7 +209,7 @@ export const Dashboard = () => {
                       <img
                         key={photoURL}
                         src={photoURL}
-                        alt={user.displayName || user.email || 'User'}
+                        alt={user?.displayName || user?.email || 'User'}
                         className="w-10 h-10 rounded-full object-cover border border-sv-border"
                         onError={() => {
                           setAvatarImageError(true);
