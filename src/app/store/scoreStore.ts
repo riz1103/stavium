@@ -741,7 +741,6 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
   setMeasureSelectionStart: (index) => set({ measureSelectionStart: index }),
   setSelectedVoiceIndex: (index) => set({ selectedVoiceIndex: index }),
   setSelectedDuration: (duration) => set({ selectedDuration: duration }),
-  selectedRestDuration: null,
   setSelectedRestDuration: (duration) => set({ selectedRestDuration: duration }),
   selectedNote: null,
   setSelectedNote: (note) => set({ selectedNote: note }),

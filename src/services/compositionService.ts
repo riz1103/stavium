@@ -121,7 +121,7 @@ export const getUserCompositions = async (
       return;
     }
     result.value.forEach((docSnap) => {
-      const data = docSnap.data();
+      const data = docSnap.data() as any;
       const comp: Composition = {
         ...data,
         id: docSnap.id,

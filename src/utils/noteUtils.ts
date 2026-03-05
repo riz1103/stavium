@@ -219,7 +219,7 @@ export const findMeasureAccidental = (
       const element = voice.notes[i];
       
       // Only check notes (not rests)
-      if (!('pitch' in element)) continue;
+      if (!('pitch' in element) || !element.pitch) continue;
       
       const { note, accidental } = parsePitch(element.pitch);
       

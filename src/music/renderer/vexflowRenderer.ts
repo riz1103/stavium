@@ -1,5 +1,5 @@
 import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Dot, Articulation, StaveTie, RendererBackends } from 'vexflow';
-import { Clef, Composition, Measure, Note, Rest } from '../../types/music';
+import { Clef, Composition, Measure, Note, Rest, NoteDuration } from '../../types/music';
 import { parsePitch, pitchToVexFlowKey, keySignatureToVexFlow, shouldShowAccidental, findMeasureAccidental, getKeySignatureAccidentals } from '../../utils/noteUtils';
 import { durationToVexFlow } from '../../utils/durationUtils';
 import { PlayingNoteRef } from '../../app/store/playbackStore';
@@ -122,7 +122,7 @@ export class VexFlowRenderer {
     this.canvasWidth  = options.width  || 1200;
     this.canvasHeight = options.height || 400;
 
-    this.renderer = new Renderer(container, RendererBackends.SVG);
+    this.renderer = new Renderer(container as HTMLDivElement, RendererBackends.SVG);
     this.renderer.resize(this.canvasWidth, this.canvasHeight);
     this.context = this.renderer.getContext();
     // Store renderer reference on the instance so resize works
@@ -177,7 +177,7 @@ export class VexFlowRenderer {
     }
 
     // ── Calculate selected measure range ──────────────────────────────────
-    const selectedRange = selectedMeasureIndex !== null && selectedMeasureIndex !== undefined && measureSelectionStart !== null
+    const selectedRange = selectedMeasureIndex !== null && selectedMeasureIndex !== undefined && measureSelectionStart !== null && measureSelectionStart !== undefined
       ? {
           start: Math.min(measureSelectionStart, selectedMeasureIndex),
           end: Math.max(measureSelectionStart, selectedMeasureIndex),

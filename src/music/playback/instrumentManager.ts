@@ -34,7 +34,7 @@ export class InstrumentManager {
       const soundfontName = soundfontMap[instrumentName] || 'acoustic_grand_piano';
 
       // Load instrument using soundfont-player
-      const instrument = await Soundfont.instrument(this.audioContext!, soundfontName);
+      await Soundfont.instrument(this.audioContext!, soundfontName as any);
       
       // Store a reference (Soundfont-player handles the actual playback)
       this.instruments.set(instrumentName, null);
@@ -65,12 +65,12 @@ export class InstrumentManager {
       };
 
       const soundfontName = soundfontMap[instrumentName] || 'acoustic_grand_piano';
-      const instrument = await Soundfont.instrument(this.audioContext!, soundfontName);
+      const instrument = await Soundfont.instrument(this.audioContext!, soundfontName as any);
       
       // Convert frequency to MIDI note
       const midiNote = Math.round(12 * Math.log2(frequency / 440) + 69);
       
-      instrument.start(midiNote, startTime || this.audioContext!.currentTime, { duration });
+      instrument.start(String(midiNote), startTime || this.audioContext!.currentTime, { duration });
     } catch (error) {
       console.error(`Error playing note on ${instrumentName}:`, error);
       // Fallback to Tone.js

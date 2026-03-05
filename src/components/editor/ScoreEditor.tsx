@@ -374,7 +374,7 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
     const topLineY  = STAVE_Y_START + staffIndex * ROW_SPACING + STAFF_LINE_OFFSET;
     const relativeY = svgY - topLineY;
     const step      = Math.round(relativeY / STEP_SIZE);
-    const stepMap   = clef === 'treble' ? TREBLE_STEP_TO_MIDI : BASS_STEP_TO_MIDI;
+    const stepMap: Record<string, number> = clef === 'treble' ? TREBLE_STEP_TO_MIDI : BASS_STEP_TO_MIDI;
     const steps     = Object.keys(stepMap).map(Number).sort((a, b) => a - b);
     const clamped   = Math.max(steps[0], Math.min(steps[steps.length - 1], step));
     let midi = stepMap[String(step)] ?? stepMap[String(clamped)] ?? (clef === 'treble' ? 77 : 57);
@@ -598,7 +598,7 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
       const actualPitch = applyKeySignatureAndMeasureAccidentals(
         pitch,
         keySignature,
-        measure,
+        measure as any,
         insertIndex
       );
       

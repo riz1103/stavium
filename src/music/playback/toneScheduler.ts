@@ -19,7 +19,7 @@ const SOUNDFONT_MAP: Record<string, string> = {
 };
 
 // Tone.js synth presets used as fallback when soundfont loading fails
-const SYNTH_PRESETS: Record<string, Tone.RecursivePartial<Tone.SynthOptions>> = {
+const SYNTH_PRESETS: Record<string, any> = {
   piano:   { oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.3,  sustain: 0.2, release: 1.0 } },
   organ:   { oscillator: { type: 'square'   }, envelope: { attack: 0.01, decay: 0.01, sustain: 1.0, release: 0.1 } },
   guitar:  { oscillator: { type: 'sawtooth' }, envelope: { attack: 0.01, decay: 0.5,  sustain: 0.1, release: 0.5 } },
@@ -116,7 +116,7 @@ export class ToneScheduler {
       const midi = pitchToMidi(actualPitch);
 
       // Try to get or load soundfont
-      let sfPlayer = this.sfPlayers.get(instrument);
+      let sfPlayer: SoundfontPlayer | null | undefined = this.sfPlayers.get(instrument);
       if (!sfPlayer) {
         sfPlayer = await this.loadSoundfont(instrument);
       }
@@ -301,7 +301,7 @@ export class ToneScheduler {
               const actualPitch = applyKeySignatureAndMeasureAccidentals(
                 note.pitch,
                 currentKeySig,
-                measure,
+                measure as any,
                 noteIndex,
                 note.accidental // Pass the note's explicit accidental field
               );
