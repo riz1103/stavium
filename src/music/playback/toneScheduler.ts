@@ -142,7 +142,12 @@ export class ToneScheduler {
   }
 
   // ── Playback ──────────────────────────────────────────────────────────────
-  async playComposition(composition: Composition): Promise<void> {
+  async playComposition(
+    composition: Composition, 
+    playbackTempo?: number,
+    startMeasure?: number | null,
+    endMeasure?: number | null
+  ): Promise<void> {
     // Unlock AudioContext — must be called from a user gesture
     await Tone.start();
 
@@ -155,17 +160,29 @@ export class ToneScheduler {
     this.scheduledNotes = [];
     this.playbackStartTime = ac.currentTime;
 
+    // Get playback store to check for playback instruments
+    const playbackStore = usePlaybackStore.getState();
+    
+    // Use playback tempo if provided, otherwise use composition tempo
+    const effectiveTempo = playbackTempo ?? composition.tempo;
+
+    // Collect all instruments (composition + playback overrides) that need to be loaded
+    const instrumentsToLoad = new Set<string>();
+    composition.staves.forEach((staff, staffIndex) => {
+      const effectiveInstrument = playbackStore.getEffectiveInstrument(staffIndex, staff.instrument);
+      instrumentsToLoad.add(effectiveInstrument);
+    });
+    
     // Load soundfonts for every unique instrument in parallel
-    const uniqueInstruments = [...new Set(composition.staves.map((s) => s.instrument))];
     const sfResults = await Promise.all(
-      uniqueInstruments.map(async (name) => ({ name, player: await this.loadSoundfont(name) }))
+      Array.from(instrumentsToLoad).map(async (name) => ({ name, player: await this.loadSoundfont(name) }))
     );
     const sfMap = new Map(sfResults.map(({ name, player }) => [name, player]));
 
     // Reset the Tone.js Transport for fallback scheduling
     Tone.getTransport().cancel();
     Tone.getTransport().stop();
-    Tone.getTransport().bpm.value = composition.tempo;
+    Tone.getTransport().bpm.value = effectiveTempo;
 
     const now = ac.currentTime + 0.1; // small lookahead so first note isn't clipped
     let hasFallbackNotes = false;
@@ -188,21 +205,20 @@ export class ToneScheduler {
     }
     function effTempo(upTo: number): number {
       for (let i = upTo; i >= 0; i--) if (refMeasures[i]?.tempo !== undefined) return refMeasures[i].tempo!;
-      return composition.tempo;
+      return effectiveTempo; // Use effective tempo (playback or composition)
     }
 
-    // Get volume/mute state from playback store
-    const playbackStore = usePlaybackStore.getState();
-
     composition.staves.forEach((staff, staffIndex) => {
-      const sfPlayer = sfMap.get(staff.instrument) ?? null;
+      // Use playback instrument if set, otherwise use composition instrument
+      const effectiveInstrument = playbackStore.getEffectiveInstrument(staffIndex, staff.instrument);
+      const sfPlayer = sfMap.get(effectiveInstrument) ?? null;
       
       // For playback, create a per-staff fallback synth (not per-instrument) so each staff
       // can have independent volume control even if they share the same instrument
       let fallback: Tone.PolySynth | null = null;
       if (!sfPlayer) {
         if (!this.staffFallbackSynths.has(staffIndex)) {
-          const preset = SYNTH_PRESETS[staff.instrument] ?? SYNTH_PRESETS['piano'];
+          const preset = SYNTH_PRESETS[effectiveInstrument] ?? SYNTH_PRESETS['piano'];
           const synth = new Tone.PolySynth(Tone.Synth, preset).toDestination();
           this.staffFallbackSynths.set(staffIndex, synth);
         }
@@ -221,9 +237,30 @@ export class ToneScheduler {
         fallback.volume.value = volumeDb;
       }
 
-      let currentMeasureStart = 0; // in seconds
+      // Calculate timing offset for measures before startMeasure
+      let timingOffset = 0; // in seconds
+      if (startMeasure !== null && startMeasure !== undefined && startMeasure > 0) {
+        // Calculate total duration of measures before the start measure
+        for (let i = 0; i < startMeasure; i++) {
+          const measure = staff.measures[i];
+          if (!measure) continue;
+          const timeSig = effTimeSig(i);
+          const tempo = effTempo(i);
+          const [beats] = timeSig.split('/').map(Number);
+          const anacrusisBeats = (i === 0 && composition.anacrusis) ? (composition.pickupBeats ?? 1) : beats;
+          timingOffset += beatsToSeconds(anacrusisBeats, tempo);
+        }
+      }
+      
+      let currentMeasureStart = timingOffset; // in seconds
+      
+      // Determine measure range to play
+      const startIdx = startMeasure !== null && startMeasure !== undefined ? startMeasure : 0;
+      const endIdx = endMeasure !== null && endMeasure !== undefined ? endMeasure : staff.measures.length - 1;
 
       staff.measures.forEach((measure, measureIndex) => {
+        // Skip measures outside the playback range
+        if (measureIndex < startIdx || measureIndex > endIdx) return;
         // Effective values at this measure
         const currentTimeSig = effTimeSig(measureIndex);
         const currentKeySig  = effKeySig(measureIndex);
@@ -232,8 +269,9 @@ export class ToneScheduler {
         const [effBPM] = currentTimeSig.split('/').map(Number);
 
         // Pickup measure has fewer beats; all others use the effective time signature
+        // Only apply anacrusis if we're starting from measure 0
         const thisMeasureBeats =
-          composition.anacrusis && measureIndex === 0 ? pickupBeats : effBPM;
+          (startIdx === 0 && composition.anacrusis && measureIndex === 0) ? pickupBeats : effBPM;
         const measureDurationSec = beatsToSeconds(thisMeasureBeats, currentTempo);
 
         // Each measure starts at its calculated time

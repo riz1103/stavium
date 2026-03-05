@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useUserStore } from '../app/store/userStore';
 import { useScoreStore } from '../app/store/scoreStore';
+import { usePlaybackStore } from '../app/store/playbackStore';
 import { getComposition, saveComposition } from '../services/compositionService';
 import { ScoreEditor } from '../components/editor/ScoreEditor';
 import { ScoreInfoPanel } from '../components/toolbar/ScoreInfoPanel';
@@ -86,6 +87,9 @@ export const EditorPage = () => {
     }
   }, [id, user, navigate, resetComposition]);
 
+  const resetPlaybackTempo = usePlaybackStore((s) => s.setPlaybackTempo);
+  const setPlaybackInstrument = usePlaybackStore((s) => s.setPlaybackInstrument);
+  
   const loadComposition = async (compositionId: string) => {
     try {
       setLoading(true);
@@ -94,6 +98,9 @@ export const EditorPage = () => {
         setComposition(comp);
         setTitle(comp.title);
         setIsReadOnly(true); // Always start read-only when opening a saved composition
+        resetPlaybackTempo(null); // Reset playback tempo when loading new composition
+        // Reset playback instruments when loading new composition
+        comp.staves.forEach((_, index) => setPlaybackInstrument(index, null));
       }
     } catch (error) {
       console.error('Error loading composition:', error);
@@ -132,7 +139,7 @@ export const EditorPage = () => {
   const desktopToolbar = (
     <div className="hidden md:flex flex-col bg-sv-card border-b border-sv-border">
       {isReadOnly ? (
-        /* Read-only mode: compact info bar with Export + Volume only */
+        /* Read-only mode: compact info bar with Tempo (for playback) + Volume + Export */
         <div className="flex items-center gap-3 px-3 py-2 overflow-x-auto toolbar-scroll">
           {/* View-mode badge */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium flex-shrink-0">
@@ -141,6 +148,10 @@ export const EditorPage = () => {
             </svg>
             View Only
           </div>
+          <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+          <CompositionControls isReadOnly={true} />
+          <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+          <InstrumentSelector isReadOnly={true} />
           <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
           <StaffVolumeControls />
           <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
@@ -165,7 +176,7 @@ export const EditorPage = () => {
             <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
             <ClefSelector />
             <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-            <InstrumentSelector />
+            <InstrumentSelector isReadOnly={false} />
             <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
             <MeasurePropertiesPanel />
             <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
@@ -174,7 +185,7 @@ export const EditorPage = () => {
 
           {/* Row 3: Composition + Volume + Chord */}
           <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll border-b border-sv-border">
-            <CompositionControls />
+            <CompositionControls isReadOnly={false} />
             <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
             <StaffVolumeControls />
           </div>
@@ -251,7 +262,7 @@ export const EditorPage = () => {
         <MeasureControls />
         <div className="flex flex-wrap gap-2">
           <ClefSelector />
-          <InstrumentSelector />
+          <InstrumentSelector isReadOnly={isReadOnly} />
           <MeasurePropertiesPanel />
         </div>
         <StaffVolumeControls />
@@ -259,7 +270,7 @@ export const EditorPage = () => {
     ),
     settings: (
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
-        {!isReadOnly && <CompositionControls />}
+        <CompositionControls isReadOnly={isReadOnly} />
         <div className="flex gap-2 flex-wrap">
           {!isReadOnly && <UndoRedoToolbar />}
           <ExportToolbar />

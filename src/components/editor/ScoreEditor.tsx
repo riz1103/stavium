@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useScoreStore } from '../../app/store/scoreStore';
-import { usePlaybackStore } from '../../app/store/playbackStore';
+import { usePlaybackStore, PlayingNoteRef } from '../../app/store/playbackStore';
 import { ToneScheduler } from '../../music/playback/toneScheduler';
 import {
   VexFlowRenderer,
@@ -146,6 +146,8 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
   const setSelectedRestDuration = useScoreStore((s) => s.setSelectedRestDuration);
   const deleteSelectedNote = useScoreStore((s) => s.deleteSelectedNote);
   const playingNotes       = usePlaybackStore((s) => s.playingNotes);
+  const playbackState     = usePlaybackStore((s) => s.state);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Long-press state
   const longPressTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -158,6 +160,13 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
 
   // Track whether the upcoming mouseup should skip "add note" (already handled)
   const suppressAddNote = useRef(false);
+  
+  // Track touch interaction state for mobile scrolling
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const isInteracting = useRef(false); // true when actually interacting with notes, false when just scrolling
+
+  // Auto-scroll: track the last measure we scrolled to so we only scroll once per measure
+  const lastAutoScrollMeasureRef = useRef<number>(-1);
 
   // Preview scheduler for note previews (uses actual instrument sounds)
   const previewSchedulerRef = useRef<ToneScheduler | null>(null);
@@ -520,6 +529,9 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
 
   // ── Unified pointer up handler (mouse or touch) ─────────────────────────
   const handlePointerUp = (clientX: number, clientY: number) => {
+    // In read-only mode, block all editing interactions
+    if (isReadOnly) return;
+    
     cancelLongPress();
 
     const ds = dragStateRef.current;
@@ -625,12 +637,31 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
       cancelLongPress();
       dragStateRef.current = null;
       setDragState(null);
+      isInteracting.current = false;
+      touchStartPos.current = null;
       return;
     }
-    e.preventDefault(); // Prevent scrolling and other default behaviors
     const coords = getEventCoordinates(e);
     if (coords) {
-      handlePointerDown(coords.clientX, coords.clientY, e);
+      touchStartPos.current = { x: coords.clientX, y: coords.clientY };
+      isInteracting.current = false;
+      
+      // Check if we're starting on a note
+      const svg = clientToSvg(coords.clientX, coords.clientY);
+      if (svg && composition) {
+        const loc = resolveStaffMeasure(svg.x, svg.y);
+        if (loc) {
+          const note = findNoteNear(svg.x, svg.y, loc.staffIndex, loc.measureIndex, selectedVoiceIndex);
+          if (note) {
+            // We're starting on a note - this is an interaction, prevent scrolling
+            isInteracting.current = true;
+            e.preventDefault();
+            handlePointerDown(coords.clientX, coords.clientY, e);
+            return;
+          }
+        }
+      }
+      // If not on a note, allow scrolling (don't prevent default, don't call handlePointerDown)
     }
   };
 
@@ -638,29 +669,79 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
   const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
     // Only handle single touch (ignore multi-touch gestures)
     if (e.touches.length > 1) {
+      isInteracting.current = false;
+      touchStartPos.current = null;
       return;
     }
-    e.preventDefault(); // Prevent scrolling while dragging
+    
     const coords = getEventCoordinates(e);
-    if (coords) {
+    if (!coords || !touchStartPos.current) return;
+    
+    // If we're already interacting (started on a note or dragging), handle it
+    if (isInteracting.current || dragStateRef.current) {
+      e.preventDefault();
       handlePointerMove(coords.clientX, coords.clientY);
+      return;
     }
+    
+    // Calculate movement distance
+    const dx = Math.abs(coords.clientX - touchStartPos.current.x);
+    const dy = Math.abs(coords.clientY - touchStartPos.current.y);
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // If movement is significant, check if we should start an interaction
+    if (distance > DRAG_THRESHOLD) {
+      // Check if we're moving over a note
+      const svg = clientToSvg(coords.clientX, coords.clientY);
+      if (svg && composition) {
+        const loc = resolveStaffMeasure(svg.x, svg.y);
+        if (loc) {
+          const note = findNoteNear(svg.x, svg.y, loc.staffIndex, loc.measureIndex, selectedVoiceIndex);
+          if (note) {
+            // We're moving over a note - start interaction
+            isInteracting.current = true;
+            e.preventDefault();
+            // Initialize pointer down first, then move
+            handlePointerDown(touchStartPos.current.x, touchStartPos.current.y, e);
+            handlePointerMove(coords.clientX, coords.clientY);
+            return;
+          }
+        }
+      }
+      // If primarily vertical movement and not on a note, allow scrolling
+      if (dy > dx) {
+        // Vertical scrolling - don't prevent default
+        return;
+      }
+    }
+    
+    // For small movements, allow scrolling (don't prevent default)
   };
 
   // ── Touch end ───────────────────────────────────────────────────────────
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
-    e.preventDefault(); // Prevent context menu and other defaults
+    // Only prevent default if we were actually interacting
+    if (isInteracting.current) {
+      e.preventDefault();
+    }
+    
     // Use changedTouches for touch end (more reliable than touches)
     if (e.changedTouches.length > 0) {
       const touch = e.changedTouches[0];
-      handlePointerUp(touch.clientX, touch.clientY);
+      if (isInteracting.current) {
+        handlePointerUp(touch.clientX, touch.clientY);
+      }
     } else {
       // Fallback to getEventCoordinates if changedTouches is empty
       const coords = getEventCoordinates(e);
-      if (coords) {
+      if (coords && isInteracting.current) {
         handlePointerUp(coords.clientX, coords.clientY);
       }
     }
+    
+    // Reset interaction state
+    isInteracting.current = false;
+    touchStartPos.current = null;
   };
 
   // ── Touch cancel ────────────────────────────────────────────────────────
@@ -669,6 +750,8 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
     // If dragging, cancel (don't delete unless released outside)
     dragStateRef.current = null;
     setDragState(null);
+    isInteracting.current = false;
+    touchStartPos.current = null;
   };
 
   // ── Mouse leave — cancel interactions if pointer leaves the editor ───────
@@ -696,17 +779,98 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
   const dragOffStaff = dragState?.offStaff ?? false;
   const dragPitch    = dragState?.targetPitch ?? null;
 
+  // Auto-scroll to keep the currently playing note centred horizontally.
+  // We throttle by measure: only scroll once each time the playback moves to a
+  // new measure, so we don't fight 60-fps note updates cancelling the scroll.
+  useEffect(() => {
+    if (playbackState !== 'playing' || !scrollContainerRef.current || !rendererRef.current) return;
+    if (playingNotes.size === 0) return;
+
+    // ── 1. Determine which measure is currently playing ──────────────────────
+    // Pull the measureIndex from the first entry in the set
+    const firstEntry = playingNotes.values().next().value as string | undefined;
+    if (!firstEntry) return;
+    const parts = firstEntry.split(':').map(Number);
+    const currentMeasure = parts[1]; // measureIndex
+
+    // Only re-scroll when the playhead moves to a new measure
+    if (currentMeasure === lastAutoScrollMeasureRef.current) return;
+    lastAutoScrollMeasureRef.current = currentMeasure;
+
+    // ── 2. Find the SVG X position of the first playing note ────────────────
+    const allPositions = rendererRef.current.getNotePositions();
+    let totalX = 0;
+    let found = 0;
+
+    playingNotes.forEach((serialized) => {
+      const [si, mi, vi, ni] = serialized.split(':').map(Number);
+      const pos = allPositions.find(
+        (p) => p.staffIndex === si &&
+               p.measureIndex === mi &&
+               p.voiceIndex === vi &&
+               p.noteDataIndex === ni   // scheduler uses the data-index (voice.notes[i])
+      );
+      if (pos) {
+        totalX += pos.x;
+        found++;
+      }
+    });
+
+    if (found === 0) return;
+    const targetSvgX = totalX / found;
+
+    // ── 3. Convert SVG-space X → scroll-container scroll position ────────────
+    const container = scrollContainerRef.current;
+    const svgEl = containerRef.current?.querySelector('svg') as SVGSVGElement | null;
+    if (!svgEl) return;
+
+    const ctm = svgEl.getScreenCTM();
+    if (!ctm) return;
+
+    // Transform the SVG point to screen coordinates
+    const pt = svgEl.createSVGPoint();
+    pt.x = targetSvgX;
+    pt.y = 0;
+    const screenX = pt.matrixTransform(ctm).x;
+
+    // Convert screen X → position within the scrollable content
+    const containerRect = container.getBoundingClientRect();
+    const noteXInContent = screenX - containerRect.left + container.scrollLeft;
+
+    // Scroll so the note is centred horizontally in the viewport
+    const desiredScrollLeft = noteXInContent - container.clientWidth / 2;
+
+    container.scrollTo({
+      left: Math.max(0, desiredScrollLeft),
+      behavior: 'smooth',
+    });
+  }, [playingNotes, playbackState]);  // no 'composition' dep — we only need note positions
+
+  // Reset the auto-scroll measure tracker when playback stops
+  useEffect(() => {
+    if (playbackState !== 'playing') {
+      lastAutoScrollMeasureRef.current = -1;
+    }
+  }, [playbackState]);
+
   return (
-    <div className="w-full h-full overflow-auto bg-sv-bg relative select-none"
-         style={{ padding: '16px' }}>
+    <div 
+      ref={scrollContainerRef}
+      className="w-full h-full overflow-auto bg-sv-bg relative select-none"
+      style={{ padding: '16px' }}>
       {/* Score canvas — white sheet paper on dark background */}
+      {/* display:inline-block + minWidth:100% → the card expands to the SVG's intrinsic
+          width so the outer overflow-auto container sees the real content width and
+          creates a horizontal scrollbar when the score is wider than the viewport.    */}
       <div
         style={{
           background: '#fff',
           borderRadius: '8px',
           boxShadow: '0 4px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08)',
           minHeight: '600px',
-          overflow: 'hidden',
+          display: 'inline-block',
+          minWidth: '100%',
+          verticalAlign: 'top',
         }}
       >
         <div
@@ -719,14 +883,14 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
           onTouchCancel={handleTouchCancel}
-          className="w-full min-h-[600px] touch-none"
+          className="min-h-[600px]"
           style={{
             cursor: isReadOnly
               ? 'default'
               : isDragging
               ? dragOffStaff ? 'no-drop' : 'grabbing'
               : 'crosshair',
-            touchAction: 'none',
+            touchAction: 'pan-x pan-y', // Allow both horizontal and vertical scrolling
             userSelect: 'none',
             WebkitUserSelect: 'none',
             WebkitTouchCallout: 'none',

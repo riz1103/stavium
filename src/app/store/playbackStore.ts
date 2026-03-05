@@ -31,6 +31,18 @@ interface PlaybackStateStore {
   setStaffMuted: (staffIndex: number, muted: boolean) => void;
   getStaffVolume: (staffIndex: number) => number; // returns 0-100, default 100
   isStaffMuted: (staffIndex: number) => boolean;
+  /** Playback tempo (can be changed even for view-only users, for playback/study purposes) */
+  playbackTempo: number | null; // null means use composition tempo
+  setPlaybackTempo: (tempo: number | null) => void;
+  getEffectiveTempo: (compositionTempo: number) => number; // returns playback tempo if set, otherwise composition tempo
+  /** Playback instruments per staff (can be changed even for view-only users, for playback/study purposes) */
+  playbackInstruments: Record<number, string>; // staffIndex → instrument name
+  setPlaybackInstrument: (staffIndex: number, instrument: string | null) => void; // null means use composition instrument
+  getEffectiveInstrument: (staffIndex: number, compositionInstrument: string) => string; // returns playback instrument if set, otherwise composition instrument
+  /** Playback range (start and end measures) */
+  playbackStartMeasure: number | null; // null means start from beginning
+  playbackEndMeasure: number | null; // null means play to end
+  setPlaybackRange: (startMeasure: number | null, endMeasure: number | null) => void;
 }
 
 const serializeNoteRef = (ref: PlayingNoteRef): string =>
@@ -44,6 +56,10 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
   playingNotes: new Set(),
   staffVolumes: {},
   staffMuted: {},
+  playbackTempo: null,
+  playbackInstruments: {},
+  playbackStartMeasure: null,
+  playbackEndMeasure: null,
   setState: (state) => set({ state }),
   setCurrentMeasure: (measure) => set({ currentMeasure: measure }),
   setCurrentBeat: (beat) => set({ currentBeat: beat }),
@@ -75,4 +91,28 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
   isStaffMuted: (staffIndex) => {
     return get().staffMuted[staffIndex] ?? false; // default not muted
   },
+  setPlaybackTempo: (tempo) => set({ playbackTempo: tempo }),
+  getEffectiveTempo: (compositionTempo) => {
+    const playbackTempo = get().playbackTempo;
+    return playbackTempo !== null ? playbackTempo : compositionTempo;
+  },
+  setPlaybackInstrument: (staffIndex, instrument) => {
+    set((state) => {
+      const newInstruments = { ...state.playbackInstruments };
+      if (instrument === null) {
+        delete newInstruments[staffIndex];
+      } else {
+        newInstruments[staffIndex] = instrument;
+      }
+      return { playbackInstruments: newInstruments };
+    });
+  },
+  getEffectiveInstrument: (staffIndex, compositionInstrument) => {
+    const playbackInstruments = get().playbackInstruments;
+    return playbackInstruments[staffIndex] ?? compositionInstrument;
+  },
+  setPlaybackRange: (startMeasure, endMeasure) => set({ 
+    playbackStartMeasure: startMeasure, 
+    playbackEndMeasure: endMeasure 
+  }),
 }));

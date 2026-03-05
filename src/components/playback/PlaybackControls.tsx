@@ -7,6 +7,10 @@ export const PlaybackControls = () => {
   const composition = useScoreStore((state) => state.composition);
   const playbackState = usePlaybackStore((state) => state.state);
   const setPlaybackState = usePlaybackStore((state) => state.setState);
+  const getEffectiveTempo = usePlaybackStore((state) => state.getEffectiveTempo);
+  const playbackStartMeasure = usePlaybackStore((state) => state.playbackStartMeasure);
+  const playbackEndMeasure = usePlaybackStore((state) => state.playbackEndMeasure);
+  const setPlaybackRange = usePlaybackStore((state) => state.setPlaybackRange);
   const schedulerRef = useRef<ToneScheduler | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -24,7 +28,13 @@ export const PlaybackControls = () => {
     }
     setIsLoading(true);
     try {
-      await schedulerRef.current.playComposition(composition);
+      const effectiveTempo = getEffectiveTempo(composition.tempo);
+      await schedulerRef.current.playComposition(
+        composition, 
+        effectiveTempo,
+        playbackStartMeasure,
+        playbackEndMeasure
+      );
       setPlaybackState('playing');
     } catch (err) {
       console.error('Playback error:', err);
@@ -33,18 +43,36 @@ export const PlaybackControls = () => {
     }
   };
 
+  const handleReplay = async () => {
+    if (!composition || !schedulerRef.current) return;
+    // Stop current playback first
+    schedulerRef.current.stop();
+    setPlaybackState('stopped');
+    // Small delay to ensure stop completes
+    setTimeout(() => {
+      handlePlay();
+    }, 100);
+  };
+
   const handlePause = () => { schedulerRef.current?.pause(); setPlaybackState('paused'); };
   const handleStop  = () => { schedulerRef.current?.stop();  setPlaybackState('stopped'); };
 
   const hasNotes = composition?.staves.some((s) =>
     s.measures.some((m) => m.voices.some((v) => v.notes.length > 0))
   );
-  const currentInstrument = composition?.staves[0]?.instrument ?? 'piano';
+  const getEffectiveInstrument = usePlaybackStore((state) => state.getEffectiveInstrument);
+  const currentInstrument = composition
+    ? getEffectiveInstrument(0, composition.staves[0]?.instrument ?? 'piano')
+    : 'piano';
   const isPlaying = playbackState === 'playing';
   const isPaused  = playbackState === 'paused';
+  
+  // Get total number of measures
+  const totalMeasures = composition?.staves[0]?.measures.length ?? 0;
+  const measureOptions = Array.from({ length: totalMeasures }, (_, i) => i + 1);
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2.5">
+    <div className="flex items-center gap-2 px-4 py-2.5 flex-wrap">
       {/* Transport controls */}
       <div className="flex items-center gap-1">
         {/* Play / Resume */}
@@ -100,6 +128,54 @@ export const PlaybackControls = () => {
         </button>
       </div>
 
+      {/* Measure Range Selection */}
+      {composition && totalMeasures > 0 && (
+        <div className="flex items-center gap-2 ml-2 px-3 py-1.5 bg-sv-elevated rounded-lg border border-sv-border">
+          <span className="text-xs text-sv-text-muted">From:</span>
+          <select
+            value={playbackStartMeasure ?? ''}
+            onChange={(e) => setPlaybackRange(
+              e.target.value ? Number(e.target.value) - 1 : null,
+              playbackEndMeasure
+            )}
+            className="sv-select w-16 text-xs"
+            disabled={isPlaying}
+          >
+            <option value="">Start</option>
+            {measureOptions.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <span className="text-xs text-sv-text-muted">To:</span>
+          <select
+            value={playbackEndMeasure !== null ? playbackEndMeasure + 1 : ''}
+            onChange={(e) => setPlaybackRange(
+              playbackStartMeasure,
+              e.target.value ? Number(e.target.value) - 1 : null
+            )}
+            className="sv-select w-16 text-xs"
+            disabled={isPlaying}
+          >
+            <option value="">End</option>
+            {measureOptions.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          {(playbackStartMeasure !== null || playbackEndMeasure !== null) && (
+            <button
+              onClick={handleReplay}
+              disabled={isPlaying || isLoading}
+              className="flex items-center justify-center w-7 h-7 rounded-md bg-sv-cyan/20 text-sv-cyan hover:bg-sv-cyan/30 border border-sv-cyan/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Replay from start measure"
+            >
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Status / Info */}
       {composition && (
         <div className="flex items-center gap-2 ml-2 text-sm text-sv-text-muted">
@@ -123,7 +199,7 @@ export const PlaybackControls = () => {
           </span>
           <span className="hidden sm:inline text-sv-text-dim">·</span>
           <span className="text-sv-text-muted">
-            {composition.tempo} <span className="text-xs text-sv-text-dim">BPM</span>
+            {composition ? getEffectiveTempo(composition.tempo) : 120} <span className="text-xs text-sv-text-dim">BPM</span>
           </span>
 
           {/* Hint */}
