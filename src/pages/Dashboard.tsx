@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../app/store/userStore';
 import { getUserCompositions, deleteComposition } from '../services/compositionService';
@@ -15,11 +15,61 @@ export const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('mine');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [avatarDropdownOpen, setAvatarDropdownOpen] = useState(false);
+  const avatarDropdownRef = useRef<HTMLDivElement>(null);
+  const [avatarImageError, setAvatarImageError] = useState(false);
+
+  // Check if user has a valid photoURL (handle both photoURL and photoUrl for compatibility)
+  const photoURL = user?.photoURL || (user as any)?.photoUrl;
+  const hasPhotoURL = photoURL && typeof photoURL === 'string' && photoURL.trim() !== '';
+
+  // Generate initials from displayName or email
+  const getInitials = (): string => {
+    if (user?.displayName) {
+      const parts = user.displayName.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        // First letter of first name + first letter of last name
+        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      } else if (parts[0].length >= 2) {
+        // First two letters if single word
+        return parts[0].substring(0, 2).toUpperCase();
+      } else {
+        return parts[0][0].toUpperCase();
+      }
+    }
+    if (user?.email) {
+      // First two letters of email
+      return user.email.substring(0, 2).toUpperCase();
+    }
+    return 'U';
+  };
 
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
     loadCompositions();
   }, [user, navigate]);
+
+  // Reset avatar image error when photoURL changes
+  useEffect(() => {
+    if (hasPhotoURL) {
+      setAvatarImageError(false);
+    }
+  }, [photoURL]);
+
+  // Close avatar dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (avatarDropdownRef.current && !avatarDropdownRef.current.contains(event.target as Node)) {
+        setAvatarDropdownOpen(false);
+      }
+    };
+
+    if (avatarDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [avatarDropdownOpen]);
 
   const loadCompositions = async () => {
     if (!user) return;
@@ -83,10 +133,21 @@ export const Dashboard = () => {
     (c) => c.userId !== user?.uid && c.privacy === 'public'
   );
 
-  const displayList =
+  const baseDisplayList =
     activeTab === 'mine'   ? myCompositions     :
     activeTab === 'shared' ? sharedCompositions :
                              publicCompositions;
+
+  // Filter by search query (name, author, arranger)
+  const displayList = searchQuery.trim()
+    ? baseDisplayList.filter((comp) => {
+        const query = searchQuery.toLowerCase().trim();
+        const matchesTitle = comp.title?.toLowerCase().includes(query) ?? false;
+        const matchesAuthor = comp.author?.toLowerCase().includes(query) ?? false;
+        const matchesArranger = comp.arrangedBy?.toLowerCase().includes(query) ?? false;
+        return matchesTitle || matchesAuthor || matchesArranger;
+      })
+    : baseDisplayList;
 
   return (
     <div className="min-h-screen bg-sv-bg flex flex-col overflow-hidden">
@@ -102,17 +163,93 @@ export const Dashboard = () => {
             </div>
           </div>
 
-          {/* User / Logout */}
-          <div className="flex items-center gap-3">
-            <span className="hidden sm:block text-sm text-sv-text-muted truncate max-w-[180px]">
-              {user?.email}
-            </span>
+          {/* Avatar Dropdown */}
+          <div className="relative" ref={avatarDropdownRef}>
             <button
-              onClick={handleLogout}
-              className="sv-btn-ghost text-xs px-3 py-1.5"
+              onClick={() => setAvatarDropdownOpen(!avatarDropdownOpen)}
+              className="flex items-center gap-2 rounded-lg hover:bg-sv-elevated transition-colors p-1.5"
+              aria-label="User menu"
             >
-              Sign out
+              {hasPhotoURL && !avatarImageError ? (
+                <img
+                  key={photoURL}
+                  src={photoURL}
+                  alt={user.displayName || user.email || 'User'}
+                  className="w-8 h-8 rounded-full object-cover border border-sv-border"
+                  onError={() => {
+                    setAvatarImageError(true);
+                  }}
+                  onLoad={() => {
+                    setAvatarImageError(false);
+                  }}
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-sv-cyan/20 flex items-center justify-center border border-sv-border">
+                  <span className="text-sv-cyan text-xs font-semibold">
+                    {getInitials()}
+                  </span>
+                </div>
+              )}
+              <svg
+                className={`w-4 h-4 text-sv-text-dim transition-transform ${avatarDropdownOpen ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
+
+            {/* Dropdown Menu */}
+            {avatarDropdownOpen && (
+              <div className="absolute right-0 mt-2 w-64 bg-sv-card border border-sv-border rounded-lg shadow-lg z-50 overflow-hidden">
+                <div className="p-4 border-b border-sv-border">
+                  <div className="flex items-center gap-3">
+                    {hasPhotoURL && !avatarImageError ? (
+                      <img
+                        key={photoURL}
+                        src={photoURL}
+                        alt={user.displayName || user.email || 'User'}
+                        className="w-10 h-10 rounded-full object-cover border border-sv-border"
+                        onError={() => {
+                          setAvatarImageError(true);
+                        }}
+                        onLoad={() => {
+                          setAvatarImageError(false);
+                        }}
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-sv-cyan/20 flex items-center justify-center border border-sv-border">
+                        <span className="text-sv-cyan text-sm font-semibold">
+                          {getInitials()}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      {user?.displayName && (
+                        <p className="text-sm font-medium text-sv-text truncate">
+                          {user.displayName}
+                        </p>
+                      )}
+                      <p className="text-xs text-sv-text-muted truncate">
+                        {user?.email}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-2">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-sv-text hover:bg-sv-elevated rounded-md transition-colors text-left"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                    <span>Sign out</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -133,7 +270,7 @@ export const Dashboard = () => {
           </div>
 
           {/* Tabs */}
-          <div className="flex items-center gap-1 mb-6 border-b border-sv-border">
+          <div className="flex items-center gap-1 mb-4 border-b border-sv-border">
             {([
               { id: 'mine'   as Tab, label: 'My Compositions', icon: '🎵', count: myCompositions.length },
               { id: 'shared' as Tab, label: 'Shared with me',  icon: '👥', count: sharedCompositions.length },
@@ -161,6 +298,52 @@ export const Dashboard = () => {
             ))}
           </div>
 
+          {/* Search Filter - Always show if there are any compositions or if there's an active search */}
+          {(compositions.length > 0 || searchQuery.trim()) ? (
+            <div className="mb-6">
+              <div className="relative">
+                <svg
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sv-text-dim"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by name, author, or arranger..."
+                  className="w-full pl-10 pr-4 py-2.5 bg-sv-elevated border border-sv-border rounded-lg
+                             text-sv-text placeholder-sv-text-dim
+                             focus:outline-none focus:ring-2 focus:ring-sv-cyan/40 focus:border-sv-cyan/60
+                             transition-all"
+                />
+                {searchQuery.trim() && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center
+                               text-sv-text-dim hover:text-sv-text rounded-full hover:bg-sv-elevated
+                               transition-colors"
+                    title="Clear search"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {searchQuery.trim() && (
+                <p className="mt-2 text-xs text-sv-text-dim">
+                  {displayList.length === 0
+                    ? 'No compositions match your search'
+                    : `Found ${displayList.length} composition${displayList.length === 1 ? '' : 's'}`}
+                </p>
+              )}
+            </div>
+          ) : null}
+
           {/* Loading */}
           {loading ? (
             <div className="flex flex-col items-center justify-center py-24 gap-4">
@@ -172,9 +355,20 @@ export const Dashboard = () => {
           ) : displayList.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 sv-card rounded-2xl animate-fade-in">
               <div className="text-6xl mb-4 opacity-30">
-                {activeTab === 'mine' ? '🎵' : activeTab === 'shared' ? '👥' : '🌐'}
+                {searchQuery.trim() ? '🔍' : activeTab === 'mine' ? '🎵' : activeTab === 'shared' ? '👥' : '🌐'}
               </div>
-              {activeTab === 'mine' ? (
+              {searchQuery.trim() ? (
+                <>
+                  <h3 className="text-xl font-semibold text-sv-text mb-2">No matches found</h3>
+                  <p className="text-sv-text-muted text-sm mb-4">Try a different search term</p>
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="sv-btn-ghost text-sm"
+                  >
+                    Clear search
+                  </button>
+                </>
+              ) : activeTab === 'mine' ? (
                 <>
                   <h3 className="text-xl font-semibold text-sv-text mb-2">No compositions yet</h3>
                   <p className="text-sv-text-muted text-sm mb-6">Start composing your first piece</p>

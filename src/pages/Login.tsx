@@ -32,20 +32,14 @@ export const Login = () => {
         <div className="sv-card p-8 rounded-2xl"
              style={{ boxShadow: '0 0 60px rgba(0,212,245,0.06), 0 8px 32px rgba(0,0,0,0.5)' }}>
 
-          {/* Logo + Brand */}
+          {/* Logo */}
           <div className="flex flex-col items-center mb-8">
             <img
               src="/stavium_logo.png"
               alt="Stavium"
-              className="w-24 h-24 rounded-2xl mb-4 object-cover"
+              className="w-40 h-40 rounded-2xl object-cover"
               style={{ filter: 'drop-shadow(0 0 16px rgba(0,212,245,0.3))' }}
             />
-            <h1 className="text-3xl font-bold tracking-widest text-sv-text uppercase">
-              STAVIUM
-            </h1>
-            <p className="text-sv-text-dim text-xs tracking-[0.3em] uppercase mt-1">
-              Compose · Play · Create
-            </p>
           </div>
 
           {/* Error */}
