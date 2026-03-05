@@ -92,6 +92,8 @@ export interface Composition {
   /** Automatically updated when composition is modified */
   updatedAt?: Date;
   userId?: string;
+  /** UID of the last user who saved the composition (may differ from userId for public/shared edits) */
+  modifiedBy?: string;
 }
 
 export type Instrument = 

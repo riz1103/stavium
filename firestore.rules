@@ -29,14 +29,24 @@ service cloud.firestore {
                       isPublic(resource.data) ||
                       isSharedWithMe(resource.data));
 
-      // Create: authenticated user, must set their own userId
+      // Create: authenticated user, must set their own userId; title must be a string.
       allow create: if isAuthenticated() &&
-                       request.resource.data.userId == request.auth.uid;
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.title is string;
 
-      // Update: owner only, userId must not change
+      // Update: immutable fields (userId, createdAt) must not change, PLUS the caller
+      // must be one of:
+      //   1. The owner of the composition.
+      //   2. A user explicitly shared (privacy='shared') with 'edit' permission.
+      //   3. Any authenticated user when the composition is public with 'edit' permission.
       allow update: if isAuthenticated() &&
-                       isOwner(resource.data) &&
-                       request.resource.data.userId == request.auth.uid;
+                       request.resource.data.userId == resource.data.userId &&
+                       request.resource.data.createdAt == resource.data.createdAt &&
+                       (isOwner(resource.data) ||
+                        (isSharedWithMe(resource.data) &&
+                         resource.data.sharePermission == 'edit') ||
+                        (isPublic(resource.data) &&
+                         resource.data.sharePermission == 'edit'));
 
       // Delete: owner only
       allow delete: if isAuthenticated() && isOwner(resource.data);

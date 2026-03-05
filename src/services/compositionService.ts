@@ -17,12 +17,15 @@ const COMPOSITIONS_COLLECTION = 'compositions';
 
 export const saveComposition = async (
   composition: Composition,
-  userId: string
+  userId: string,
+  modifiedByUid?: string
 ): Promise<string> => {
   try {
     const compositionData: any = {
       ...composition,
       userId,
+      // Track who last saved the document; falls back to the owner when not supplied.
+      modifiedBy: modifiedByUid ?? userId,
       updatedAt: Timestamp.now(),
       createdAt: composition.createdAt
         ? Timestamp.fromDate(composition.createdAt)

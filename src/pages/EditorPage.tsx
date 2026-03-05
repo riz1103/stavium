@@ -113,7 +113,14 @@ export const EditorPage = () => {
     if (!user || !composition) return;
     try {
       setSaving(true);
-      await saveComposition({ ...composition, id: id || undefined, title, userId: user.uid }, user.uid);
+      // Preserve the original owner's userId so the document's userId field never changes.
+      // Pass the current user's uid separately as modifiedBy so we always know who last saved.
+      const ownerId = composition.userId || user.uid;
+      await saveComposition(
+        { ...composition, id: id || undefined, title, userId: ownerId },
+        ownerId,
+        user.uid   // modifiedBy — the actual person hitting Save
+      );
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (error) {
