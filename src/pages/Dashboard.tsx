@@ -233,22 +233,16 @@ export const Dashboard = () => {
                       )}
                     </div>
 
-                    {/* Metadata pills */}
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                      <span className="px-2 py-0.5 rounded-md bg-sv-elevated border border-sv-border text-xs text-sv-text-muted">
-                        {comp.timeSignature}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-md bg-sv-elevated border border-sv-border text-xs text-sv-text-muted">
-                        {comp.keySignature}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-md bg-sv-elevated border border-sv-border text-xs text-sv-text-muted">
-                        {comp.tempo} BPM
-                      </span>
-                    </div>
-
-                    {/* Author */}
-                    {comp.author && (
-                      <p className="text-xs text-sv-text-dim mb-1">By {comp.author}</p>
+                    {/* Author and Arranger - Prominent display */}
+                    {(comp.author || comp.arrangedBy) && (
+                      <div className="mb-3 space-y-1">
+                        {comp.author && (
+                          <p className="text-sm text-sv-text font-medium">By {comp.author}</p>
+                        )}
+                        {comp.arrangedBy && (
+                          <p className="text-sm text-sv-text-muted">Arr. {comp.arrangedBy}</p>
+                        )}
+                      </div>
                     )}
                     {/* Origin label for compositions from other users */}
                     {comp.userId !== user?.uid && (
@@ -259,11 +253,19 @@ export const Dashboard = () => {
                       </p>
                     )}
 
-                    {/* Footer: date + privacy */}
+                    {/* Footer: date + metadata + privacy */}
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-sv-border">
-                      <span className="text-xs text-sv-text-dim">
-                        {comp.updatedAt ? `Updated ${formatDate(comp.updatedAt)}` : formatDate(comp.createdAt) ? `Created ${formatDate(comp.createdAt)}` : ''}
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-sv-text-dim">
+                          {comp.updatedAt ? `Updated ${formatDate(comp.updatedAt)}` : formatDate(comp.createdAt) ? `Created ${formatDate(comp.createdAt)}` : ''}
+                        </span>
+                        <span className="text-xs text-sv-text-dim">·</span>
+                        <span className="text-xs text-sv-text-dim">{comp.timeSignature}</span>
+                        <span className="text-xs text-sv-text-dim">·</span>
+                        <span className="text-xs text-sv-text-dim">{comp.keySignature}</span>
+                        <span className="text-xs text-sv-text-dim">·</span>
+                        <span className="text-xs text-sv-text-dim">{comp.tempo} BPM</span>
+                      </div>
                       <span className={`text-xs ${p.color} flex items-center gap-1`} title={p.label}>
                         {p.icon}
                       </span>
