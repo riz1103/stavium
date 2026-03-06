@@ -77,6 +77,8 @@ export class ToneScheduler {
   private scheduledNotes: ScheduledNote[] = [];
   /** AudioBufferSourceNodes created by manual crossfade sustain (for stop/cleanup). */
   private crossfadeNodes: AudioBufferSourceNode[] = [];
+  /** In-flight promise guard so repeated preload triggers don't duplicate work. */
+  private preloadAllPromise: Promise<void> | null = null;
   /** Animation frame ID for highlighting updates */
   private highlightAnimationFrame: number | null = null;
   /** AudioContext start time (when playback began) */
@@ -878,17 +880,23 @@ export class ToneScheduler {
 
   /**
    * Preload only the piano soundfont.
-   * Safe to call right after login — silently ignores AudioContext failures
-   * (e.g. browser hasn't received a user-gesture yet).
+   * Safe to call right after login/dashboard mount.
+   * Important: preloading should NOT depend on a user gesture. We still attempt
+   * to unlock/resume audio context, but proceed with network/decode prefetch even
+   * when unlock fails so assets are cached before editing/playback starts.
    */
   async preloadPiano(): Promise<void> {
+    // Best effort: try to unlock, but never block/abort preload when unavailable.
+    try { await Tone.start(); } catch {}
     try {
-      await Tone.start();
       const ac = this.getAC();
-      if (ac.state === 'suspended') await ac.resume();
+      if (ac.state === 'suspended') ac.resume().catch(() => {});
+    } catch {}
+
+    try {
       await this.loadSoundfont('piano');
     } catch (err) {
-      console.debug('[Soundfont] Piano preload skipped (AudioContext not ready):', err);
+      console.debug('[Soundfont] Piano preload failed:', err);
     }
   }
 
@@ -902,32 +910,38 @@ export class ToneScheduler {
    * and can kick off an eager background preload immediately.
    */
   async preloadAllSoundfonts(): Promise<void> {
-    try {
-      await Tone.start();
-      const ac = this.getAC();
-      if (ac.state === 'suspended') await ac.resume();
-    } catch (err) {
-      console.debug('[Soundfont] preloadAllSoundfonts: AudioContext not ready, skipping:', err);
-      return;
-    }
+    if (this.preloadAllPromise) return this.preloadAllPromise;
 
-    // ── 1. Piano first ───────────────────────────────────────────────────────
-    if (!this.sfPlayers.has('piano')) {
-      try { await this.loadSoundfont('piano'); } catch {}
-    }
+    this.preloadAllPromise = (async () => {
+      // Best effort: try to unlock, but DO NOT abort preloading if not possible.
+      try { await Tone.start(); } catch {}
+      try {
+        const ac = this.getAC();
+        if (ac.state === 'suspended') ac.resume().catch(() => {});
+      } catch {}
 
-    // ── 2. Every other instrument in parallel ────────────────────────────────
-    const remaining = Object.keys(SOUNDFONT_MAP).filter((n) => n !== 'piano');
-    await Promise.allSettled(
-      remaining.map(async (name) => {
-        if (this.sfPlayers.has(name)) return;
-        try { await this.loadSoundfont(name); } catch {}
-      })
-    );
+      // ── 1. Piano first ─────────────────────────────────────────────────────
+      if (!this.sfPlayers.has('piano')) {
+        try { await this.loadSoundfont('piano'); } catch {}
+      }
 
-    // ── 3. Mark the browser HTTP cache as warm ───────────────────────────────
-    markSoundfontCacheWarm();
-    console.log('[Soundfont] All instruments preloaded. Cache marked warm for next session.');
+      // ── 2. Every other instrument in parallel ──────────────────────────────
+      const remaining = Object.keys(SOUNDFONT_MAP).filter((n) => n !== 'piano');
+      await Promise.allSettled(
+        remaining.map(async (name) => {
+          if (this.sfPlayers.has(name)) return;
+          try { await this.loadSoundfont(name); } catch {}
+        })
+      );
+
+      // ── 3. Mark browser cache as warm for subsequent sessions ─────────────
+      markSoundfontCacheWarm();
+      console.log('[Soundfont] All instruments preloaded. Cache marked warm for next session.');
+    })().finally(() => {
+      this.preloadAllPromise = null;
+    });
+
+    return this.preloadAllPromise;
   }
 }
 
