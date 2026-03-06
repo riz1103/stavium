@@ -11,6 +11,8 @@ export const PlaybackControls = () => {
   const playbackStartMeasure = usePlaybackStore((state) => state.playbackStartMeasure);
   const playbackEndMeasure = usePlaybackStore((state) => state.playbackEndMeasure);
   const setPlaybackRange = usePlaybackStore((state) => state.setPlaybackRange);
+  const playChords = usePlaybackStore((state) => state.playChords);
+  const setPlayChords = usePlaybackStore((state) => state.setPlayChords);
   const schedulerRef = useRef(sharedScheduler);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -38,7 +40,8 @@ export const PlaybackControls = () => {
         composition, 
         effectiveTempo,
         playbackStartMeasure,
-        playbackEndMeasure
+        playbackEndMeasure,
+        playChords
       );
       setPlaybackState('playing');
     } catch (err) {
@@ -221,6 +224,19 @@ export const PlaybackControls = () => {
           )}
         </div>
       )}
+
+      {/* Chord playback toggle */}
+      <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-sv-elevated border border-sv-border">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={playChords}
+            onChange={(e) => setPlayChords(e.target.checked)}
+            className="w-4 h-4 rounded border-sv-border text-sv-cyan focus:ring-sv-cyan/50"
+          />
+          <span className="text-xs text-sv-text">Play Chords</span>
+        </label>
+      </div>
     </div>
   );
 };

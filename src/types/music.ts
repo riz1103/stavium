@@ -48,6 +48,13 @@ export interface Voice {
   notes: MusicElement[];
 }
 
+export interface ChordSymbol {
+  /** Chord symbol text (e.g., "Cm7", "F/A", "G7sus") */
+  symbol: string;
+  /** Position in beats from the start of the measure (0 = start of measure) */
+  beat: number;
+}
+
 export interface Measure {
   number: number;
   voices: Voice[];
@@ -59,6 +66,8 @@ export interface Measure {
   keySignature?: string;  // e.g. "G" – changes key sig from this measure onward
   tempo?: number;         // BPM – changes tempo from this measure onward
   clef?: Clef;            // clef change for this staff from this measure onward
+  /** Chord symbols displayed above the staff */
+  chords?: ChordSymbol[];
 }
 
 export interface Staff {
@@ -85,6 +94,8 @@ export interface Composition {
   pickupBeats?: number;
   /** When true, measure numbers are displayed above the first staff. Default true. */
   showMeasureNumbers?: boolean;
+  /** When true, chord symbols are played during playback. Default false. */
+  playChords?: boolean;
   /** Optional author/composer name */
   author?: string;
   /** Optional arranger name */

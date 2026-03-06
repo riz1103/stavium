@@ -1,5 +1,6 @@
 import * as Tone from 'tone';
 import Soundfont from 'soundfont-player';
+import { Chord } from 'tonal';
 import { Composition, Note } from '../../types/music';
 import { durationToBeats, beatsToSeconds } from '../../utils/durationUtils';
 import { pitchToMidi, applyKeySignature, applyKeySignatureAndMeasureAccidentals } from '../../utils/noteUtils';
@@ -415,7 +416,8 @@ export class ToneScheduler {
     composition: Composition, 
     playbackTempo?: number,
     startMeasure?: number | null,
-    endMeasure?: number | null
+    endMeasure?: number | null,
+    playChords?: boolean
   ): Promise<void> {
     // Unlock AudioContext — must be called from a user gesture
     await Tone.start();
@@ -780,6 +782,58 @@ export class ToneScheduler {
             measureTime += beats;
           });
         });
+
+        // ── Play chord symbols if enabled ──────────────────────────────────────
+        if (playChords && measure.chords && measure.chords.length > 0) {
+          measure.chords.forEach((chordSymbol) => {
+            try {
+              // Parse chord symbol using Tonal.js
+              const chord = Chord.get(chordSymbol.symbol);
+              if (chord && chord.notes && chord.notes.length > 0) {
+                // Calculate start time for this chord (within the measure)
+                const chordBeatTime = beatsToSeconds(chordSymbol.beat, effectiveTempo);
+                const chordStartTime = currentMeasureStart + chordBeatTime;
+                
+                // Play chord notes in a middle octave (octave 4)
+                const chordNotes = chord.notes.map((noteName: string) => {
+                  // Convert note name (e.g., "C", "Eb") to pitch (e.g., "C4", "Eb4")
+                  const pitch = `${noteName}4`;
+                  return pitchToMidi(pitch);
+                }).filter((midi: number) => midi > 0);
+
+                if (chordNotes.length > 0) {
+                  // Play chord for 1 beat duration
+                  const chordDuration = beatsToSeconds(1, effectiveTempo);
+                  
+                  chordNotes.forEach((midi: number) => {
+                    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+                    const shouldLoop = !LOOP_DISABLED.has(effectiveInstrument);
+                    const loopStartVal = LOOP_START[effectiveInstrument] ?? 0.08;
+                    
+                    this.pendingAudio.push({
+                      type: sfPlayer ? 'sf' : 'fallback',
+                      midi,
+                      freq,
+                      startTime: chordStartTime,
+                      playDuration: chordDuration,
+                      gain: gain * 0.7, // Slightly quieter for chords
+                      instrument: effectiveInstrument,
+                      shouldLoop,
+                      loopStart: loopStartVal,
+                      staffIndex,
+                      transportTime: chordSymbol.beat,
+                    });
+
+                    if (!sfPlayer) hasFallbackNotes = true;
+                  });
+                }
+              }
+            } catch (err) {
+              // Ignore invalid chord symbols
+              console.debug(`[ToneScheduler] Failed to parse chord: ${chordSymbol.symbol}`, err);
+            }
+          });
+        }
 
         // Advance to next measure start time (pickup measure may be shorter)
         currentMeasureStart += measureDurationSec;

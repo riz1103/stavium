@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection } from '../../types/music';
+import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol } from '../../types/music';
 
 interface ScoreState {
   composition: Composition | null;
@@ -71,6 +71,10 @@ interface ScoreState {
   updateSharePermission: (permission: 'view' | 'edit') => void;
   setAnacrusis: (enabled: boolean, pickupBeats?: number) => void;
   setShowMeasureNumbers: (show: boolean) => void;
+  setPlayChords: (play: boolean) => void;
+  addChord: (staffIndex: number, measureIndex: number, chord: ChordSymbol) => void;
+  removeChord: (staffIndex: number, measureIndex: number, chordIndex: number) => void;
+  updateChord: (staffIndex: number, measureIndex: number, chordIndex: number, chord: Partial<ChordSymbol>) => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -941,6 +945,100 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         ...composition,
         showMeasureNumbers: show,
       },
+    });
+  },
+
+  setPlayChords: (play) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+    set({
+      composition: updateCompositionWithDates(composition, { playChords: play }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  addChord: (staffIndex, measureIndex, chord) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+
+    const newStaves = [...composition.staves];
+    const staff = { ...newStaves[staffIndex] };
+    const measures = [...staff.measures];
+    const measure = { ...measures[measureIndex] };
+    
+    const chords = measure.chords ? [...measure.chords] : [];
+    chords.push(chord);
+    // Sort chords by beat position
+    chords.sort((a, b) => a.beat - b.beat);
+    
+    measure.chords = chords;
+    measures[measureIndex] = measure;
+    staff.measures = measures;
+    newStaves[staffIndex] = staff;
+
+    set({
+      composition: updateCompositionWithDates(composition, { staves: newStaves }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  removeChord: (staffIndex, measureIndex, chordIndex) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+
+    const newStaves = [...composition.staves];
+    const staff = { ...newStaves[staffIndex] };
+    const measures = [...staff.measures];
+    const measure = { ...measures[measureIndex] };
+    
+    if (measure.chords) {
+      const chords = [...measure.chords];
+      chords.splice(chordIndex, 1);
+      measure.chords = chords.length > 0 ? chords : undefined;
+    }
+    
+    measures[measureIndex] = measure;
+    staff.measures = measures;
+    newStaves[staffIndex] = staff;
+
+    set({
+      composition: updateCompositionWithDates(composition, { staves: newStaves }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  updateChord: (staffIndex, measureIndex, chordIndex, updates) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+
+    const newStaves = [...composition.staves];
+    const staff = { ...newStaves[staffIndex] };
+    const measures = [...staff.measures];
+    const measure = { ...measures[measureIndex] };
+    
+    if (measure.chords) {
+      const chords = [...measure.chords];
+      chords[chordIndex] = { ...chords[chordIndex], ...updates };
+      // Re-sort if beat changed
+      chords.sort((a, b) => a.beat - b.beat);
+      measure.chords = chords;
+    }
+    
+    measures[measureIndex] = measure;
+    staff.measures = measures;
+    newStaves[staffIndex] = staff;
+
+    set({
+      composition: updateCompositionWithDates(composition, { staves: newStaves }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
     });
   },
 

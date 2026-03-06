@@ -6,7 +6,7 @@ import { getUserCompositions, deleteComposition } from '../services/compositionS
 import { Composition } from '../types/music';
 import { logout } from '../services/authService';
 import { sharedScheduler } from '../music/playback/toneScheduler';
-import { importCompositionFromFile } from '../utils/importUtils';
+import { importCompositionFromFile, importCompositionFromImages } from '../utils/importUtils';
 
 type Tab = 'mine' | 'shared' | 'public';
 
@@ -102,11 +102,34 @@ export const Dashboard = () => {
   const handleImportClick = () => importInputRef.current?.click();
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
+    const files = Array.from(e.target.files);
     e.target.value = '';
+    
     try {
       setImporting(true);
-      const imported = await importCompositionFromFile(file);
+      
+      // Check if all selected files are images
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.tiff', '.tif'];
+      const allImages = files.every(file => {
+        const lower = file.name.toLowerCase();
+        return imageExtensions.some(ext => lower.endsWith(ext));
+      });
+      
+      let imported: Composition;
+      
+      if (allImages && files.length > 0) {
+        // Multiple images: use image conversion endpoint
+        // Auto-generate sequential page numbers
+        const pageNumbers = files.map((_, index) => index + 1);
+        imported = await importCompositionFromImages(files, pageNumbers);
+      } else if (files.length === 1) {
+        // Single file: use regular import
+        imported = await importCompositionFromFile(files[0]);
+      } else {
+        // Mixed file types or multiple non-image files
+        throw new Error('Please select either a single file (PDF, MIDI, MusicXML) or multiple image files (JPEG, PNG, TIFF)');
+      }
+      
       // Set the imported composition in the store, then navigate to the editor.
       // Pass { imported: true } in route state so EditorPage knows not to reset.
       setComposition({ ...imported, userId: user?.uid });
@@ -297,7 +320,8 @@ export const Dashboard = () => {
               <input
                 ref={importInputRef}
                 type="file"
-                accept=".mid,.midi,.musicxml,.xml,.mxl"
+                multiple
+                accept=".mid,.midi,.musicxml,.xml,.mxl,.pdf,.jpg,.jpeg,.png,.tiff,.tif"
                 onChange={handleImportFile}
                 style={{ display: 'none' }}
               />

@@ -22,6 +22,7 @@ import { LyricsToolbar } from '../components/toolbar/LyricsToolbar';
 import { UndoRedoToolbar } from '../components/toolbar/UndoRedoToolbar';
 import { ExportToolbar } from '../components/toolbar/ExportToolbar';
 import { ChordDetectionPanel } from '../components/toolbar/ChordDetectionPanel';
+import { ChordEditor } from '../components/toolbar/ChordEditor';
 import { MeasurePropertiesPanel } from '../components/toolbar/MeasurePropertiesPanel';
 import { StaffVolumeControls } from '../components/toolbar/StaffVolumeControls';
 
@@ -302,6 +303,8 @@ export const EditorPage = () => {
               <LyricsToolbar />
                   <Sep />
               <ChordDetectionPanel />
+                  <Sep />
+              <ChordEditor />
                 </div>
               )}
             </div>

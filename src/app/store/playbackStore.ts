@@ -43,6 +43,9 @@ interface PlaybackStateStore {
   playbackStartMeasure: number | null; // null means start from beginning
   playbackEndMeasure: number | null; // null means play to end
   setPlaybackRange: (startMeasure: number | null, endMeasure: number | null) => void;
+  /** Whether to play chord symbols during playback */
+  playChords: boolean;
+  setPlayChords: (play: boolean) => void;
 }
 
 const serializeNoteRef = (ref: PlayingNoteRef): string =>
@@ -60,6 +63,8 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
   playbackInstruments: {},
   playbackStartMeasure: null,
   playbackEndMeasure: null,
+  playChords: false,
+  setPlayChords: (play) => set({ playChords: play }),
   setState: (state) => set({ state }),
   setCurrentMeasure: (measure) => set({ currentMeasure: measure }),
   setCurrentBeat: (beat) => set({ currentBeat: beat }),

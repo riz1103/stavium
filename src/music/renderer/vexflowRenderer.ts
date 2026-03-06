@@ -544,6 +544,35 @@ export class VexFlowRenderer {
 
         measureStave.setContext(this.context).draw();
 
+        // ── Draw chord symbols above the staff ────────────────────────────────────
+        if (measure.chords && measure.chords.length > 0) {
+          const svgEl = this.getSvgElement();
+          if (svgEl) {
+            // Calculate beat width in pixels
+            const beatWidth = mw / effBPM;
+            
+            measure.chords.forEach((chord) => {
+              // Calculate x position based on beat
+              const chordX = mx + (chord.beat * beatWidth);
+              
+              // Position above the staff (above the top line)
+              const chordY = y - 25; // Above the staff
+              
+              const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+              text.setAttribute('x', String(chordX));
+              text.setAttribute('y', String(chordY));
+              text.setAttribute('font-family', 'Arial, sans-serif');
+              text.setAttribute('font-size', '14');
+              text.setAttribute('font-weight', 'bold');
+              text.setAttribute('fill', '#333');
+              text.setAttribute('text-anchor', 'start');
+              text.setAttribute('dominant-baseline', 'middle');
+              text.textContent = chord.symbol;
+              svgEl.appendChild(text);
+            });
+          }
+        }
+
         // For anacrusis first measure, use pickupBeats as the Voice beat count
         const voiceBeats =
           composition.anacrusis && measureIndex === 0 ? pickupBeats : effBPM;

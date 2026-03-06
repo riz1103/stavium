@@ -1,5 +1,6 @@
-import { Composition, NoteDuration, Staff, Measure, Note, Rest } from '../types/music';
+import { Composition, NoteDuration, Staff, Measure, Note, Rest, ChordSymbol } from '../types/music';
 import { midiToPitch } from './noteUtils';
+import { omrService } from '../services/omrService';
 
 type ParsedMidiTrack = {
   name?: string;
@@ -273,7 +274,31 @@ export async function importCompositionFromFile(file: File, currentTitle?: strin
   if (lower.endsWith('.musicxml') || lower.endsWith('.xml') || lower.endsWith('.mxl')) {
     return importFromMusicXml(file, currentTitle);
   }
-  throw new Error('Unsupported file type. Please upload MIDI (.mid/.midi) or MusicXML (.musicxml/.xml/.mxl).');
+  if (lower.endsWith('.pdf')) {
+    return importFromPDF(file, currentTitle);
+  }
+  // Check for image formats
+  const imageExtensions = ['.jpg', '.jpeg', '.png', '.tiff', '.tif'];
+  if (imageExtensions.some(ext => lower.endsWith(ext))) {
+    return importFromImages([file], [1], currentTitle);
+  }
+  throw new Error('Unsupported file type. Please upload PDF (.pdf), MIDI (.mid/.midi), MusicXML (.musicxml/.xml/.mxl), or images (.jpg/.jpeg/.png/.tiff/.tif).');
+}
+
+/**
+ * Import composition from multiple image files
+ * @param files Array of image files
+ * @param pageNumbers Array of page numbers (defaults to sequential if not provided)
+ * @param currentTitle Optional title for the composition
+ */
+export async function importCompositionFromImages(
+  files: File[],
+  pageNumbers?: number[],
+  currentTitle?: string
+): Promise<Composition> {
+  // Auto-generate page numbers if not provided
+  const pages = pageNumbers || files.map((_, index) => index + 1);
+  return importFromImages(files, pages, currentTitle);
 }
 
 async function importFromMidi(file: File, currentTitle?: string): Promise<Composition> {
@@ -310,7 +335,7 @@ async function importFromMidi(file: File, currentTitle?: string): Promise<Compos
 
   if (readStr(4) !== 'MThd') throw new Error('Invalid MIDI header.');
   const headerLen = readU32();
-  const format = readU16();
+  readU16(); // format (not used)
   const trackCount = readU16();
   const division = readU16();
   if (division & 0x8000) throw new Error('SMPTE time division MIDI files are not supported.');
@@ -632,10 +657,70 @@ async function importFromMusicXml(file: File, currentTitle?: string): Promise<Co
 
       let globalCursor = 0;    // running time position in divisions
       let chordGroupStart = 0; // start of the current chord group
-
+      
+      // ── Extract harmony (chord symbols) and notes with proper MusicXML time tracking ─────
+      const harmonyElements: Array<{ timeDivs: number; symbol: string }> = [];
+      
       for (const child of Array.from(measure.children)) {
         const ln = (child.localName || child.nodeName).toLowerCase();
 
+        if (ln === 'harmony') {
+          const harmony = child;
+          const rootStep = harmony.querySelector('root > root-step')?.textContent?.trim();
+          const rootAlter = harmony.querySelector('root > root-alter')?.textContent?.trim();
+          const kindText = harmony.getAttribute('text') || harmony.querySelector('kind')?.getAttribute('text') || '';
+          const kind = harmony.querySelector('kind');
+          const kindValue = kind?.textContent?.trim() || '';
+          const bassStep = harmony.querySelector('bass > bass-step')?.textContent?.trim();
+          const bassAlter = harmony.querySelector('bass > bass-alter')?.textContent?.trim();
+          
+          if (rootStep) {
+            let chordSymbol = rootStep;
+            // Add accidental to root if present
+            if (rootAlter) {
+              const alterNum = Number(rootAlter);
+              if (alterNum === 1) chordSymbol += '#';
+              else if (alterNum === -1) chordSymbol += 'b';
+            }
+            
+            // Add chord quality
+            if (kindText) {
+              chordSymbol += kindText;
+            } else if (kindValue) {
+              // Map MusicXML kind values to chord symbols
+              const kindMap: Record<string, string> = {
+                'major': '',
+                'minor': 'm',
+                'minor-seventh': 'm7',
+                'dominant': '7',
+                'major-seventh': 'maj7',
+                'diminished': 'dim',
+                'augmented': 'aug',
+              };
+              chordSymbol += kindMap[kindValue] || '';
+            }
+            
+            // Add bass note if present
+            if (bassStep && bassStep !== rootStep) {
+              let bassNote = bassStep;
+              if (bassAlter) {
+                const alterNum = Number(bassAlter);
+                if (alterNum === 1) bassNote += '#';
+                else if (alterNum === -1) bassNote += 'b';
+              }
+              chordSymbol += `/${bassNote}`;
+            }
+            
+            // Harmony elements appear before the notes they apply to
+            // Position them at the current globalCursor
+            harmonyElements.push({
+              timeDivs: globalCursor,
+              symbol: chordSymbol,
+            });
+          }
+          continue;
+        }
+        
         if (ln === 'backup') {
           const dur = Number(child.querySelector('duration')?.textContent ?? '0');
           if (dur > 0) { globalCursor = Math.max(0, globalCursor - dur); chordGroupStart = globalCursor; }
@@ -709,6 +794,15 @@ async function importFromMusicXml(file: File, currentTitle?: string): Promise<Co
           outMeasure.tempo = measureTempo;
         }
 
+        // Add chord symbols to the measure (only for the first voice to avoid duplicates)
+        if (vid === voiceIds[0] && harmonyElements.length > 0) {
+          const chords: ChordSymbol[] = harmonyElements.map((h) => ({
+            symbol: h.symbol,
+            beat: h.timeDivs / divisions, // Convert divisions to beats
+          }));
+          outMeasure.chords = chords;
+        }
+
         let cursorDivs = 0;
         for (const evt of events) {
           // Fill any gap before this event with rests.
@@ -763,4 +857,51 @@ async function importFromMusicXml(file: File, currentTitle?: string): Promise<Co
     showMeasureNumbers: true,
     privacy: 'private',
   };
+}
+
+async function importFromPDF(file: File, currentTitle?: string): Promise<Composition> {
+  try {
+    // Convert PDF to MusicXML using OMR service
+    const response = await omrService.convertToMusicXML(file);
+    
+    // Create a Blob from the MusicXML string and convert it to a File-like object
+    const musicXmlBlob = new Blob([response.file_content], { type: 'application/xml' });
+    const musicXmlFile = new File([musicXmlBlob], file.name.replace(/\.pdf$/i, '.musicxml'), {
+      type: 'application/xml',
+    });
+    
+    // Use the existing MusicXML import function
+    // Pass the title if provided, otherwise let it extract from MusicXML
+    return await importFromMusicXml(musicXmlFile, currentTitle);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to convert PDF';
+    throw new Error(`PDF conversion failed: ${errorMessage}`);
+  }
+}
+
+async function importFromImages(
+  files: File[],
+  pageNumbers: number[],
+  currentTitle?: string
+): Promise<Composition> {
+  try {
+    // Convert images to MusicXML using OMR service
+    const response = await omrService.convertImagesToMusicXML(files, pageNumbers);
+    
+    // Create a Blob from the MusicXML string and convert it to a File-like object
+    const musicXmlBlob = new Blob([response.file_content], { type: 'application/xml' });
+    const fileName = files.length === 1 
+      ? files[0].name.replace(/\.(jpg|jpeg|png|tiff|tif)$/i, '.musicxml')
+      : 'imported.musicxml';
+    const musicXmlFile = new File([musicXmlBlob], fileName, {
+      type: 'application/xml',
+    });
+    
+    // Use the existing MusicXML import function
+    // Pass the title if provided, otherwise let it extract from MusicXML
+    return await importFromMusicXml(musicXmlFile, currentTitle);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to convert images';
+    throw new Error(`Image conversion failed: ${errorMessage}`);
+  }
 }
