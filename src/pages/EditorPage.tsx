@@ -18,6 +18,7 @@ import { AccidentalToolbar } from '../components/toolbar/AccidentalToolbar';
 import { TieSlurToolbar } from '../components/toolbar/TieSlurToolbar';
 import { ArticulationToolbar } from '../components/toolbar/ArticulationToolbar';
 import { DynamicToolbar } from '../components/toolbar/DynamicToolbar';
+import { LyricsToolbar } from '../components/toolbar/LyricsToolbar';
 import { UndoRedoToolbar } from '../components/toolbar/UndoRedoToolbar';
 import { ExportToolbar } from '../components/toolbar/ExportToolbar';
 import { ChordDetectionPanel } from '../components/toolbar/ChordDetectionPanel';
@@ -285,6 +286,8 @@ export const EditorPage = () => {
                   <Sep />
               <DynamicToolbar />
                   <Sep />
+              <LyricsToolbar />
+                  <Sep />
               <ChordDetectionPanel />
                 </div>
               )}
@@ -334,6 +337,7 @@ export const EditorPage = () => {
             <TieSlurToolbar />
             <ArticulationToolbar />
             <DynamicToolbar />
+            <LyricsToolbar />
           </>
         ) : (
           <div className="flex items-center justify-center py-4 text-sv-text-dim text-sm">

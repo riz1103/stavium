@@ -385,7 +385,11 @@ export class VexFlowRenderer {
       : CLEF_WIDTH + 40;
 
     const neededWidth  = LEFT_MARGIN + totalStavesWidth;
-    const neededHeight = STAVE_Y_START + composition.staves.length * ROW_SPACING + 60;
+    const visibleStaves = composition.staves
+      .map((staff, index) => ({ staff, index }))
+      .filter(({ staff }) => !staff.hidden);
+    const visibleStaffCount = Math.max(visibleStaves.length, 1);
+    const neededHeight = STAVE_Y_START + visibleStaffCount * ROW_SPACING + 60;
 
     if (neededWidth > this.canvasWidth || neededHeight > this.canvasHeight) {
       this.canvasWidth  = Math.max(neededWidth,  this.canvasWidth);
@@ -411,8 +415,28 @@ export class VexFlowRenderer {
     // Position measure numbers above the top staff line
     const measureNumberY = STAVE_Y_START + STAFF_LINE_OFFSET - 10; // Above the top line
 
-    composition.staves.forEach((staff, staffIndex) => {
-      const y = STAVE_Y_START + staffIndex * ROW_SPACING;
+    visibleStaves.forEach(({ staff, index: staffIndex }, visibleRowIndex) => {
+      const y = STAVE_Y_START + visibleRowIndex * ROW_SPACING;
+
+      // ── Staff label (left side, editor view) ───────────────────────────────
+      const staffLabel = staff.name?.trim() || `Staff ${staffIndex + 1}`;
+      const svgElForLabel = this.getSvgElement();
+      if (svgElForLabel) {
+        const labelY = y + STAFF_LINE_OFFSET + 2 * LINE_SPACING;
+        const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        const labelX = LEFT_MARGIN - 12;
+        txt.setAttribute('x', String(labelX));
+        txt.setAttribute('y', String(labelY));
+        txt.setAttribute('text-anchor', 'middle');
+        txt.setAttribute('dominant-baseline', 'middle');
+        txt.setAttribute('font-family', 'Arial, sans-serif');
+        txt.setAttribute('font-size', '10');
+        txt.setAttribute('font-style', 'italic');
+        txt.setAttribute('fill', '#333');
+        txt.setAttribute('transform', `rotate(-90 ${labelX} ${labelY})`);
+        txt.textContent = staffLabel;
+        svgElForLabel.appendChild(txt);
+      }
 
       // ── 1. Header stave: clef + key signature + time signature ──────────────
       const headerStave = new Stave(LEFT_MARGIN, y, CLEF_WIDTH);
@@ -740,6 +764,34 @@ export class VexFlowRenderer {
               });
             }
 
+            // ── Draw lyrics (below staff) ─────────────────────────────────────────
+            if (voice) {
+              const lyricBaselineY = y + STAFF_LINE_OFFSET + 4 * LINE_SPACING + 28;
+              voice.notes.forEach((element, dataIndex) => {
+                if (!('pitch' in element) || !element.lyric) return;
+                const tickableIdx = tickableDataIndices.indexOf(dataIndex);
+                if (tickableIdx < 0 || tickableIdx >= tickables.length) return;
+                const staveNote = tickables[tickableIdx];
+                try {
+                  const x = staveNote.getAbsoluteX();
+                  if (!x) return;
+                  const svgEl = this.getSvgElement();
+                  if (!svgEl) return;
+                  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                  text.setAttribute('x', String(x));
+                  text.setAttribute('y', String(lyricBaselineY));
+                  text.setAttribute('font-family', 'Arial, sans-serif');
+                  text.setAttribute('font-size', '12');
+                  text.setAttribute('fill', '#111');
+                  text.setAttribute('text-anchor', 'middle');
+                  text.textContent = element.lyric;
+                  svgEl.appendChild(text);
+                } catch (err) {
+                  console.warn('Failed to draw lyric:', err);
+                }
+              });
+            }
+
             // ── Capture actual note-head positions after formatting ──────────
             tickables.forEach((sn, ti) => {
               try {
@@ -878,7 +930,7 @@ export class VexFlowRenderer {
       }
 
       // ── 4. Draw measure numbers (only on first staff) ─────────────────────
-      if (showMeasureNumbers && staffIndex === 0) {
+      if (showMeasureNumbers && visibleRowIndex === 0) {
         staff.measures.forEach((measure, measureIndex) => {
           const { x: mx, width: mw } = layout[measureIndex] ?? {
             x: LEFT_MARGIN + CLEF_WIDTH + measureIndex * MEASURE_WIDTH,
@@ -1104,7 +1156,10 @@ export class VexFlowRenderer {
       return Math.max(60, Math.round((pickupBeats / beatsPerMeasure) * PRINT_MEAS_W));
     };
 
-    const numStaves   = composition.staves.length;
+    const visibleStaves = composition.staves
+      .map((staff, index) => ({ staff, index }))
+      .filter(({ staff }) => !staff.hidden);
+    const numStaves   = Math.max(visibleStaves.length, 1);
     const maxMeasures = Math.max(...composition.staves.map((s) => s.measures.length), 1);
 
     // Calculate actual measure widths (pickup measure is smaller)
@@ -1182,8 +1237,8 @@ export class VexFlowRenderer {
       const sysEndM   = Math.min(sysStartM + measPerSys, maxMeasures);
       const sysY      = TITLE_H + sysIdx * systemH;
 
-      composition.staves.forEach((staff, staffIdx) => {
-        const staveY = sysY + STAVE_TOP + staffIdx * ROW_SPACING;
+      visibleStaves.forEach(({ staff, index: staffIdx }, visibleRowIdx) => {
+        const staveY = sysY + STAVE_TOP + visibleRowIdx * ROW_SPACING;
         const staveX = labelWidth;
 
         // ── Header stave (clef + key sig; time sig only on system 0) ──────
@@ -1203,14 +1258,16 @@ export class VexFlowRenderer {
         if (staffLabel && svgEl) {
           const labelY = staveY + STAFF_LINE_OFFSET + 2 * LINE_SPACING;
           const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-          txt.setAttribute('x', String(staveX - 6));
+          const labelX = staveX - 8;
+          txt.setAttribute('x', String(labelX));
           txt.setAttribute('y', String(labelY));
-          txt.setAttribute('text-anchor', 'end');
+          txt.setAttribute('text-anchor', 'middle');
           txt.setAttribute('dominant-baseline', 'middle');
           txt.setAttribute('font-family', 'Arial, sans-serif');
           txt.setAttribute('font-size', sysIdx === 0 ? '13' : '11');
           txt.setAttribute('font-style', 'italic');
           txt.setAttribute('fill', '#000');
+          txt.setAttribute('transform', `rotate(-90 ${labelX} ${labelY})`);
           // Show full name on system 0; abbreviated (first word) on the rest
           txt.textContent = sysIdx === 0
             ? staffLabel
@@ -1409,6 +1466,32 @@ export class VexFlowRenderer {
                   }
                 }
               }
+
+              // ── Draw lyrics in print view (below staff) ───────────────────────
+              if (voice && svgEl) {
+                const lyricBaselineY = staveY + STAFF_LINE_OFFSET + 4 * LINE_SPACING + 24;
+                voice.notes.forEach((element, dataIndex) => {
+                  if (!('pitch' in element) || !element.lyric) return;
+                  const tickableIdx = tickableDataIndices.indexOf(dataIndex);
+                  if (tickableIdx < 0 || tickableIdx >= tickables.length) return;
+                  const staveNote = tickables[tickableIdx];
+                  try {
+                    const x = staveNote.getAbsoluteX();
+                    if (!x) return;
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    text.setAttribute('x', String(x));
+                    text.setAttribute('y', String(lyricBaselineY));
+                    text.setAttribute('font-family', 'Arial, sans-serif');
+                    text.setAttribute('font-size', '11');
+                    text.setAttribute('fill', '#111');
+                    text.setAttribute('text-anchor', 'middle');
+                    text.textContent = element.lyric;
+                    svgEl.appendChild(text);
+                  } catch (err) {
+                    console.warn('Failed to draw print lyric:', err);
+                  }
+                });
+              }
             } catch (err) {
               console.warn(`Print system ${sysIdx} measure ${mIdx} error:`, err);
             }
@@ -1423,7 +1506,7 @@ export class VexFlowRenderer {
           }
 
           // ── Measure numbers (first staff only, every measure) ─────────────
-          if (staffIdx === 0 && svgEl) {
+          if (visibleRowIdx === 0 && svgEl) {
             const isPickup = composition.anacrusis && mIdx === 0;
             if (!isPickup) {
               const measNum = composition.anacrusis ? mIdx : mIdx + 1;

@@ -24,6 +24,8 @@ export interface Note {
   pitch: Pitch;
   duration: NoteDuration;
   accidental?: Accidental;
+  /** Optional lyric syllable/text rendered beneath the note head. */
+  lyric?: string;
   tie?: boolean;
   slur?: boolean;
   /** Override the automatic arc direction for the SLUR arc this note belongs to. */
@@ -64,6 +66,8 @@ export interface Staff {
   instrument: string;
   measures: Measure[];
   name?: string; // Optional custom name for the staff
+  /** Hide in score UI and PDF/print output; playback still includes this staff. */
+  hidden?: boolean;
 }
 
 export type PrivacyLevel = 'private' | 'shared' | 'public';

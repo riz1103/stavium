@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useScoreStore } from '../../app/store/scoreStore';
 import { usePlaybackStore, PlayingNoteRef } from '../../app/store/playbackStore';
 import { ToneScheduler } from '../../music/playback/toneScheduler';
@@ -86,13 +86,6 @@ function midiToDiatonicStep(midi: number, clef: 'treble' | 'bass'): number {
   return Math.round((ref - midi) / 1.75);
 }
 
-function pitchToSvgY(pitch: string, staffIndex: number, clef: 'treble' | 'bass'): number {
-  const topLineY = STAVE_Y_START + staffIndex * ROW_SPACING + STAFF_LINE_OFFSET;
-  const midi = pitchToMidi(pitch);
-  const step = midiToDiatonicStep(midi, clef);
-  return topLineY + step * STEP_SIZE;
-}
-
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface NoteRef {
@@ -148,6 +141,16 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
   const playingNotes       = usePlaybackStore((s) => s.playingNotes);
   const playbackState     = usePlaybackStore((s) => s.state);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const visibleStaffIndices = useMemo(
+    () => (composition ? composition.staves.map((staff, index) => ({ staff, index })).filter(({ staff }) => !staff.hidden).map(({ index }) => index) : []),
+    [composition]
+  );
+  const hasVisibleStaves = visibleStaffIndices.length > 0;
+  const getTopLineYForStaff = (staffIndex: number): number | null => {
+    const rowIndex = visibleStaffIndices.indexOf(staffIndex);
+    if (rowIndex < 0) return null;
+    return STAVE_Y_START + rowIndex * ROW_SPACING + STAFF_LINE_OFFSET;
+  };
 
   // Long-press state
   const longPressTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -359,8 +362,10 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
   ): { staffIndex: number; measureIndex: number } | null => {
     if (!composition) return null;
     let staffIndex = -1;
-    composition.staves.forEach((_, si) => {
-      const topLine    = STAVE_Y_START + si * ROW_SPACING + STAFF_LINE_OFFSET;
+    visibleStaffIndices.forEach((si) => {
+      const topLineY = getTopLineYForStaff(si);
+      if (topLineY === null) return;
+      const topLine    = topLineY;
       const bottomLine = topLine + 4 * 10;
       if (y >= topLine - 25 && y <= bottomLine + 25) staffIndex = si;
     });
@@ -380,7 +385,8 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
 
   // ── Helper: SVG Y + staff → diatonic pitch string ───────────────────────
   const svgYToPitch = (svgY: number, staffIndex: number, clef: 'treble' | 'bass'): string => {
-    const topLineY  = STAVE_Y_START + staffIndex * ROW_SPACING + STAFF_LINE_OFFSET;
+    const topLineY = getTopLineYForStaff(staffIndex);
+    if (topLineY === null) return midiToPitch(clef === 'treble' ? 60 : 48);
     const relativeY = svgY - topLineY;
     const step      = Math.round(relativeY / STEP_SIZE);
     const stepMap: Record<string, number> = clef === 'treble' ? TREBLE_STEP_TO_MIDI : BASS_STEP_TO_MIDI;
@@ -500,7 +506,24 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
         } else {
           // Cursor left all staves
           const si = ds.noteRef.staffIndex;
-          const topLine    = STAVE_Y_START + si * ROW_SPACING + STAFF_LINE_OFFSET;
+          const topLine = getTopLineYForStaff(si);
+          if (topLine === null) {
+            offStaff = true;
+            const updated: DragState = {
+              ...ds,
+              currentClientX: clientX,
+              currentClientY: clientY,
+              hasMoved: moved,
+              offStaff,
+              targetPitch,
+              targetStaffIndex,
+              targetMeasureIndex,
+              targetInsertIndex,
+            };
+            dragStateRef.current = updated;
+            setDragState({ ...updated });
+            return;
+          }
           const bottomLine = topLine + 4 * 10;
           offStaff = svg.y < topLine - 40 || svg.y > bottomLine + 40;
         }
@@ -883,7 +906,7 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
           onTouchCancel={handleTouchCancel}
-          className="min-h-[600px]"
+          className="min-h-[600px] relative"
           style={{
             cursor: isReadOnly
               ? 'default'
@@ -897,6 +920,13 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
           }}
           title={isReadOnly ? 'View only — click Edit to make changes' : 'Click to add · Drag to move · Hold to delete · Drag off staff to remove'}
         />
+        {!hasVisibleStaves && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="px-3 py-2 rounded-lg bg-sv-card/90 border border-sv-border text-sv-text-muted text-sm">
+              All staves are hidden. Use Staff controls to show at least one staff.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Long-press ring animation ───────────────────────────────────── */}

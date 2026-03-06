@@ -19,6 +19,7 @@ interface ScoreState {
     noteIndex: number,
     note: Partial<Note>
   ) => void;
+  replicateLyricsToStaff: (sourceStaffIndex: number, targetStaffIndex: number) => void;
   /**
    * Set slurDirection on the tie/slur chain that contains the given note.
    *
@@ -35,6 +36,7 @@ interface ScoreState {
     isTieContext?: boolean
   ) => void;
   addMeasure: (staffIndex: number) => void;
+  insertMeasureBefore: (staffIndex: number, measureIndex: number) => void;
   removeMeasure: (staffIndex: number, measureIndex: number) => void;
   copyMeasure: (staffIndex: number, startMeasureIndex: number, endMeasureIndex?: number) => void;
   pasteMeasure: (targetStaffIndex: number, targetMeasureIndex: number, insertAfter?: boolean) => void;
@@ -45,6 +47,7 @@ interface ScoreState {
   addStaff: (staff: Staff) => void;
   removeStaff: (staffIndex: number) => void;
   updateStaffName: (staffIndex: number, name: string) => void;
+  setStaffHidden: (staffIndex: number, hidden: boolean) => void;
   /**
    * Set per-measure property overrides.
    * - timeSignature / keySignature / tempo are "global" changes: they are written
@@ -356,6 +359,57 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     });
   },
 
+  replicateLyricsToStaff: (sourceStaffIndex, targetStaffIndex) => {
+    const { composition } = get();
+    if (!composition) return;
+    if (sourceStaffIndex === targetStaffIndex) return;
+
+    const sourceStaff = composition.staves[sourceStaffIndex];
+    const targetStaff = composition.staves[targetStaffIndex];
+    if (!sourceStaff || !targetStaff) return;
+
+    saveToHistory(composition);
+
+    const newStaves: Staff[] = JSON.parse(JSON.stringify(composition.staves));
+
+    const source = newStaves[sourceStaffIndex];
+    const target = newStaves[targetStaffIndex];
+
+    target.measures.forEach((targetMeasure, measureIndex) => {
+      const sourceMeasure = source.measures[measureIndex];
+      targetMeasure.voices.forEach((targetVoice, voiceIndex) => {
+        const sourceVoice = sourceMeasure?.voices[voiceIndex];
+        const sourceLyricsInVoice: Array<string | undefined> = [];
+
+        sourceVoice?.notes.forEach((sourceElement) => {
+          if ('pitch' in sourceElement) {
+            const lyric = (sourceElement as Note).lyric?.trim();
+            if (lyric) {
+              sourceLyricsInVoice.push(lyric);
+            }
+          }
+        });
+
+        let lyricCursor = 0;
+        targetVoice.notes.forEach((targetElement) => {
+          if (!('pitch' in targetElement)) return;
+          const nextLyric =
+            lyricCursor < sourceLyricsInVoice.length ? sourceLyricsInVoice[lyricCursor] : undefined;
+          (targetElement as Note).lyric = nextLyric;
+          lyricCursor++;
+        });
+      });
+    });
+
+    set({
+      composition: updateCompositionWithDates(composition, {
+        staves: newStaves,
+      }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
   setChainSlurDirection: (staffIndex, measureIndex, voiceIndex, noteIndex, direction, isTieContext = false) => {
     const { composition } = get();
     if (!composition) return;
@@ -467,6 +521,38 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         ...composition,
         staves: newStaves,
       },
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  insertMeasureBefore: (staffIndex, measureIndex) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+
+    const newStaves = [...composition.staves];
+    const staff = { ...newStaves[staffIndex] };
+    const measures = [...staff.measures];
+    const insertIndex = Math.max(0, Math.min(measureIndex, measures.length));
+
+    const newMeasure: Measure = {
+      number: insertIndex + 1,
+      voices: [{ notes: [] }],
+    };
+
+    measures.splice(insertIndex, 0, newMeasure);
+    measures.forEach((m, idx) => {
+      m.number = idx + 1;
+    });
+
+    staff.measures = measures;
+    newStaves[staffIndex] = staff;
+
+    set({
+      composition: updateCompositionWithDates(composition, {
+        staves: newStaves,
+      }),
       canUndo: historyIndex >= 0,
       canRedo: false,
     });
@@ -670,6 +756,27 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         ...composition,
         staves: newStaves,
       },
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  setStaffHidden: (staffIndex, hidden) => {
+    const { composition } = get();
+    if (!composition) return;
+    if (!composition.staves[staffIndex]) return;
+    saveToHistory(composition);
+
+    const newStaves = [...composition.staves];
+    newStaves[staffIndex] = {
+      ...newStaves[staffIndex],
+      hidden,
+    };
+
+    set({
+      composition: updateCompositionWithDates(composition, {
+        staves: newStaves,
+      }),
       canUndo: historyIndex >= 0,
       canRedo: false,
     });

@@ -9,11 +9,13 @@ export const StaffControls = () => {
   const addStaff           = useScoreStore((state) => state.addStaff);
   const removeStaff        = useScoreStore((state) => state.removeStaff);
   const updateStaffName    = useScoreStore((state) => state.updateStaffName);
+  const setStaffHidden     = useScoreStore((state) => state.setStaffHidden);
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue,    setEditValue]    = useState('');
 
   if (!composition) return null;
+  const visibleStaffCount = composition.staves.filter((s) => !s.hidden).length;
 
   const handleAdd = () => {
     const newStaff: Staff = {
@@ -41,10 +43,11 @@ export const StaffControls = () => {
   return (
     <div className="sv-toolbar">
       <span className="sv-toolbar-label">Staff</span>
-      <div className="flex items-center gap-1 flex-wrap">
+      <div className="flex flex-col gap-1 min-w-[260px] max-h-36 overflow-y-auto pr-1">
         {composition.staves.map((staff, index) => {
           const name = staff.name || `Staff ${index + 1}`;
           const active = selectedStaffIndex === index;
+          const isHidden = !!staff.hidden;
           if (editingIndex === index) {
             return (
               <div key={index} className="flex items-center gap-1">
@@ -65,16 +68,43 @@ export const StaffControls = () => {
             );
           }
           return (
-            <button
+            <div
               key={index}
-              onClick={() => setSelectedStaff(index)}
-              onDoubleClick={(e) => { e.stopPropagation(); setEditingIndex(index); setEditValue(name); }}
-              title={`${name} — ${staff.clef} / ${staff.instrument}. Double-tap to rename`}
-              className={active ? 'sv-btn-active text-xs' : 'sv-btn-ghost text-xs'}
+              className={`flex items-center justify-between gap-2 px-1 py-0.5 rounded-md border ${
+                active ? 'border-sv-cyan/35 bg-sv-cyan/5' : 'border-sv-border bg-sv-card/50'
+              }`}
             >
-              {name}
-              <span className="opacity-50 text-[10px]">({staff.clef[0].toUpperCase()})</span>
-            </button>
+              <button
+                onClick={() => setSelectedStaff(index)}
+                onDoubleClick={(e) => { e.stopPropagation(); setEditingIndex(index); setEditValue(name); }}
+                title={`${name} — ${staff.clef} / ${staff.instrument}. Double-tap to rename`}
+                className={active ? 'sv-btn-active text-xs flex-1 justify-start' : `sv-btn-ghost text-xs flex-1 justify-start ${isHidden ? 'opacity-60' : ''}`}
+              >
+                {name}
+                <span className="opacity-50 text-[10px]">({staff.clef[0].toUpperCase()})</span>
+                {isHidden && <span className="opacity-70 text-[10px] italic">hidden</span>}
+              </button>
+              <button
+                onClick={() => setStaffHidden(index, !isHidden)}
+                disabled={!isHidden && visibleStaffCount <= 1}
+                title={
+                  !isHidden && visibleStaffCount <= 1
+                    ? 'At least one staff must stay visible'
+                    : isHidden
+                    ? `Show ${name} in score and PDF`
+                    : `Hide ${name} from score and PDF (playback unchanged)`
+                }
+                className={
+                  !isHidden && visibleStaffCount <= 1
+                    ? 'sv-btn-ghost text-xs opacity-30 cursor-not-allowed'
+                    : isHidden
+                    ? 'sv-btn-success text-xs'
+                    : 'sv-btn-ghost text-xs'
+                }
+              >
+                {isHidden ? 'Show' : 'Hide'}
+              </button>
+            </div>
           );
         })}
       </div>
