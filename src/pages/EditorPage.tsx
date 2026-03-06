@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useUserStore } from '../app/store/userStore';
 import { useScoreStore } from '../app/store/scoreStore';
 import { usePlaybackStore } from '../app/store/playbackStore';
@@ -37,6 +37,7 @@ const TAB_CONFIG: { id: MobileTab; label: string; icon: string }[] = [
 export const EditorPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const user = useUserStore((state) => state.user);
   const composition = useScoreStore((state) => state.composition);
   const setComposition = useScoreStore((state) => state.setComposition);
@@ -106,9 +107,21 @@ export const EditorPage = () => {
       }
       loadComposition(id);
     } else {
-      resetComposition();
-      setTitle('Untitled Composition');
-      setLoading(false);
+      // If navigated here from Dashboard import, the composition is already
+      // in the store — don't reset it.
+      const state = location.state as { imported?: boolean } | null;
+      if (state?.imported && composition) {
+        setTitle(composition.title || 'Imported Composition');
+        setIsReadOnly(false);
+        setLoading(false);
+        // Clear the location state so a subsequent re-render or refresh doesn't
+        // skip the reset again.
+        navigate('/editor', { replace: true, state: {} });
+      } else {
+        resetComposition();
+        setTitle('Untitled Composition');
+        setLoading(false);
+      }
     }
   }, [id, user, navigate, resetComposition]);
 
@@ -222,7 +235,7 @@ export const EditorPage = () => {
           <Sep />
           <StaffVolumeControls />
           <Sep />
-          <ExportToolbar />
+          <ExportToolbar isReadOnly={true} />
         </div>
       ) : (
         <>
@@ -255,7 +268,7 @@ export const EditorPage = () => {
                 <Sep />
             <MeasurePropertiesPanel />
                 <Sep />
-            <ExportToolbar />
+            <ExportToolbar isReadOnly={false} />
               </div>
             )}
           </div>
@@ -363,7 +376,7 @@ export const EditorPage = () => {
         <CompositionControls isReadOnly={isReadOnly} />
         <div className="flex gap-2 flex-wrap">
           {!isReadOnly && <UndoRedoToolbar />}
-          <ExportToolbar />
+          <ExportToolbar isReadOnly={isReadOnly} />
         </div>
         {!isReadOnly && <ChordDetectionPanel />}
         <StaffVolumeControls />

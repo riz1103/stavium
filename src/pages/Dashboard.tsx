@@ -1,10 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../app/store/userStore';
+import { useScoreStore } from '../app/store/scoreStore';
 import { getUserCompositions, deleteComposition } from '../services/compositionService';
 import { Composition } from '../types/music';
 import { logout } from '../services/authService';
 import { sharedScheduler } from '../music/playback/toneScheduler';
+import { importCompositionFromFile } from '../utils/importUtils';
 
 type Tab = 'mine' | 'shared' | 'public';
 
@@ -20,6 +22,9 @@ export const Dashboard = () => {
   const [avatarDropdownOpen, setAvatarDropdownOpen] = useState(false);
   const avatarDropdownRef = useRef<HTMLDivElement>(null);
   const [avatarImageError, setAvatarImageError] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const setComposition = useScoreStore((state) => state.setComposition);
 
   // Check if user has a valid photoURL (handle both photoURL and photoUrl for compatibility)
   const photoURL = user?.photoURL || (user as any)?.photoUrl;
@@ -93,6 +98,26 @@ export const Dashboard = () => {
 
   const handleCreateNew = () => navigate('/editor');
   const handleOpen = (compositionId: string) => navigate(`/editor/${compositionId}`);
+
+  const handleImportClick = () => importInputRef.current?.click();
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    e.target.value = '';
+    try {
+      setImporting(true);
+      const imported = await importCompositionFromFile(file);
+      // Set the imported composition in the store, then navigate to the editor.
+      // Pass { imported: true } in route state so EditorPage knows not to reset.
+      setComposition({ ...imported, userId: user?.uid });
+      navigate('/editor', { state: { imported: true } });
+    } catch (error) {
+      console.error('Error importing file:', error);
+      alert(error instanceof Error ? error.message : 'Failed to import file.');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const handleDelete = async (compositionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -267,13 +292,43 @@ export const Dashboard = () => {
           {/* Page title + New button */}
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-semibold text-sv-text">Compositions</h2>
-            <button onClick={handleCreateNew} className="sv-btn-primary gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-              </svg>
-              <span className="hidden sm:inline">New Composition</span>
-              <span className="sm:hidden">New</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Hidden file input for import */}
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".mid,.midi,.musicxml,.xml,.mxl"
+                onChange={handleImportFile}
+                style={{ display: 'none' }}
+              />
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold
+                           border border-sv-cyan/40 text-sv-cyan bg-sv-cyan/5
+                           hover:bg-sv-cyan/15 hover:border-sv-cyan/60
+                           transition-all cursor-pointer whitespace-nowrap
+                           ${importing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {importing ? (
+                  <span className="w-4 h-4 border-2 border-sv-cyan/30 border-t-sv-cyan rounded-full animate-spin" />
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                )}
+                <span className="hidden sm:inline">{importing ? 'Importing…' : 'Import File'}</span>
+                <span className="sm:hidden">{importing ? '…' : 'Import'}</span>
+              </button>
+              <button onClick={handleCreateNew} className="sv-btn-primary gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="hidden sm:inline">New Composition</span>
+                <span className="sm:hidden">New</span>
+              </button>
+            </div>
           </div>
 
           {/* Tabs */}

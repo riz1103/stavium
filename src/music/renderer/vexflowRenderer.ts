@@ -1,7 +1,7 @@
 import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Dot, Articulation, StaveTie, Beam, Stem, RendererBackends } from 'vexflow';
 import { Clef, Composition, Measure, Note, Rest, NoteDuration } from '../../types/music';
 import { parsePitch, pitchToVexFlowKey, pitchToMidi, keySignatureToVexFlow, shouldShowAccidental, findMeasureAccidental, getKeySignatureAccidentals } from '../../utils/noteUtils';
-import { durationToVexFlow } from '../../utils/durationUtils';
+import { durationToBeats, durationToVexFlow } from '../../utils/durationUtils';
 import { PlayingNoteRef } from '../../app/store/playbackStore';
 
 export interface RenderOptions {
@@ -586,9 +586,45 @@ export class VexFlowRenderer {
             const beams: Beam[] = [];
             if (voice) {
               let beamGroup: any[] = [];
+              let currentBeat = 0;
+              let beamGroupStartBeat = 0;
+
+              // Middle-line MIDI for stem-direction rule (staff line 3)
+              const middleLineMidi = effClef === 'treble' ? 71  // B4
+                                   : effClef === 'bass'   ? 50  // D3
+                                   : effClef === 'alto'   ? 60  // C4
+                                   : 57;                        // A3 (tenor)
+
+              // Pre-scan: find the single farthest note (outlier) across ALL beamable
+              // notes in this measure, then use ONE stem direction for every beam group.
+              // This prevents adjacent beat-groups from flipping up/down, which looks
+              // cluttered and is not standard engraving practice.
+              let measureMaxDist = -1;
+              let measureStemDir = Stem.DOWN; // equal-distance default
+              for (const el of voice.notes) {
+                if (!('pitch' in el)) continue;
+                const base = (el as Note).duration.startsWith('dotted-')
+                  ? (el as Note).duration.replace('dotted-', '')
+                  : (el as Note).duration;
+                if (base !== 'eighth' && base !== 'sixteenth' && base !== 'thirty-second') continue;
+                const dist = Math.abs(pitchToMidi((el as Note).pitch) - middleLineMidi);
+                if (dist > measureMaxDist) {
+                  measureMaxDist = dist;
+                  measureStemDir = pitchToMidi((el as Note).pitch) < middleLineMidi ? Stem.UP : Stem.DOWN;
+                }
+              }
+
+              // Break beams at beat boundaries (standard engraving rule).
+              // Compound time (6/8, 9/8, 12/8): group by dotted-quarter = 1.5 beats.
+              // Simple time: one group per beat so musicians can see beat structure clearly.
+              const isCompound = effBPM % 3 === 0 && effBPM > 3 && effBeatType === 8;
+              const beatUnit = 4 / effBeatType; // one beat in quarter-note units
+              const beamBeatSize = isCompound ? 1.5 : beatUnit;
+              const beatGroupOf = (pos: number) => Math.floor(pos / beamBeatSize + 1e-9);
 
               const flushBeamGroup = () => {
                 if (beamGroup.length >= 2) {
+                  beamGroup.forEach((sn) => sn.setStemDirection(measureStemDir));
                   try { beams.push(new Beam(beamGroup)); } catch (_) { /* skip */ }
                 }
                 beamGroup = [];
@@ -596,8 +632,9 @@ export class VexFlowRenderer {
 
               for (let i = 0; i < voice.notes.length; i++) {
                 const element = voice.notes[i];
+                const elementBeats = durationToBeats(element.duration);
                 const tickableIdx = tickableDataIndices.indexOf(i);
-                if (tickableIdx < 0) { flushBeamGroup(); continue; }
+                if (tickableIdx < 0) { flushBeamGroup(); currentBeat += elementBeats; continue; }
 
                 const staveNote = tickables[tickableIdx];
 
@@ -609,6 +646,11 @@ export class VexFlowRenderer {
                   const isBeamable = base === 'eighth' || base === 'sixteenth' || base === 'thirty-second';
 
                   if (isBeamable) {
+                    // Break beam at beat boundaries
+                    if (beamGroup.length > 0 && beatGroupOf(currentBeat) !== beatGroupOf(beamGroupStartBeat)) {
+                      flushBeamGroup();
+                    }
+                    if (beamGroup.length === 0) beamGroupStartBeat = currentBeat;
                     beamGroup.push(staveNote);
                   } else {
                     flushBeamGroup();
@@ -617,6 +659,7 @@ export class VexFlowRenderer {
                   // Rest breaks the beam group
                   flushBeamGroup();
                 }
+                currentBeat += elementBeats;
               }
               flushBeamGroup(); // flush any trailing group
             }
@@ -929,42 +972,74 @@ export class VexFlowRenderer {
         // incomplete slurs are engraving errors and we don't draw a half-arc here.
       }
 
-      // ── 4. Draw measure numbers (only on first staff) ─────────────────────
-      if (showMeasureNumbers && visibleRowIndex === 0) {
+      // ── 4. Draw measure numbers and tempo markings (only on first staff) ───
+      if (visibleRowIndex === 0) {
+        const refMeasures = composition.staves[0]?.measures ?? [];
         staff.measures.forEach((measure, measureIndex) => {
           const { x: mx, width: mw } = layout[measureIndex] ?? {
             x: LEFT_MARGIN + CLEF_WIDTH + measureIndex * MEASURE_WIDTH,
             width: MEASURE_WIDTH,
           };
           
-          // Calculate measure number (accounting for anacrusis)
-          let measureNumber: number;
-          if (composition.anacrusis && measureIndex === 0) {
-            // Pickup measure is usually not numbered, or numbered as 0
-            // We'll skip it or show it as a special marker
-            return; // Skip numbering the pickup measure
-          } else {
-            // Regular measures: if anacrusis exists, subtract 1 from index
-            measureNumber = composition.anacrusis ? measureIndex : measureIndex + 1;
+          // ── Measure numbers ───────────────────────────────────────────────────
+          if (showMeasureNumbers) {
+            // Calculate measure number (accounting for anacrusis)
+            let measureNumber: number;
+            if (composition.anacrusis && measureIndex === 0) {
+              // Pickup measure is usually not numbered, or numbered as 0
+              // We'll skip it or show it as a special marker
+              // Skip numbering the pickup measure
+            } else {
+              // Regular measures: if anacrusis exists, subtract 1 from index
+              measureNumber = composition.anacrusis ? measureIndex : measureIndex + 1;
+
+              // Position number at the start (left edge) of the measure
+              const numberX = mx + 5; // Small offset from the left edge
+              
+              // Draw measure number using SVG text element
+              const svgElement = this.getSvgElement();
+              if (svgElement) {
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', String(numberX));
+                text.setAttribute('y', String(measureNumberY));
+                text.setAttribute('font-family', 'Arial');
+                text.setAttribute('font-size', '11');
+                text.setAttribute('fill', '#333');
+                text.setAttribute('text-anchor', 'start'); // Left alignment (start of measure)
+                text.setAttribute('dominant-baseline', 'text-bottom'); // Bottom baseline
+                text.textContent = String(measureNumber);
+                svgElement.appendChild(text);
+              }
+            }
           }
 
-          // Position number at the start (left edge) of the measure
-          const numberX = mx + 5; // Small offset from the left edge
+          // ── Tempo markings ───────────────────────────────────────────────────
+          // Show tempo marking when this measure introduces a tempo change
+          const prevTempo = measureIndex > 0
+            ? effectiveTempo(refMeasures, measureIndex - 1, composition.tempo)
+            : composition.tempo;
+          const currentTempo = effectiveTempo(refMeasures, measureIndex, composition.tempo);
           
-          // Draw measure number using SVG text element
-          // VexFlow SVG context doesn't have setTextAlign/setTextBaseline
-          const svgElement = this.getSvgElement();
-          if (svgElement) {
-            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            text.setAttribute('x', String(numberX));
-            text.setAttribute('y', String(measureNumberY));
-            text.setAttribute('font-family', 'Arial');
-            text.setAttribute('font-size', '11');
-            text.setAttribute('fill', '#333');
-            text.setAttribute('text-anchor', 'start'); // Left alignment (start of measure)
-            text.setAttribute('dominant-baseline', 'text-bottom'); // Bottom baseline
-            text.textContent = String(measureNumber);
-            svgElement.appendChild(text);
+          if (currentTempo !== prevTempo) {
+            const svgElement = this.getSvgElement();
+            if (svgElement) {
+              // Position tempo marking above the staff, centered in the measure
+              const tempoX = mx + mw / 2;
+              const tempoY = measureNumberY - 8; // Slightly above measure numbers
+              
+              // Draw quarter note symbol + "= [tempo]"
+              const tempoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+              tempoText.setAttribute('x', String(tempoX));
+              tempoText.setAttribute('y', String(tempoY));
+              tempoText.setAttribute('font-family', 'Arial');
+              tempoText.setAttribute('font-size', '12');
+              tempoText.setAttribute('fill', '#333');
+              tempoText.setAttribute('text-anchor', 'middle'); // Center alignment
+              tempoText.setAttribute('dominant-baseline', 'text-bottom');
+              // Use Unicode quarter note (♩) or fallback to "♩"
+              tempoText.textContent = `♩ = ${currentTempo}`;
+              svgElement.appendChild(tempoText);
+            }
           }
         });
       }
@@ -1013,11 +1088,11 @@ export class VexFlowRenderer {
   private getStemDirection(pitch: string, clef: 'treble' | 'bass' | 'alto' | 'tenor'): number {
     const midi = pitchToMidi(pitch);
     
-    // Middle line MIDI values
-    const middleLineMidi = clef === 'treble' ? 71 : // B4 for treble
-                          clef === 'bass' ? 50 :    // D3 for bass
-                          clef === 'alto' ? 67 :     // G4 for alto (approximate)
-                          69;                        // A4 for tenor (approximate)
+    // Middle line (staff line 3) MIDI values
+    const middleLineMidi = clef === 'treble' ? 71  // B4
+                         : clef === 'bass'   ? 50  // D3
+                         : clef === 'alto'   ? 60  // C4
+                         : 57;                     // A3 (tenor)
     
     // Notes on or above middle line: stem down, below: stem up
     // VexFlow uses Stem.DOWN (1) and Stem.UP (-1)
@@ -1323,9 +1398,40 @@ export class VexFlowRenderer {
               const beams: Beam[] = [];
               if (voice) {
                 let beamGroup: any[] = [];
+                let currentBeat = 0;
+                let beamGroupStartBeat = 0;
+
+                // Middle-line MIDI for stem-direction rule (staff line 3)
+                const printMiddleLineMidi = staff.clef === 'treble' ? 71  // B4
+                                          : staff.clef === 'bass'   ? 50  // D3
+                                          : staff.clef === 'alto'   ? 60  // C4
+                                          : 57;                           // A3 (tenor)
+
+                // Pre-scan: one stem direction for ALL beam groups in this measure
+                // so adjacent beat-groups never flip up/down independently.
+                let printMeasureMaxDist = -1;
+                let printMeasureStemDir = Stem.DOWN;
+                for (const el of voice.notes) {
+                  if (!('pitch' in el)) continue;
+                  const base = (el as Note).duration.startsWith('dotted-')
+                    ? (el as Note).duration.replace('dotted-', '')
+                    : (el as Note).duration;
+                  if (base !== 'eighth' && base !== 'sixteenth' && base !== 'thirty-second') continue;
+                  const dist = Math.abs(pitchToMidi((el as Note).pitch) - printMiddleLineMidi);
+                  if (dist > printMeasureMaxDist) {
+                    printMeasureMaxDist = dist;
+                    printMeasureStemDir = pitchToMidi((el as Note).pitch) < printMiddleLineMidi ? Stem.UP : Stem.DOWN;
+                  }
+                }
+
+                const isCompound = beatsPerMeasure % 3 === 0 && beatsPerMeasure > 3 && beatTypeValue === 8;
+                const beatUnit = 4 / beatTypeValue;
+                const beamBeatSize = isCompound ? 1.5 : beatUnit;
+                const beatGroupOf = (pos: number) => Math.floor(pos / beamBeatSize + 1e-9);
 
                 const flushBeamGroup = () => {
                   if (beamGroup.length >= 2) {
+                    beamGroup.forEach((sn) => sn.setStemDirection(printMeasureStemDir));
                     try { beams.push(new Beam(beamGroup)); } catch (_) { /* skip */ }
                   }
                   beamGroup = [];
@@ -1333,8 +1439,9 @@ export class VexFlowRenderer {
 
                 for (let i = 0; i < voice.notes.length; i++) {
                   const element = voice.notes[i];
+                  const elementBeats = durationToBeats(element.duration);
                   const tickableIdx = tickableDataIndices.indexOf(i);
-                  if (tickableIdx < 0) { flushBeamGroup(); continue; }
+                  if (tickableIdx < 0) { flushBeamGroup(); currentBeat += elementBeats; continue; }
 
                   const staveNote = tickables[tickableIdx];
 
@@ -1347,6 +1454,10 @@ export class VexFlowRenderer {
                       base === 'eighth' || base === 'sixteenth' || base === 'thirty-second';
 
                     if (isBeamable) {
+                      if (beamGroup.length > 0 && beatGroupOf(currentBeat) !== beatGroupOf(beamGroupStartBeat)) {
+                        flushBeamGroup();
+                      }
+                      if (beamGroup.length === 0) beamGroupStartBeat = currentBeat;
                       beamGroup.push(staveNote);
                     } else {
                       flushBeamGroup();
@@ -1355,6 +1466,7 @@ export class VexFlowRenderer {
                     // Rest breaks the beam group
                     flushBeamGroup();
                   }
+                  currentBeat += elementBeats;
                 }
                 flushBeamGroup(); // flush any trailing group
               }
@@ -1505,10 +1617,11 @@ export class VexFlowRenderer {
             });
           }
 
-          // ── Measure numbers (first staff only, every measure) ─────────────
+          // ── Measure numbers and tempo markings (first staff only) ─────────
           if (visibleRowIdx === 0 && svgEl) {
             const isPickup = composition.anacrusis && mIdx === 0;
             if (!isPickup) {
+              // Measure number
               const measNum = composition.anacrusis ? mIdx : mIdx + 1;
               const numTxt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
               numTxt.setAttribute('x', String(measX + 3));
@@ -1519,6 +1632,29 @@ export class VexFlowRenderer {
               numTxt.setAttribute('text-anchor', 'start');
               numTxt.textContent = String(measNum);
               svgEl.appendChild(numTxt);
+            }
+
+            // Tempo marking (if this measure introduces a tempo change)
+            const refMeasures = composition.staves[0]?.measures ?? [];
+            const prevTempo = mIdx > 0
+              ? effectiveTempo(refMeasures, mIdx - 1, composition.tempo)
+              : composition.tempo;
+            const currentTempo = effectiveTempo(refMeasures, mIdx, composition.tempo);
+            
+            if (currentTempo !== prevTempo) {
+              // Position tempo marking centered in the measure, above the staff
+              const tempoX = measX + measWidth / 2;
+              const tempoY = staveY + STAFF_LINE_OFFSET - 14; // Above measure numbers
+              
+              const tempoTxt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+              tempoTxt.setAttribute('x', String(tempoX));
+              tempoTxt.setAttribute('y', String(tempoY));
+              tempoTxt.setAttribute('font-family', 'Arial');
+              tempoTxt.setAttribute('font-size', '11');
+              tempoTxt.setAttribute('fill', '#444');
+              tempoTxt.setAttribute('text-anchor', 'middle');
+              tempoTxt.textContent = `♩ = ${currentTempo}`;
+              svgEl.appendChild(tempoTxt);
             }
           }
 

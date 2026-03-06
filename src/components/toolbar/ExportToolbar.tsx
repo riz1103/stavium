@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { useScoreStore } from '../../app/store/scoreStore';
 import { exportToMIDI, exportToPDF } from '../../utils/exportUtils';
 
-export const ExportToolbar = () => {
+interface ExportToolbarProps {
+  isReadOnly?: boolean;
+}
+
+export const ExportToolbar = ({ isReadOnly = false }: ExportToolbarProps) => {
   const composition = useScoreStore((state) => state.composition);
   const [exporting, setExporting] = useState(false);
 

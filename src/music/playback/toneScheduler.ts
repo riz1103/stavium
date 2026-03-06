@@ -65,6 +65,24 @@ interface ScheduledNote {
   endTime: number;   // AudioContext time (seconds)
 }
 
+/** A pending audio event that will be materialized into an AudioBufferSourceNode
+ *  just-in-time (within a lookahead window) rather than all at once. */
+interface PendingAudioEvent {
+  /** 'sf' = soundfont player, 'fallback' = Tone.js PolySynth */
+  type: 'sf' | 'fallback';
+  midi: number;
+  freq: number;       // only used for fallback
+  startTime: number;  // AudioContext absolute time
+  playDuration: number;
+  gain: number;
+  instrument: string;
+  shouldLoop: boolean;
+  loopStart: number;
+  staffIndex: number;
+  /** noteTime relative to Transport (only used for fallback) */
+  transportTime: number;
+}
+
 export class ToneScheduler {
   /** Cache of loaded soundfont players, keyed by instrument name */
   private sfPlayers: Map<string, SoundfontPlayer> = new Map();
@@ -73,7 +91,7 @@ export class ToneScheduler {
   /** Per-staff fallback synths (for playback with individual volume control) */
   private staffFallbackSynths: Map<number, Tone.PolySynth> = new Map();
   private isPlaying = false;
-  /** All scheduled notes with their timing info */
+  /** All scheduled notes with their timing info (for highlights) */
   private scheduledNotes: ScheduledNote[] = [];
   /** AudioBufferSourceNodes created by manual crossfade sustain (for stop/cleanup). */
   private crossfadeNodes: AudioBufferSourceNode[] = [];
@@ -85,6 +103,14 @@ export class ToneScheduler {
   private playbackStartTime: number = 0;
   /** The AudioContext time when all notes will have finished */
   private playbackEndTime: number = 0;
+
+  // ── JIT audio scheduling ─────────────────────────────────────────────────
+  /** Queue of audio events not yet sent to the audio graph. Sorted by startTime. */
+  private pendingAudio: PendingAudioEvent[] = [];
+  /** Index into pendingAudio – everything before this has already been dispatched. */
+  private pendingAudioCursor: number = 0;
+  /** How far ahead (seconds) of AudioContext.currentTime we materialize nodes. */
+  private static readonly LOOKAHEAD_SEC = 3.0;
 
   // ── AudioContext ──────────────────────────────────────────────────────────
   /** Share Tone.js's underlying AudioContext so timing is in sync */
@@ -399,8 +425,10 @@ export class ToneScheduler {
     const ac = this.getAC();
     if (ac.state === 'suspended') await ac.resume();
 
-    // Clear previous scheduled notes and any lingering crossfade sources
+    // Clear previous scheduled notes, pending audio queue, and lingering crossfade sources
     this.scheduledNotes = [];
+    this.pendingAudio = [];
+    this.pendingAudioCursor = 0;
     this.crossfadeNodes = [];
     this.playbackStartTime = ac.currentTime;
 
@@ -409,6 +437,32 @@ export class ToneScheduler {
     
     // Use playback tempo if provided, otherwise use composition tempo
     const effectiveTempo = playbackTempo ?? composition.tempo;
+
+    // Normalize requested playback range so stale/out-of-bounds values
+    // never result in a silent "played nothing" run.
+    const maxMeasures = composition.staves.reduce(
+      (mx, staff) => Math.max(mx, staff.measures.length),
+      0
+    );
+    const clampMeasure = (value: number | null | undefined): number | null => {
+      if (value === null || value === undefined || !Number.isFinite(value)) return null;
+      if (maxMeasures <= 0) return null;
+      const n = Math.floor(value);
+      if (n < 0) return 0;
+      if (n >= maxMeasures) return maxMeasures - 1;
+      return n;
+    };
+    let normalizedStart = clampMeasure(startMeasure ?? null);
+    let normalizedEnd = clampMeasure(endMeasure ?? null);
+    if (
+      normalizedStart !== null &&
+      normalizedEnd !== null &&
+      normalizedEnd < normalizedStart
+    ) {
+      const temp = normalizedStart;
+      normalizedStart = normalizedEnd;
+      normalizedEnd = temp;
+    }
 
     // Collect all instruments (composition + playback overrides) that need to be loaded
     const instrumentsToLoad = new Set<string>();
@@ -552,8 +606,8 @@ export class ToneScheduler {
       let currentMeasureStart = 0; // in seconds, relative to playback start
       
       // Determine measure range to play
-      const startIdx = startMeasure !== null && startMeasure !== undefined ? startMeasure : 0;
-      const endIdx = endMeasure !== null && endMeasure !== undefined ? endMeasure : staff.measures.length - 1;
+      const startIdx = normalizedStart ?? 0;
+      const endIdx = normalizedEnd ?? (staff.measures.length - 1);
 
       staff.measures.forEach((measure, measureIndex) => {
         // Skip measures outside the playback range
@@ -699,48 +753,27 @@ export class ToneScheduler {
                 ? totalDurationSec * 1.05 // 5% extension for legato
                 : totalDurationSec;
               
-              // Skip playback if muted
+              // Queue audio event for JIT scheduling (unless muted)
               if (!isMuted) {
-                if (sfPlayer) {
-                  // Build loop options:
-                  //  - Decay instruments (piano, guitar): no loop — let the sample
-                  //    decay naturally.  Looping would re-trigger the attack transient.
-                  //  - Sustaining instruments (organ, strings…): loop from loopStart
-                  //    so only the sustain body repeats; the attack transient plays
-                  //    exactly once at note-on.
-                  const shouldLoop = !LOOP_DISABLED.has(effectiveInstrument);
-                  const loopStart = LOOP_START[effectiveInstrument] ?? 0.08;
+                const shouldLoop = !LOOP_DISABLED.has(effectiveInstrument);
+                const loopStartVal = LOOP_START[effectiveInstrument] ?? 0.08;
+                const freq = 440 * Math.pow(2, (midi - 69) / 12);
 
-                  // Long sustains on loop-enabled instruments: prefer manual crossfade
-                  // to reduce seam artifacts. If anything fails, fallback immediately
-                  // to the built-in soundfont loop path (no audio dropouts).
-                  let scheduled = false;
-                  if (shouldLoop && playDuration >= 1.6) {
-                    scheduled = this.scheduleCrossfadeSustain(
-                      sfPlayer,
-                      midi,
-                      startTime,
-                      playDuration,
-                      gain,
-                      loopStart
-                    );
-                  }
+                this.pendingAudio.push({
+                  type: sfPlayer ? 'sf' : 'fallback',
+                  midi,
+                  freq,
+                  startTime,
+                  playDuration,
+                  gain,
+                  instrument: effectiveInstrument,
+                  shouldLoop,
+                  loopStart: loopStartVal,
+                  staffIndex,
+                  transportTime: noteTime,
+                });
 
-                  if (!scheduled) {
-                    const loopOpts = shouldLoop ? { loop: true, loopStart } : {};
-                    sfPlayer.start(
-                      String(midi) as unknown as Parameters<SoundfontPlayer['start']>[0],
-                      startTime,
-                      { duration: playDuration, gain, ...loopOpts } as any
-                    );
-                  }
-                } else if (fallback) {
-                  const freq = 440 * Math.pow(2, (midi - 69) / 12);
-                  Tone.getTransport().schedule((audioTime) => {
-                    fallback.triggerAttackRelease(freq, playDuration, audioTime);
-                  }, noteTime);
-                  hasFallbackNotes = true;
-                }
+                if (!sfPlayer) hasFallbackNotes = true;
               }
             }
 
@@ -753,9 +786,20 @@ export class ToneScheduler {
       });
     });
 
+    // Sort pending audio by start time for efficient JIT draining
+    this.pendingAudio.sort((a, b) => a.startTime - b.startTime);
+    this.pendingAudioCursor = 0;
+
     // Start Tone Transport only if fallback synths are used
     if (hasFallbackNotes) {
       Tone.getTransport().start();
+    }
+
+    // If a constrained range ended up scheduling no notes, retry full range once.
+    if (this.scheduledNotes.length === 0 && (normalizedStart !== null || normalizedEnd !== null)) {
+      console.warn('[Playback] Selected range produced no playable notes. Retrying full range.');
+      await this.playComposition(composition, playbackTempo, null, null);
+      return;
     }
 
     // Calculate the time when all notes will have finished
@@ -763,8 +807,59 @@ export class ToneScheduler {
       ? Math.max(...this.scheduledNotes.map((n) => n.endTime))
       : now;
 
+    // Materialize the first batch of audio nodes before starting highlights
+    this.drainPendingAudio();
+
     this.isPlaying = true;
     this.startHighlightUpdates();
+  }
+
+  // ── JIT audio node creation ───────────────────────────────────────────────
+  /**
+   * Materialize pending audio events whose startTime falls within
+   * the lookahead window (currentTime + LOOKAHEAD_SEC).
+   * Called once immediately when playback starts and then every animation frame.
+   */
+  private drainPendingAudio(): void {
+    const ac = this.getAC();
+    const horizon = ac.currentTime + ToneScheduler.LOOKAHEAD_SEC;
+
+    while (this.pendingAudioCursor < this.pendingAudio.length) {
+      const ev = this.pendingAudio[this.pendingAudioCursor];
+      if (ev.startTime > horizon) break; // remaining events are later → stop
+
+      this.pendingAudioCursor++;
+
+      if (ev.type === 'sf') {
+        const sfPlayer = this.sfPlayers.get(ev.instrument) ?? null;
+        if (!sfPlayer) continue;
+
+        // Long sustains on loop-enabled instruments: prefer manual crossfade
+        let scheduled = false;
+        if (ev.shouldLoop && ev.playDuration >= 1.6) {
+          scheduled = this.scheduleCrossfadeSustain(
+            sfPlayer, ev.midi, ev.startTime, ev.playDuration, ev.gain, ev.loopStart
+          );
+        }
+
+        if (!scheduled) {
+          const loopOpts = ev.shouldLoop ? { loop: true, loopStart: ev.loopStart } : {};
+          sfPlayer.start(
+            String(ev.midi) as unknown as Parameters<SoundfontPlayer['start']>[0],
+            ev.startTime,
+            { duration: ev.playDuration, gain: ev.gain, ...loopOpts } as any
+          );
+        }
+      } else {
+        // Fallback Tone.js synth
+        const fallback = this.staffFallbackSynths.get(ev.staffIndex);
+        if (fallback) {
+          Tone.getTransport().schedule((audioTime) => {
+            fallback.triggerAttackRelease(ev.freq, ev.playDuration, audioTime);
+          }, ev.transportTime);
+        }
+      }
+    }
   }
 
   // ── Highlight updates ──────────────────────────────────────────────────────
@@ -777,6 +872,9 @@ export class ToneScheduler {
         usePlaybackStore.getState().clearPlayingNotes();
         return;
       }
+
+      // Materialize upcoming audio nodes (JIT scheduling)
+      this.drainPendingAudio();
 
       const currentTime = ac.currentTime;
 
@@ -839,6 +937,9 @@ export class ToneScheduler {
   stop(): void {
     this.isPlaying = false;
     this.stopHighlightUpdates();
+    // Clear JIT pending queue so no more audio nodes will be created
+    this.pendingAudio = [];
+    this.pendingAudioCursor = 0;
     // If the AudioContext was suspended (paused), resume it first so stop commands go through
     const ac = this.getAC();
     if (ac.state === 'suspended') {
