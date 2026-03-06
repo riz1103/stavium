@@ -47,6 +47,9 @@ export const EditorPage = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>('notes');
   const [toolbarOpen, setToolbarOpen] = useState(true);
+  // When first save creates a new doc, we navigate to /editor/:id.
+  // Skip the immediate reload so we stay in current editing state.
+  const skipNextIdLoadRef = useRef(false);
   // Loaded compositions start in read-only mode; new compositions start in edit mode
   const [isReadOnly, setIsReadOnly] = useState(!!id);
 
@@ -95,6 +98,11 @@ export const EditorPage = () => {
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
     if (id) {
+      if (skipNextIdLoadRef.current) {
+        skipNextIdLoadRef.current = false;
+        setLoading(false);
+        return;
+      }
       loadComposition(id);
     } else {
       resetComposition();
@@ -132,11 +140,20 @@ export const EditorPage = () => {
       // Preserve the original owner's userId so the document's userId field never changes.
       // Pass the current user's uid separately as modifiedBy so we always know who last saved.
       const ownerId = composition.userId || user.uid;
-      await saveComposition(
+      const savedId = await saveComposition(
         { ...composition, id: id || undefined, title, userId: ownerId },
         ownerId,
         user.uid   // modifiedBy — the actual person hitting Save
       );
+
+      // First save from /editor (new composition): move to /editor/:id so
+      // subsequent saves update this same composition instead of creating new ones.
+      if (!id && savedId) {
+        skipNextIdLoadRef.current = true;
+        setComposition({ ...composition, id: savedId, title, userId: ownerId });
+        navigate(`/editor/${savedId}`, { replace: true });
+      }
+
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (error) {
