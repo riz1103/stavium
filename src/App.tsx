@@ -7,6 +7,7 @@ import { LandingPage } from './pages/LandingPage';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { EditorPage } from './pages/EditorPage';
+import { sharedScheduler, isSoundfontCacheWarm } from './music/playback/toneScheduler';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AnimatedRoutes
@@ -41,6 +42,16 @@ function App() {
     const unsubscribe = onAuthChange((u) => {
       setUser(u);
       setLoading(false);
+
+      // ── Eager soundfont warm-up for returning users ───────────────────────
+      // If the user is already logged in (Firebase restored their session) AND
+      // we know the browser HTTP cache is warm from a previous full preload,
+      // kick off a background preload immediately — before they even reach the
+      // Dashboard — so instruments are in sfPlayers by the time they open a
+      // composition.
+      if (u && isSoundfontCacheWarm()) {
+        sharedScheduler.preloadAllSoundfonts().catch(() => {});
+      }
     });
     return () => unsubscribe();
   }, [setUser, setLoading]);

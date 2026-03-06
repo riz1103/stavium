@@ -17,12 +17,21 @@ export type Accidental = 'sharp' | 'flat' | 'natural' | null;
 
 export type Pitch = string; // e.g., "C4", "E#5", "Bb3"
 
+/** Controls which side a slur/tie arc curves toward. */
+export type SlurDirection = 'auto' | 'above' | 'below';
+
 export interface Note {
   pitch: Pitch;
   duration: NoteDuration;
   accidental?: Accidental;
   tie?: boolean;
   slur?: boolean;
+  /** Override the automatic arc direction for the SLUR arc this note belongs to. */
+  slurDirection?: SlurDirection;
+  /** Override the automatic arc direction for the TIE arc on this specific note.
+   *  Intentionally separate from slurDirection so a tie inside a slur phrase
+   *  can have its own independent direction. */
+  tieDirection?: SlurDirection;
   articulation?: string;
   dynamic?: string;
 }

@@ -190,15 +190,63 @@ html, body {
   flex-wrap: wrap;
 }
 
+/* Section label chip — visible pill so users can scan sections at a glance */
 .sv-toolbar-label {
-  font-size: 0.6875rem;
-  font-weight: 600;
+  font-size: 0.625rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--sv-text-dim);
-  margin-right: 2px;
+  letter-spacing: 0.07em;
+  color: var(--sv-text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--sv-border-lt);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-right: 3px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
+
+/* ── Collapsible toolbar section wrappers ───────────────────────────────── */
+/* Each conceptual row (Notes, Structure, Score, Expression) gets its own    */
+/* colored header so users can zone-in quickly and collapse what they don't  */
+/* need.                                                                      */
+
+.sv-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  width: 100%;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  border: none;
+  background: transparent;
+  transition: background 0.12s;
+  text-align: left;
+}
+.sv-section-header:hover { background: rgba(255,255,255,0.03); }
+
+/* Per-section accent colors — header text + toolbar-label chip tint */
+
+/* Notes & Rests — cyan */
+.sv-section-notes .sv-section-header          { color: var(--sv-cyan); }
+.sv-section-notes .sv-toolbar-label           { color: var(--sv-cyan);  border-color: rgba(0,212,245,0.30); background: rgba(0,212,245,0.07); }
+
+/* Structure — blue */
+.sv-section-structure .sv-section-header      { color: #60a5fa; }
+.sv-section-structure .sv-toolbar-label       { color: #93c5fd; border-color: rgba(96,165,250,0.30); background: rgba(96,165,250,0.07); }
+
+/* Score Settings — emerald */
+.sv-section-score .sv-section-header          { color: #34d399; }
+.sv-section-score .sv-toolbar-label           { color: #6ee7b7; border-color: rgba(52,211,153,0.30); background: rgba(52,211,153,0.07); }
+
+/* Expression — purple (only visible when a note is selected) */
+.sv-section-expression .sv-section-header     { color: #c084fc; }
+.sv-section-expression .sv-toolbar-label      { color: #d8b4fe; border-color: rgba(192,132,252,0.30); background: rgba(192,132,252,0.07); }
 
 /* ── Form controls ───────────────────────────────────────────────────────── */
 .sv-input, .sv-select {

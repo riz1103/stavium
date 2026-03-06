@@ -4,6 +4,7 @@ import { useUserStore } from '../app/store/userStore';
 import { getUserCompositions, deleteComposition } from '../services/compositionService';
 import { Composition } from '../types/music';
 import { logout } from '../services/authService';
+import { sharedScheduler } from '../music/playback/toneScheduler';
 
 type Tab = 'mine' | 'shared' | 'public';
 
@@ -48,6 +49,12 @@ export const Dashboard = () => {
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
     loadCompositions();
+    // Preload all soundfonts in the background (piano first, then the rest).
+    // The Google sign-in click counts as a user gesture so the AudioContext
+    // starts immediately. Once complete, a localStorage timestamp is written so
+    // subsequent app opens know the browser HTTP cache is warm and can skip
+    // waiting for the user to reach this page before starting preloads.
+    sharedScheduler.preloadAllSoundfonts().catch(() => {/* silently ignore */});
   }, [user, navigate]);
 
   // Reset avatar image error when photoURL changes

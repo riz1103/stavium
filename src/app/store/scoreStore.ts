@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel } from '../../types/music';
+import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection } from '../../types/music';
 
 interface ScoreState {
   composition: Composition | null;
@@ -18,6 +18,21 @@ interface ScoreState {
     voiceIndex: number,
     noteIndex: number,
     note: Partial<Note>
+  ) => void;
+  /**
+   * Set slurDirection on the tie/slur chain that contains the given note.
+   *
+   * @param isTieContext  When true the user is acting on a tie (not the outer
+   *   slur), so only THIS note's slurDirection is updated.  When false the
+   *   entire slur chain is updated.  Pass `wouldBeTie` from TieSlurToolbar.
+   */
+  setChainSlurDirection: (
+    staffIndex: number,
+    measureIndex: number,
+    voiceIndex: number,
+    noteIndex: number,
+    direction: SlurDirection,
+    isTieContext?: boolean
   ) => void;
   addMeasure: (staffIndex: number) => void;
   removeMeasure: (staffIndex: number, measureIndex: number) => void;
@@ -338,6 +353,92 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         ...composition,
         staves: newStaves,
       },
+    });
+  },
+
+  setChainSlurDirection: (staffIndex, measureIndex, voiceIndex, noteIndex, direction, isTieContext = false) => {
+    const { composition } = get();
+    if (!composition) return;
+    const staff = composition.staves[staffIndex];
+    if (!staff) return;
+
+    // When the user is acting on a TIE (isTieContext=true), update ONLY this
+    // note's tieDirection — a completely separate field from slurDirection.
+    // This guarantees the outer slur arc is never touched, even when the note
+    // has both tie=true and slur=true.
+    if (isTieContext) {
+      saveToHistory(composition);
+      const newComp: Composition = JSON.parse(JSON.stringify(composition));
+      const el = newComp.staves[staffIndex].measures[measureIndex]?.voices[voiceIndex]?.notes[noteIndex];
+      if (el && 'pitch' in el) {
+        (el as Note).tieDirection = direction === 'auto' ? undefined : direction;
+      }
+      set({ composition: newComp, canUndo: historyIndex >= 0, canRedo: false });
+      return;
+    }
+
+    // Helper: get note element at a position
+    const getNote = (mIdx: number, nIdx: number): Note | null => {
+      const el = staff.measures[mIdx]?.voices[voiceIndex]?.notes[nIdx];
+      return el && 'pitch' in el ? (el as Note) : null;
+    };
+
+    // Walk BACKWARD to find the chain start (first note that has slur or tie,
+    // preceded by a note that does NOT have slur or tie).
+    let startM = measureIndex;
+    let startN = noteIndex;
+    while (true) {
+      let prevM = startM;
+      let prevN = startN - 1;
+      if (prevN < 0) {
+        prevM = startM - 1;
+        if (prevM < 0) break;
+        const prevVoice = staff.measures[prevM]?.voices[voiceIndex];
+        if (!prevVoice) break;
+        prevN = prevVoice.notes.length - 1;
+      }
+      const prev = getNote(prevM, prevN);
+      if (!prev || (!prev.tie && !prev.slur)) break;
+      startM = prevM;
+      startN = prevN;
+    }
+
+    // Walk FORWARD from start, collecting every note with slur or tie
+    const chain: { mIdx: number; nIdx: number }[] = [];
+    let mIdx = startM;
+    let nIdx = startN;
+    while (true) {
+      const note = getNote(mIdx, nIdx);
+      if (!note || (!note.tie && !note.slur)) break;
+      chain.push({ mIdx, nIdx });
+      // Advance to next note
+      const voice = staff.measures[mIdx]?.voices[voiceIndex];
+      if (!voice) break;
+      nIdx++;
+      if (nIdx >= voice.notes.length) {
+        mIdx++;
+        nIdx = 0;
+        if (mIdx >= staff.measures.length) break;
+      }
+    }
+
+    if (chain.length === 0) return;
+
+    saveToHistory(composition);
+
+    // Deep-clone and apply direction to all chain members
+    const newComp: Composition = JSON.parse(JSON.stringify(composition));
+    chain.forEach(({ mIdx: mi, nIdx: ni }) => {
+      const el = newComp.staves[staffIndex].measures[mi]?.voices[voiceIndex]?.notes[ni];
+      if (el && 'pitch' in el) {
+        (el as Note).slurDirection = direction === 'auto' ? undefined : direction;
+      }
+    });
+
+    set({
+      composition: newComp,
+      canUndo: historyIndex >= 0,
+      canRedo: false,
     });
   },
 

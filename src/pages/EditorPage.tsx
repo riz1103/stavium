@@ -50,6 +50,22 @@ export const EditorPage = () => {
   // Loaded compositions start in read-only mode; new compositions start in edit mode
   const [isReadOnly, setIsReadOnly] = useState(!!id);
 
+  // Collapsible toolbar sections — persisted in localStorage
+  const [collapsedRows, setCollapsedRows] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('stavium_toolbar_sections');
+      return new Set(stored ? JSON.parse(stored) : []);
+    } catch { return new Set(); }
+  });
+  const toggleRow = (id: string) => {
+    setCollapsedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem('stavium_toolbar_sections', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
+
   // Derived permission flags (recomputed whenever composition or user changes)
   const isOwner = !composition?.userId || composition.userId === user?.uid;
   // Non-owners with view-only permission can never switch to edit mode
@@ -142,6 +158,32 @@ export const EditorPage = () => {
     );
   }
 
+  /* ── Helpers ──────────────────────────────────────────────────────────── */
+  const SectionHeader = ({
+    id, icon, label, pulse,
+  }: { id: string; icon: string; label: string; pulse?: boolean }) => (
+    <button
+      className="sv-section-header"
+      onClick={() => toggleRow(id)}
+      title={collapsedRows.has(id) ? `Expand ${label}` : `Collapse ${label}`}
+    >
+      <span className="text-sm leading-none">{icon}</span>
+      <span>{label}</span>
+      {pulse && (
+        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80 animate-pulse ml-0.5"
+              title="Active — note selected" />
+      )}
+      <svg
+        className={`w-3 h-3 ml-auto flex-shrink-0 transition-transform duration-150 ${collapsedRows.has(id) ? '-rotate-90' : ''}`}
+        fill="none" stroke="currentColor" viewBox="0 0 24 24"
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+      </svg>
+    </button>
+  );
+
+  const Sep = () => <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />;
+
   /* ── Desktop toolbar rows ─────────────────────────────────────────────── */
   const desktopToolbar = (
     <div className="hidden md:flex flex-col bg-sv-card border-b border-sv-border">
@@ -155,60 +197,80 @@ export const EditorPage = () => {
             </svg>
             View Only
           </div>
-          <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+          <Sep />
           <CompositionControls isReadOnly={true} />
-          <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+          <Sep />
           <InstrumentSelector isReadOnly={true} />
-          <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+          <Sep />
           <StaffVolumeControls />
-          <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
+          <Sep />
           <ExportToolbar />
         </div>
       ) : (
         <>
-          {/* Row 1: Notes + Rests + UndoRedo */}
-          <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll border-b border-sv-border">
-            <NoteToolbar />
-            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-            <RestToolbar />
-            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-            <UndoRedoToolbar />
+          {/* ── Section 1: Notes & Rests ──────────────────────────────────── */}
+          <div className="sv-section-notes border-b border-sv-border">
+            <SectionHeader id="notes" icon="♩" label="Notes & Rests" />
+            {!collapsedRows.has('notes') && (
+              <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+                <NoteToolbar />
+                <Sep />
+                <RestToolbar />
+                <Sep />
+                <UndoRedoToolbar />
+              </div>
+            )}
           </div>
 
-          {/* Row 2: Staff / Measure / Clef / Instrument + Export */}
-          <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll border-b border-sv-border">
-            <StaffControls />
-            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-            <MeasureControls />
-            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-            <ClefSelector />
-            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-            <InstrumentSelector isReadOnly={false} />
-            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-            <MeasurePropertiesPanel />
-            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-            <ExportToolbar />
+          {/* ── Section 2: Structure ─────────────────────────────────────── */}
+          <div className="sv-section-structure border-b border-sv-border">
+            <SectionHeader id="structure" icon="⊞" label="Structure" />
+            {!collapsedRows.has('structure') && (
+              <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+                <StaffControls />
+                <Sep />
+                <MeasureControls />
+                <Sep />
+                <ClefSelector />
+                <Sep />
+                <InstrumentSelector isReadOnly={false} />
+                <Sep />
+                <MeasurePropertiesPanel />
+                <Sep />
+                <ExportToolbar />
+              </div>
+            )}
           </div>
 
-          {/* Row 3: Composition + Volume + Chord */}
-          <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll border-b border-sv-border">
-            <CompositionControls isReadOnly={false} />
-            <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-            <StaffVolumeControls />
+          {/* ── Section 3: Score Settings ─────────────────────────────────── */}
+          <div className={`sv-section-score ${selectedNote && !collapsedRows.has('expression') ? 'border-b border-sv-border' : ''}`}>
+            <SectionHeader id="score" icon="♫" label="Score Settings" />
+            {!collapsedRows.has('score') && (
+              <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+                <CompositionControls isReadOnly={false} />
+                <Sep />
+                <StaffVolumeControls />
+              </div>
+            )}
           </div>
 
-          {/* Row 4: Note expression (context tools — only show when note selected) */}
+          {/* ── Section 4: Expression (context — only when note selected) ─── */}
           {selectedNote && (
-            <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
-              <AccidentalToolbar />
-              <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-              <TieSlurToolbar />
-              <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-              <ArticulationToolbar />
-              <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-              <DynamicToolbar />
-              <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />
-              <ChordDetectionPanel />
+            <div className="sv-section-expression">
+              <SectionHeader id="expression" icon="✦" label="Note Expression" pulse />
+              {!collapsedRows.has('expression') && (
+                <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+                  <AccidentalToolbar />
+                  <Sep />
+                  <TieSlurToolbar />
+                  <Sep />
+                  <ArticulationToolbar />
+                  <Sep />
+                  <DynamicToolbar />
+                  <Sep />
+                  <ChordDetectionPanel />
+                </div>
+              )}
             </div>
           )}
         </>

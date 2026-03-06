@@ -5,6 +5,32 @@ import { durationToBeats, beatsToSeconds } from '../../utils/durationUtils';
 import { pitchToMidi, applyKeySignature, applyKeySignatureAndMeasureAccidentals } from '../../utils/noteUtils';
 import { usePlaybackStore, PlayingNoteRef } from '../../app/store/playbackStore';
 
+// ── Sustain loop configuration ────────────────────────────────────────────────
+// Piano and guitar have a natural decay envelope — looping them causes an
+// audible re-attack artefact.  For sustaining instruments (organ, strings…)
+// we loop only the SUSTAIN portion of the sample by setting loopStart past the
+// initial attack transient.  The attack plays once at note-on; every subsequent
+// loop cycle skips back to loopStart, avoiding the re-attack artefact.
+
+/** Instruments whose samples decay naturally — do NOT loop them. */
+const LOOP_DISABLED = new Set(['piano', 'guitar']);
+
+/**
+ * loopStart (in seconds) for each sustaining instrument.
+ * After the attack phase the AudioBufferSourceNode jumps back to this offset
+ * instead of the very beginning of the buffer, so only the sustain body loops.
+ */
+const LOOP_START: Record<string, number> = {
+  organ:   0.04,  // organ attack is nearly instant
+  violin:  0.15,
+  strings: 0.20,
+  choir:   0.30,
+  brass:   0.10,
+  flute:   0.10,
+  synth:   0.02,
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Maps our instrument names → Soundfont instrument names
 const SOUNDFONT_MAP: Record<string, string> = {
   piano:   'acoustic_grand_piano',
@@ -49,6 +75,8 @@ export class ToneScheduler {
   private isPlaying = false;
   /** All scheduled notes with their timing info */
   private scheduledNotes: ScheduledNote[] = [];
+  /** AudioBufferSourceNodes created by manual crossfade sustain (for stop/cleanup). */
+  private crossfadeNodes: AudioBufferSourceNode[] = [];
   /** Animation frame ID for highlighting updates */
   private highlightAnimationFrame: number | null = null;
   /** AudioContext start time (when playback began) */
@@ -60,6 +88,169 @@ export class ToneScheduler {
   /** Share Tone.js's underlying AudioContext so timing is in sync */
   private getAC(): AudioContext {
     return Tone.getContext().rawContext as AudioContext;
+  }
+
+  /**
+   * Best-effort access to the decoded sample buffer used by soundfont-player.
+   * Internal shapes differ by library version; this intentionally probes a few
+   * common layouts and returns null if unavailable.
+   */
+  private getSoundfontBuffer(sfPlayer: SoundfontPlayer, midi: number): AudioBuffer | null {
+    try {
+      const p: any = sfPlayer as any;
+      const buffers = p?.buffers;
+      if (!buffers) return null;
+
+      const tryPick = (store: any): AudioBuffer | null => {
+        if (!store) return null;
+        if (store instanceof AudioBuffer) return store;
+        if (typeof store.get === 'function') {
+          const exact = store.get(midi) ?? store.get(String(midi));
+          if (exact instanceof AudioBuffer) return exact;
+          // Nearest key fallback
+          const keys = Array.from(store.keys?.() ?? [])
+            .map((k: any) => Number(k))
+            .filter((k: number) => Number.isFinite(k))
+            .sort((a: number, b: number) => Math.abs(a - midi) - Math.abs(b - midi));
+          if (keys.length > 0) {
+            const nearest = store.get(keys[0]) ?? store.get(String(keys[0]));
+            if (nearest instanceof AudioBuffer) return nearest;
+          }
+          return null;
+        }
+        if (Array.isArray(store)) {
+          const maybe = store.find((x: any) => x instanceof AudioBuffer);
+          return maybe ?? null;
+        }
+        if (typeof store === 'object') {
+          const exact = store[midi] ?? store[String(midi)];
+          if (exact instanceof AudioBuffer) return exact;
+          const keys = Object.keys(store)
+            .map((k) => Number(k))
+            .filter((k) => Number.isFinite(k))
+            .sort((a, b) => Math.abs(a - midi) - Math.abs(b - midi));
+          if (keys.length > 0) {
+            const nearest = store[keys[0]] ?? store[String(keys[0])];
+            if (nearest instanceof AudioBuffer) return nearest;
+          }
+        }
+        return null;
+      };
+
+      // Common layouts observed across versions:
+      // 1) player.buffers (Map-like / object)
+      // 2) player.buffers.buffers (nested map/object)
+      // 3) player.buffers._buffers (private field)
+      return (
+        tryPick(buffers) ??
+        tryPick((buffers as any).buffers) ??
+        tryPick((buffers as any)._buffers)
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Manual overlap/crossfade sustain to avoid audible loop seams on long holds.
+   * Returns true when scheduled, false when buffer internals are unavailable.
+   *
+   * Safety contract:
+   * - Never throws outward
+   * - Never leaves playback silent on failure (caller falls back to sfPlayer.start)
+   */
+  private scheduleCrossfadeSustain(
+    sfPlayer: SoundfontPlayer,
+    midi: number,
+    startTime: number,
+    totalDuration: number,
+    gainValue: number,
+    loopStartHint: number,
+  ): boolean {
+    try {
+      const ac = this.getAC();
+      const buffer = this.getSoundfontBuffer(sfPlayer, midi);
+      if (!buffer) return false;
+
+      const p: any = sfPlayer as any;
+      const cents: number = typeof p?.buffers?.tuning === 'function' ? p.buffers.tuning(midi) : 0;
+      const playbackRate = Math.pow(2, cents / 1200);
+
+      const bufferLen = buffer.duration;
+      if (!Number.isFinite(bufferLen) || bufferLen < 0.2) return false;
+
+      // Clamp loop start to a safe range.
+      const loopStart = Math.max(0, Math.min(loopStartHint, bufferLen - 0.06));
+      const loopBody = bufferLen - loopStart;
+      if (loopBody < 0.08) return false;
+
+      // Adaptive crossfade to avoid overfading short loop bodies.
+      const xfade = Math.max(0.02, Math.min(0.08, loopBody * 0.25));
+      const netAdvance = loopBody - xfade;
+      if (netAdvance <= 0.01) return false;
+
+      const release = 0.05;
+
+      // Segment #1: initial attack (from offset 0) plays once.
+      let covered = Math.min(totalDuration, bufferLen);
+      let segStart = startTime;
+      const firstSrc = ac.createBufferSource();
+      firstSrc.buffer = buffer;
+      if (playbackRate !== 1) firstSrc.playbackRate.value = playbackRate;
+      const firstGain = ac.createGain();
+      firstGain.gain.setValueAtTime(gainValue, segStart);
+      firstSrc.connect(firstGain);
+      firstGain.connect(ac.destination);
+      firstSrc.start(segStart, 0, Math.min(bufferLen, totalDuration + release));
+      this.crossfadeNodes.push(firstSrc);
+
+      if (covered >= totalDuration - 0.001) {
+        return true; // short enough; no sustain stitching needed
+      }
+
+      // Start first sustain segment slightly before attack segment ends.
+      segStart = startTime + bufferLen - xfade;
+
+      while (covered < totalDuration - 0.001) {
+        const remaining = totalDuration - covered;
+        const isLast = remaining <= loopBody;
+
+        const src = ac.createBufferSource();
+        src.buffer = buffer;
+        if (playbackRate !== 1) src.playbackRate.value = playbackRate;
+        const gn = ac.createGain();
+        src.connect(gn);
+        gn.connect(ac.destination);
+
+        // Crossfade in
+        gn.gain.setValueAtTime(0, segStart);
+        gn.gain.linearRampToValueAtTime(gainValue, segStart + xfade);
+
+        if (isLast) {
+          // Hold to end, then release.
+          const tailEnd = segStart + Math.max(remaining, xfade);
+          gn.gain.setValueAtTime(gainValue, Math.max(segStart + xfade, tailEnd - 0.002));
+          gn.gain.linearRampToValueAtTime(0, tailEnd + release);
+          src.start(segStart, loopStart, Math.min(loopBody, remaining + release + xfade));
+          this.crossfadeNodes.push(src);
+          break;
+        } else {
+          // Crossfade out near segment end so next segment can overlap cleanly.
+          const segEnd = segStart + loopBody;
+          gn.gain.setValueAtTime(gainValue, segEnd - xfade - 0.002);
+          gn.gain.linearRampToValueAtTime(0, segEnd);
+          src.start(segStart, loopStart, loopBody);
+          this.crossfadeNodes.push(src);
+          covered += netAdvance;
+          segStart += netAdvance;
+        }
+      }
+
+      return true;
+    } catch (err) {
+      console.warn('[ToneScheduler] crossfade sustain scheduling failed, using fallback:', err);
+      return false;
+    }
   }
 
   // ── Instrument loading ────────────────────────────────────────────────────
@@ -206,8 +397,9 @@ export class ToneScheduler {
     const ac = this.getAC();
     if (ac.state === 'suspended') await ac.resume();
 
-    // Clear previous scheduled notes
+    // Clear previous scheduled notes and any lingering crossfade sources
     this.scheduledNotes = [];
+    this.crossfadeNodes = [];
     this.playbackStartTime = ac.currentTime;
 
     // Get playback store to check for playback instruments
@@ -257,6 +449,72 @@ export class ToneScheduler {
       for (let i = upTo; i >= 0; i--) if (refMeasures[i]?.tempo !== undefined) return refMeasures[i].tempo!;
       return effectiveTempo; // Use effective tempo (playback or composition)
     }
+
+    // ── Pre-compute cross-measure tie data ────────────────────────────────────
+    // When the last note of a measure has tie=true, its duration must be extended
+    // by the duration of the matching note at the start of the next measure (and so
+    // on for chains spanning more than two measures).  The continuation notes must
+    // be silenced (not scheduled as separate attacks).
+    //
+    // Key format: `${staffIdx}:${voiceIdx}:${measureIdx}:${noteIdx}`
+    const crossTieExtra = new Map<string, number>(); // origin note → extra seconds to add
+    const crossTieSkip  = new Set<string>();         // continuation notes → silent
+
+    composition.staves.forEach((staff, sIdx) => {
+      const numVoices = staff.measures.reduce((mx, m) => Math.max(mx, m.voices.length), 0);
+      for (let vIdx = 0; vIdx < numVoices; vIdx++) {
+        for (let mIdx = 0; mIdx < staff.measures.length - 1; mIdx++) {
+          const voice = staff.measures[mIdx]?.voices[vIdx];
+          if (!voice?.notes.length) continue;
+
+          // Find the last NOTE (not rest) in this measure
+          let lastNIdx = -1;
+          for (let n = voice.notes.length - 1; n >= 0; n--) {
+            if ('pitch' in voice.notes[n]) { lastNIdx = n; break; }
+          }
+          if (lastNIdx < 0) continue;
+
+          const lastEl = voice.notes[lastNIdx];
+          if (!('pitch' in lastEl) || !(lastEl as Note).tie) continue;
+          const lastNote = lastEl as Note;
+
+          // Walk forward into subsequent measures to follow the chain
+          const originKey = `${sIdx}:${vIdx}:${mIdx}:${lastNIdx}`;
+          let nextMIdx = mIdx + 1;
+
+          while (nextMIdx < staff.measures.length) {
+            const nextVoice = staff.measures[nextMIdx]?.voices[vIdx];
+            if (!nextVoice?.notes.length) break;
+
+            // Find first NOTE (not rest) in the next measure
+            let firstNIdx = -1;
+            for (let n = 0; n < nextVoice.notes.length; n++) {
+              if ('pitch' in nextVoice.notes[n]) { firstNIdx = n; break; }
+            }
+            if (firstNIdx < 0) break;
+
+            const firstEl = nextVoice.notes[firstNIdx] as Note;
+            if (firstEl.pitch !== lastNote.pitch) break; // different pitch → not a tie
+
+            // Accumulate this note's duration into the chain origin
+            const extraSec = beatsToSeconds(durationToBeats(firstEl.duration), effTempo(nextMIdx));
+            crossTieExtra.set(originKey, (crossTieExtra.get(originKey) ?? 0) + extraSec);
+
+            // Mark as silent (will not be scheduled as a new attack)
+            crossTieSkip.add(`${sIdx}:${vIdx}:${nextMIdx}:${firstNIdx}`);
+
+            // Continue chain only if this continuation note itself ties across
+            // to the NEXT measure (i.e. it is the last note of its measure AND tie=true)
+            const hasMoreNotesAfter = nextVoice.notes.slice(firstNIdx + 1).some(el => 'pitch' in el);
+            if (firstEl.tie && !hasMoreNotesAfter) {
+              nextMIdx++;
+            } else {
+              break;
+            }
+          }
+        }
+      }
+    });
 
     composition.staves.forEach((staff, staffIndex) => {
       // Use playback instrument if set, otherwise use composition instrument
@@ -329,13 +587,38 @@ export class ToneScheduler {
         let measureTime = 0; // Time within this measure (in beats)
 
         measure.voices.forEach((voice, voiceIndex) => {
-          let tiedNotesToSkip = 0; // Count of tied notes to skip
+          let tiedNotesToSkip = 0; // Count of tied notes to skip (within-measure chains)
           
           voice.notes.forEach((element, noteIndex) => {
-            // Skip this note if it's part of a tie chain (already handled)
+            // Skip AUDIO for within-measure tie continuations, but still register them
+            // in scheduledNotes so the highlight indicator advances through each note.
             if (tiedNotesToSkip > 0) {
               tiedNotesToSkip--;
               const beats = durationToBeats(element.duration);
+              if ('pitch' in element) {
+                const skipNoteTime = measureStartTime + beatsToSeconds(measureTime, currentTempo);
+                this.scheduledNotes.push({
+                  ref: { staffIndex, measureIndex, voiceIndex, noteIndex },
+                  startTime: now + skipNoteTime,
+                  endTime:   now + skipNoteTime + beatsToSeconds(beats, currentTempo),
+                });
+              }
+              measureTime += beats;
+              return;
+            }
+
+            // Skip AUDIO for cross-measure tie continuations, but still highlight them.
+            const flatKey = `${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`;
+            if (crossTieSkip.has(flatKey)) {
+              const beats = durationToBeats(element.duration);
+              if ('pitch' in element) {
+                const skipNoteTime = measureStartTime + beatsToSeconds(measureTime, currentTempo);
+                this.scheduledNotes.push({
+                  ref: { staffIndex, measureIndex, voiceIndex, noteIndex },
+                  startTime: now + skipNoteTime,
+                  endTime:   now + skipNoteTime + beatsToSeconds(beats, currentTempo),
+                });
+              }
               measureTime += beats;
               return;
             }
@@ -369,14 +652,27 @@ export class ToneScheduler {
                 (voice.notes[noteIndex - 1] as Note).pitch !== note.pitch;
               
               // If tied, calculate total duration of all tied notes
+              // A tie chain continues only if each note in the chain has tie=true.
+              // Example: A(tie) → B(tie) → C(no tie) → D(same pitch): chain is A+B only.
               let totalDurationSec = durationSec;
+
+              // Add any cross-measure tie extension pre-computed above
+              const crossExtra = crossTieExtra.get(`${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`) ?? 0;
+              totalDurationSec += crossExtra;
+
               if (isTied) {
                 let tiedIndex = noteIndex + 1;
+                let prevTiedIndex = noteIndex; // Track the previous note in the chain
                 while (tiedIndex < voice.notes.length) {
                   const tiedEl = voice.notes[tiedIndex];
-                  if ('pitch' in tiedEl && (tiedEl as Note).pitch === note.pitch) {
+                  const prevTiedEl = voice.notes[prevTiedIndex];
+                  // Chain continues only if: (1) same pitch, AND (2) previous note has tie=true
+                  if ('pitch' in tiedEl && 'pitch' in prevTiedEl &&
+                      (tiedEl as Note).pitch === note.pitch &&
+                      (prevTiedEl as Note).tie) {
                     const tiedBeats = durationToBeats(tiedEl.duration);
                     totalDurationSec += beatsToSeconds(tiedBeats, currentTempo);
+                    prevTiedIndex = tiedIndex;
                     tiedIndex++;
                   } else {
                     break;
@@ -396,16 +692,18 @@ export class ToneScheduler {
               const midi = pitchToMidi(actualPitch);
               
               const startTime = now + noteTime;
-              const endTime = startTime + totalDurationSec;
               
-              // Track this note for highlighting
+              // Highlight only covers this note's OWN duration.
+              // Continuation notes (within-measure or cross-measure) are added to
+              // scheduledNotes separately above, so the indicator advances through
+              // each tied note in sequence even though audio plays as one long sound.
               const noteRef: PlayingNoteRef = {
                 staffIndex,
                 measureIndex,
                 voiceIndex,
                 noteIndex,
               };
-              this.scheduledNotes.push({ ref: noteRef, startTime, endTime });
+              this.scheduledNotes.push({ ref: noteRef, startTime, endTime: startTime + durationSec });
               
               // For slurs: play with slight overlap (legato) - extend duration slightly
               const playDuration = isSlurred
@@ -415,11 +713,38 @@ export class ToneScheduler {
               // Skip playback if muted
               if (!isMuted) {
                 if (sfPlayer) {
-                  sfPlayer.start(
-                    String(midi) as unknown as Parameters<SoundfontPlayer['start']>[0],
-                    startTime,
-                    { duration: playDuration, gain } // Apply gain (0-1) for volume control
-                  );
+                  // Build loop options:
+                  //  - Decay instruments (piano, guitar): no loop — let the sample
+                  //    decay naturally.  Looping would re-trigger the attack transient.
+                  //  - Sustaining instruments (organ, strings…): loop from loopStart
+                  //    so only the sustain body repeats; the attack transient plays
+                  //    exactly once at note-on.
+                  const shouldLoop = !LOOP_DISABLED.has(effectiveInstrument);
+                  const loopStart = LOOP_START[effectiveInstrument] ?? 0.08;
+
+                  // Long sustains on loop-enabled instruments: prefer manual crossfade
+                  // to reduce seam artifacts. If anything fails, fallback immediately
+                  // to the built-in soundfont loop path (no audio dropouts).
+                  let scheduled = false;
+                  if (shouldLoop && playDuration >= 1.6) {
+                    scheduled = this.scheduleCrossfadeSustain(
+                      sfPlayer,
+                      midi,
+                      startTime,
+                      playDuration,
+                      gain,
+                      loopStart
+                    );
+                  }
+
+                  if (!scheduled) {
+                    const loopOpts = shouldLoop ? { loop: true, loopStart } : {};
+                    sfPlayer.start(
+                      String(midi) as unknown as Parameters<SoundfontPlayer['start']>[0],
+                      startTime,
+                      { duration: playDuration, gain, ...loopOpts } as any
+                    );
+                  }
                 } else if (fallback) {
                   const freq = 440 * Math.pow(2, (midi - 69) / 12);
                   Tone.getTransport().schedule((audioTime) => {
@@ -532,6 +857,9 @@ export class ToneScheduler {
     }
     this.sfPlayers.forEach((p) => { try { p.stop(); } catch {} });
     this.fallbackSynths.forEach((s) => { try { s.releaseAll(); } catch {} });
+    // Stop any manually-scheduled crossfade sources
+    this.crossfadeNodes.forEach((n) => { try { n.stop(); } catch {} });
+    this.crossfadeNodes = [];
     // Clean up per-staff synths (they'll be recreated on next play)
     this.staffFallbackSynths.forEach((s) => { try { s.dispose(); } catch {} });
     this.staffFallbackSynths.clear();
@@ -547,4 +875,91 @@ export class ToneScheduler {
     this.fallbackSynths.forEach((s) => { try { s.dispose(); } catch {} });
     this.fallbackSynths.clear();
   }
+
+  /**
+   * Preload only the piano soundfont.
+   * Safe to call right after login — silently ignores AudioContext failures
+   * (e.g. browser hasn't received a user-gesture yet).
+   */
+  async preloadPiano(): Promise<void> {
+    try {
+      await Tone.start();
+      const ac = this.getAC();
+      if (ac.state === 'suspended') await ac.resume();
+      await this.loadSoundfont('piano');
+    } catch (err) {
+      console.debug('[Soundfont] Piano preload skipped (AudioContext not ready):', err);
+    }
+  }
+
+  /**
+   * Preload ALL instruments in SOUNDFONT_MAP.
+   * Piano is loaded first (highest priority), then every other instrument in
+   * parallel so loading one slow instrument doesn't block the rest.
+   *
+   * After a successful full preload the current timestamp is written to
+   * localStorage so future app starts know the browser HTTP cache is warm
+   * and can kick off an eager background preload immediately.
+   */
+  async preloadAllSoundfonts(): Promise<void> {
+    try {
+      await Tone.start();
+      const ac = this.getAC();
+      if (ac.state === 'suspended') await ac.resume();
+    } catch (err) {
+      console.debug('[Soundfont] preloadAllSoundfonts: AudioContext not ready, skipping:', err);
+      return;
+    }
+
+    // ── 1. Piano first ───────────────────────────────────────────────────────
+    if (!this.sfPlayers.has('piano')) {
+      try { await this.loadSoundfont('piano'); } catch {}
+    }
+
+    // ── 2. Every other instrument in parallel ────────────────────────────────
+    const remaining = Object.keys(SOUNDFONT_MAP).filter((n) => n !== 'piano');
+    await Promise.allSettled(
+      remaining.map(async (name) => {
+        if (this.sfPlayers.has(name)) return;
+        try { await this.loadSoundfont(name); } catch {}
+      })
+    );
+
+    // ── 3. Mark the browser HTTP cache as warm ───────────────────────────────
+    markSoundfontCacheWarm();
+    console.log('[Soundfont] All instruments preloaded. Cache marked warm for next session.');
+  }
 }
+
+// ── Soundfont HTTP-cache warmth tracking ──────────────────────────────────────
+// soundfont-player fetches MP3 files from a CDN. Those responses are stored in
+// the browser HTTP cache (the CDN uses max-age=1 year). Writing a timestamp to
+// localStorage lets us know on subsequent app opens that the HTTP cache is very
+// likely still hot, so we can start eager background preloading immediately
+// rather than waiting for the user to navigate to a composition.
+
+const SOUNDFONT_CACHE_LS_KEY  = 'stavium_soundfonts_cached_v1';
+const SOUNDFONT_CACHE_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
+
+/** Returns true if all soundfonts were preloaded in the last 30 days. */
+export function isSoundfontCacheWarm(): boolean {
+  try {
+    const stored = localStorage.getItem(SOUNDFONT_CACHE_LS_KEY);
+    if (!stored) return false;
+    return Date.now() - new Date(stored).getTime() < SOUNDFONT_CACHE_MAX_AGE;
+  } catch {
+    return false;
+  }
+}
+
+function markSoundfontCacheWarm(): void {
+  try {
+    localStorage.setItem(SOUNDFONT_CACHE_LS_KEY, new Date().toISOString());
+  } catch { /* localStorage unavailable (private browsing etc.) — just skip */ }
+}
+
+// ── Shared singleton ──────────────────────────────────────────────────────────
+// A single long-lived ToneScheduler instance shared across the app.
+// Using a singleton means soundfonts loaded on the Dashboard are still
+// cached in sfPlayers when PlaybackControls needs them in the editor.
+export const sharedScheduler = new ToneScheduler();

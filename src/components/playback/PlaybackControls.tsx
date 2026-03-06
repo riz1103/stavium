@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useScoreStore } from '../../app/store/scoreStore';
 import { usePlaybackStore } from '../../app/store/playbackStore';
-import { ToneScheduler } from '../../music/playback/toneScheduler';
+import { sharedScheduler } from '../../music/playback/toneScheduler';
 
 export const PlaybackControls = () => {
   const composition = useScoreStore((state) => state.composition);
@@ -11,21 +11,15 @@ export const PlaybackControls = () => {
   const playbackStartMeasure = usePlaybackStore((state) => state.playbackStartMeasure);
   const playbackEndMeasure = usePlaybackStore((state) => state.playbackEndMeasure);
   const setPlaybackRange = usePlaybackStore((state) => state.setPlaybackRange);
-  const schedulerRef = useRef<ToneScheduler | null>(null);
+  const schedulerRef = useRef(sharedScheduler);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Preload instruments when composition is loaded (background, non-blocking).
+  // Piano is usually already cached from the Dashboard preload, so this is fast.
   useEffect(() => {
-    schedulerRef.current = new ToneScheduler();
-    return () => { schedulerRef.current?.dispose(); schedulerRef.current = null; };
-  }, []);
-
-  // Preload instruments when composition is loaded (background, non-blocking)
-  useEffect(() => {
-    if (!composition || !schedulerRef.current) return;
+    if (!composition) return;
     
-    // Preload instruments in the background (don't await, let it happen async)
     schedulerRef.current.preloadInstruments(composition, true).catch((err) => {
-      // Silently handle errors - preloading is best-effort
       console.debug('Instrument preloading failed:', err);
     });
   }, [composition]);

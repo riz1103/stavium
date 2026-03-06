@@ -140,6 +140,145 @@ export class VexFlowRenderer {
     return (renderer.svg || renderer.element || renderer.getContext()?.svg) as SVGSVGElement | null;
   }
 
+  /**
+   * Draw a slur arc as a custom SVG cubic-bezier curve.
+   *
+   * Unlike VexFlow's StaveTie (which uses a fixed curvature), this helper
+   * scales the arc height proportionally to the horizontal span so the curve
+   * never looks flat even for very long phrases.
+   *
+   * @param svgEl   The SVG element to append the path to.
+   * @param startNote  The starting StaveNote (null = arriving from left margin).
+   * @param endNote    The ending StaveNote   (null = departing to right margin).
+   */
+  /**
+   * Draw a slur arc as a custom SVG cubic-bezier curve.
+   *
+   * @param svgEl      The SVG element to append the path to.
+   * @param startNote  The starting StaveNote (null = arriving from left margin).
+   * @param endNote    The ending StaveNote   (null = departing to right margin).
+   * @param direction  'above' | 'below' | 'auto' (default). 'auto' uses stem direction.
+   */
+  private drawSlurArc(
+    svgEl: SVGElement,
+    startNote: any | null,
+    endNote: any | null,
+    direction: 'above' | 'below' | 'auto' = 'auto',
+  ): void {
+    try {
+      let x1: number, y1: number, x2: number, y2: number;
+
+      if (startNote && endNote) {
+        x1 = startNote.getAbsoluteX();
+        x2 = endNote.getAbsoluteX();
+        y1 = (startNote.getYs?.() ?? [])[0] ?? 0;
+        y2 = (endNote.getYs?.()   ?? [])[0] ?? 0;
+      } else if (startNote) {
+        // Departing half-arc — tail goes 70 px to the right
+        x1 = startNote.getAbsoluteX();
+        x2 = x1 + 70;
+        y1 = y2 = (startNote.getYs?.() ?? [])[0] ?? 0;
+      } else if (endNote) {
+        // Arriving half-arc — tail comes 70 px from the left
+        x2 = endNote.getAbsoluteX();
+        x1 = x2 - 70;
+        y1 = y2 = (endNote.getYs?.() ?? [])[0] ?? 0;
+      } else {
+        return;
+      }
+
+      const dist = x2 - x1;
+      if (dist < 2) return;
+
+      // Curve height scales with distance so wide slurs stay clearly arched.
+      //   dist ~100 px  →  height ~15 px  (tight phrase)
+      //   dist ~300 px  →  height ~30 px  (normal phrase)
+      //   dist ~600 px  →  height ~50 px  (very long phrase)
+      const curveHeight = Math.max(15, Math.min(55, dist * 0.1));
+
+      // Resolve direction to a sign:
+      //   'above'        → curve above the notes  (sign = −1)
+      //   'below'        → curve below the notes  (sign = +1)
+      //   'auto' (default) → opposite to stem:
+      //       stem UP  → curve below  (+1)
+      //       stem DOWN → curve above (−1)
+      let sign: number;
+      if (direction === 'above') {
+        sign = -1;
+      } else if (direction === 'below') {
+        sign = 1;
+      } else {
+        // auto — use stem direction
+        const stemDir: number =
+          startNote?.getStemDirection?.() ?? endNote?.getStemDirection?.() ?? 1;
+        sign = stemDir >= 0 ? 1 : -1;
+      }
+
+      const midY  = (y1 + y2) / 2;
+      const cpY   = midY + sign * curveHeight;
+      const cp1x  = x1 + dist * 0.25;
+      const cp2x  = x1 + dist * 0.75;
+
+      // Slightly inset endpoints so the arc starts/ends at the note-head edge
+      const ex1 = x1 + 4;
+      const ex2 = x2 - 4;
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute(
+        'd',
+        `M ${ex1},${y1} C ${cp1x},${cpY} ${cp2x},${cpY} ${ex2},${y2}`,
+      );
+      path.setAttribute('stroke', '#000');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('stroke-linecap', 'round');
+      svgEl.appendChild(path);
+    } catch (err) {
+      console.warn('Slur arc draw failed:', err);
+    }
+  }
+
+  /**
+   * Draw a tie arc as a custom SVG bezier curve with an explicit direction.
+   * Call this instead of VexFlow's StaveTie when the note has slurDirection set.
+   * Ties are always short (adjacent same-pitch notes) so the curve is compact.
+   *
+   * @param direction  'above' | 'below' (never 'auto' — caller guards this)
+   */
+  private drawTieArc(
+    svgEl: SVGElement,
+    startNote: any,
+    endNote: any,
+    direction: 'above' | 'below',
+  ): void {
+    try {
+      const x1 = startNote.getAbsoluteX();
+      const x2 = endNote.getAbsoluteX();
+      const y1 = (startNote.getYs?.() ?? [])[0] ?? 0;
+      const y2 = (endNote.getYs?.()   ?? [])[0] ?? 0;
+      const dist = x2 - x1;
+      if (dist < 2) return;
+
+      // Ties are compact — small height, stays tight to noteheads
+      const curveHeight = Math.max(8, Math.min(20, dist * 0.12));
+      const sign  = direction === 'above' ? -1 : 1;
+      const midY  = (y1 + y2) / 2;
+      const cpY   = midY + sign * curveHeight;
+      const cp1x  = x1 + dist * 0.3;
+      const cp2x  = x1 + dist * 0.7;
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${x1 + 3},${y1} C ${cp1x},${cpY} ${cp2x},${cpY} ${x2 - 3},${y2}`);
+      path.setAttribute('stroke', '#000');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('stroke-linecap', 'round');
+      svgEl.appendChild(path);
+    } catch (err) {
+      console.warn('Tie arc draw failed:', err);
+    }
+  }
+
   /** Returns the exact note-head positions captured during the last render(). */
   getNotePositions(): RenderedNotePosition[] {
     return this.notePositions;
@@ -256,6 +395,19 @@ export class VexFlowRenderer {
       }
 
       // ── 3. One stave per measure ─────────────────────────────────────────
+      // Track the previous measure's rendered tickables so we can draw a
+      // tie arc that crosses the barline when the last note of measure N
+      // has tie = true (standard in music — e.g. notes spanning a barline).
+      let prevMeasureTickables: any[] | null = null;
+      let prevMeasureDataIndices: number[] | null = null;
+      let prevMeasureVoice: any | null = null;
+
+      // Collect all measure data for two-pass slur drawing after the loop.
+      // Slurs need one single arc spanning the ENTIRE phrase across all measures,
+      // not separate per-measure arcs joined with connectors.
+      const allMeasureData: Array<{ tickables: any[]; dataIndices: number[]; voice: any } | null> =
+        new Array(staff.measures.length).fill(null);
+
       staff.measures.forEach((measure, measureIndex) => {
         const { x: mx, width: mw } = layout[measureIndex] ?? {
           x: LEFT_MARGIN + CLEF_WIDTH + measureIndex * MEASURE_WIDTH,
@@ -378,72 +530,102 @@ export class VexFlowRenderer {
             // Draw beams after the voice so they render on top
             beams.forEach((b) => b.setContext(this.context).draw());
 
-            // ── Draw ties and slurs (supports multi-note chains) ────────────────────
-            if (voice && voice.notes.length > 1) {
-              // Process ties: connect all notes in a tie chain
-              let tieStartIdx: number | null = null;
-              let tieStartNote: any = null;
-              
-              for (let i = 0; i < voice.notes.length; i++) {
-                const element = voice.notes[i];
-                if (!('pitch' in element)) {
-                  tieStartIdx = null;
-                  tieStartNote = null;
-                  continue;
+            // ── Cross-measure tie / slur ──────────────────────────────────────────
+            // If the last note of the PREVIOUS measure had tie or slur = true,
+            // draw the arc now — both StaveNotes have positions after draw().
+            if (prevMeasureTickables && prevMeasureDataIndices && prevMeasureVoice && voice) {
+              // Walk backwards to find the last NOTE (not rest) in prev measure
+              let xLastStaveNote: any = null;
+              let xLastNoteEl: Note | null = null;
+              for (let pi = prevMeasureDataIndices.length - 1; pi >= 0; pi--) {
+                const el = prevMeasureVoice.notes[prevMeasureDataIndices[pi]];
+                if (el && 'pitch' in el) {
+                  xLastStaveNote = prevMeasureTickables[pi];
+                  xLastNoteEl = el as Note;
+                  break;
                 }
-                
-                const note = element as Note;
-                const tickableIdx = tickableDataIndices.indexOf(i);
-                if (tickableIdx < 0 || tickableIdx >= tickables.length) continue;
-                
-                const staveNote = tickables[tickableIdx];
-                
-                // Check if this note starts or continues a tie
-                if (note.tie) {
-                  if (tieStartIdx === null) {
-                    // Start of a new tie chain
-                    tieStartIdx = i;
-                    tieStartNote = staveNote;
+              }
+              // Walk forwards to find the first NOTE (not rest) in this measure
+              let xFirstStaveNote: any = null;
+              let xFirstNoteEl: Note | null = null;
+              for (let ci = 0; ci < tickableDataIndices.length; ci++) {
+                const el = voice.notes[tickableDataIndices[ci]];
+                if (el && 'pitch' in el) {
+                  xFirstStaveNote = tickables[ci];
+                  xFirstNoteEl = el as Note;
+                  break;
+                }
+              }
+              // Ties require same pitch; cross-measure slurs are handled in the
+              // two-pass post-loop below so they form one arc across all measures.
+              const canDrawTie = xLastNoteEl?.tie && xFirstNoteEl && xLastNoteEl.pitch === xFirstNoteEl.pitch;
+              if (canDrawTie && xLastStaveNote && xFirstStaveNote) {
+                try {
+                  const tieDir = xLastNoteEl?.tieDirection;
+                  if (tieDir && tieDir !== 'auto') {
+                    const svgEl = this.getSvgElement();
+                    if (svgEl) this.drawTieArc(svgEl, xLastStaveNote, xFirstStaveNote, tieDir);
                   } else {
-                    // Continue tie chain - draw tie from start to current
-                    try {
-                      const tie = new StaveTie({
-                        first_note: tieStartNote,
-                        last_note: staveNote,
-                      });
-                      tie.setContext(this.context).draw();
-                      // Update start for next note in chain
-                      tieStartNote = staveNote;
-                    } catch (err) {
-                      console.warn('Failed to draw tie:', err);
-                    }
+                    new StaveTie({
+                      first_note: xLastStaveNote,
+                      last_note: xFirstStaveNote,
+                    }).setContext(this.context).draw();
                   }
-                } else {
-                  // End of tie chain
-                  tieStartIdx = null;
-                  tieStartNote = null;
-                }
-                
-                // Handle slurs (similar to ties but can span different pitches)
-                if (note.slur && i < voice.notes.length - 1) {
-                  const next = voice.notes[i + 1];
-                  if ('pitch' in next) {
-                    const nextIdx = tickableDataIndices.indexOf(i + 1);
-                    if (nextIdx >= 0 && nextIdx < tickables.length) {
-                      try {
-                        const slur = new StaveTie({
-                          first_note: staveNote,
-                          last_note: tickables[nextIdx],
-                        });
-                        slur.setContext(this.context).draw();
-                      } catch (err) {
-                        console.warn('Failed to draw slur:', err);
-                      }
-                    }
-                  }
+                } catch (xErr) {
+                  console.warn('Cross-measure tie draw failed:', xErr);
                 }
               }
             }
+
+            // ── Ties (drawn first so slur arcs render on top, encompassing them) ────
+            // Music engraving rule (Gould §tie): when tied notes appear within a
+            // slurred group, the slur arc must visually encompass the tie arc(s).
+            // Drawing ties before slurs achieves the correct z-order in SVG.
+            //
+            // Tie rules: Each tie connects exactly TWO consecutive notes of the SAME pitch.
+            // For 3+ notes of the same pitch (e.g., C4-C4-C4), you need separate ties:
+            // - Tie from 1st to 2nd note (1st note has tie=true)
+            // - Tie from 2nd to 3rd note (2nd note has tie=true)
+            // This loop draws one tie per note-pair automatically.
+            if (voice && voice.notes.length > 1) {
+              for (let i = 0; i < voice.notes.length - 1; i++) {
+                const element = voice.notes[i];
+                if (!('pitch' in element)) continue;
+                const note = element as Note;
+                // note.tie = true means "tie this note to the next note"
+                if (!note.tie) continue;
+                const tickableIdx = tickableDataIndices.indexOf(i);
+                if (tickableIdx < 0 || tickableIdx >= tickables.length) continue;
+                const next = voice.notes[i + 1];
+                if (!('pitch' in next)) continue;
+                const nextNote = next as Note;
+                // Ties only connect same-pitch notes (slurs can connect different pitches)
+                if (nextNote.pitch !== note.pitch) continue;
+                const nextTickableIdx = tickableDataIndices.indexOf(i + 1);
+                if (nextTickableIdx < 0 || nextTickableIdx >= tickables.length) continue;
+                try {
+                  const tieDir = note.tieDirection;
+                  if (tieDir && tieDir !== 'auto') {
+                    // User-specified direction — use custom SVG arc
+                    const svgEl = this.getSvgElement();
+                    if (svgEl) {
+                      this.drawTieArc(svgEl, tickables[tickableIdx], tickables[nextTickableIdx], tieDir);
+                    }
+                  } else {
+                    new StaveTie({
+                      first_note: tickables[tickableIdx],
+                      last_note: tickables[nextTickableIdx],
+                    }).setContext(this.context).draw();
+                  }
+                } catch (err) {
+                  console.warn('Failed to draw tie:', err);
+                }
+              }
+            }
+
+            // Slur chains are drawn in a single two-pass after all measures are
+            // processed (see below). This guarantees ONE arc per phrase spanning
+            // the full extent of the slur regardless of barlines.
 
             // ── Draw dynamics ─────────────────────────────────────────────────────
             if (voice) {
@@ -556,8 +738,66 @@ export class VexFlowRenderer {
           } catch (err) {
             console.warn(`Measure ${measureIndex + 1} render error:`, err);
           }
+
+          // Store this measure's data so the next iteration can draw a
+          // cross-measure tie if the last note of this measure needs one.
+          prevMeasureTickables = tickables;
+          prevMeasureDataIndices = [...tickableDataIndices];
+          prevMeasureVoice = voice;
+          // Also store for the two-pass slur drawing below.
+          allMeasureData[measureIndex] = { tickables, dataIndices: [...tickableDataIndices], voice };
         }
       });
+
+      // ── 3b. Two-pass slur drawing ────────────────────────────────────────────
+      // Standard music notation: a slur is ONE smooth arc spanning the entire
+      // phrase, regardless of how many barlines it crosses. We scan all notes
+      // across all measures to detect chains of consecutive slur-flagged notes,
+      // then draw a single StaveTie arc from the first to the endpoint of each chain.
+      {
+        let slurChainStart: { measureIdx: number; tickableIdx: number } | null = null;
+        let slurChainDirection: 'above' | 'below' | 'auto' = 'auto';
+        for (let mIdx = 0; mIdx < staff.measures.length; mIdx++) {
+          const mData = allMeasureData[mIdx];
+          if (!mData || !mData.voice) continue;
+          for (let t = 0; t < mData.tickables.length; t++) {
+            const dataIdx = mData.dataIndices[t];
+            const el = mData.voice.notes[dataIdx];
+            if (!el || !('pitch' in el)) continue; // rests don't break chains
+            const note = el as Note;
+            if (note.slur) {
+              // Start of (or continuation of) a slur chain
+              if (!slurChainStart) {
+                slurChainStart = { measureIdx: mIdx, tickableIdx: t };
+                // Capture direction from the first note of the chain
+                slurChainDirection = (note.slurDirection ?? 'auto') as 'above' | 'below' | 'auto';
+              }
+            } else if (note.tie && slurChainStart) {
+              // Tie WITHIN an active slur: the slur arc must encompass the tie arc.
+              // Don't close the slur chain — let it keep extending.
+              // If this tied note carries a direction override, prefer it.
+              if (note.slurDirection && note.slurDirection !== 'auto') {
+                slurChainDirection = note.slurDirection;
+              }
+            } else if (slurChainStart) {
+              // Chain ended — draw ONE arc from start to this note
+              const startMData = allMeasureData[slurChainStart.measureIdx];
+              if (startMData) {
+                const startTickable = startMData.tickables[slurChainStart.tickableIdx];
+                const endTickable   = mData.tickables[t];
+                const svgEl = this.getSvgElement();
+                if (startTickable && endTickable && startTickable !== endTickable && svgEl) {
+                  this.drawSlurArc(svgEl, startTickable, endTickable, slurChainDirection);
+                }
+              }
+              slurChainStart = null;
+              slurChainDirection = 'auto';
+            }
+          }
+        }
+        // If the chain reaches the end of the staff without a closing note, skip —
+        // incomplete slurs are engraving errors and we don't draw a half-arc here.
+      }
 
       // ── 4. Draw measure numbers (only on first staff) ─────────────────────
       if (showMeasureNumbers && staffIndex === 0) {
@@ -830,6 +1070,19 @@ export class VexFlowRenderer {
     }
 
     // ── Render each system ────────────────────────────────────────────────
+    // Cross-measure/cross-system tie tracking.
+    // Keyed by staffIdx; persists across sysIdx iterations.
+    const prevPrintMeasure = new Map<number, {
+      tickables: any[];
+      dataIndices: number[];
+      voice: any;
+    }>();
+
+    // Slur chain state across systems (keyed by staffIdx).
+    // When a slur chain reaches the end of a system, we record that the
+    // next system should start with an arriving half-arc.
+    const pendingCrossSystemSlur = new Map<number, boolean>();
+
     for (let sysIdx = 0; sysIdx < numSystems; sysIdx++) {
       const sysStartM = sysIdx * measPerSys;
       const sysEndM   = Math.min(sysStartM + measPerSys, maxMeasures);
@@ -872,6 +1125,10 @@ export class VexFlowRenderer {
         }
 
         // ── Measure staves ────────────────────────────────────────────────
+        // Collect all (note, tickable) pairs for this staff's system row so we
+        // can draw ONE slur arc per phrase chain in a post-loop pass.
+        const sysSlurData: Array<{ tickable: any; noteEl: Note }> = [];
+
         // Calculate cumulative x-position based on actual measure widths
         let cumulativeX = 0;
         for (let mIdx = sysStartM; mIdx < sysEndM; mIdx++) {
@@ -909,6 +1166,48 @@ export class VexFlowRenderer {
 
           if (tickables.length > 0) {
             try {
+              // ── Build beam groups BEFORE formatting (same logic as render()) ──
+              // Beam objects must exist before format() so VexFlow suppresses
+              // individual flags on beamed notes. They are drawn after the voice.
+              const beams: Beam[] = [];
+              if (voice) {
+                let beamGroup: any[] = [];
+
+                const flushBeamGroup = () => {
+                  if (beamGroup.length >= 2) {
+                    try { beams.push(new Beam(beamGroup)); } catch (_) { /* skip */ }
+                  }
+                  beamGroup = [];
+                };
+
+                for (let i = 0; i < voice.notes.length; i++) {
+                  const element = voice.notes[i];
+                  const tickableIdx = tickableDataIndices.indexOf(i);
+                  if (tickableIdx < 0) { flushBeamGroup(); continue; }
+
+                  const staveNote = tickables[tickableIdx];
+
+                  if ('pitch' in element) {
+                    const note = element as Note;
+                    const base = note.duration.startsWith('dotted-')
+                      ? note.duration.replace('dotted-', '')
+                      : note.duration;
+                    const isBeamable =
+                      base === 'eighth' || base === 'sixteenth' || base === 'thirty-second';
+
+                    if (isBeamable) {
+                      beamGroup.push(staveNote);
+                    } else {
+                      flushBeamGroup();
+                    }
+                  } else {
+                    // Rest breaks the beam group
+                    flushBeamGroup();
+                  }
+                }
+                flushBeamGroup(); // flush any trailing group
+              }
+
               const vfVoice = new Voice({ num_beats: voiceBeats, beat_value: beatTypeValue });
               vfVoice.setStrict(false);
               vfVoice.addTickables(tickables);
@@ -916,9 +1215,104 @@ export class VexFlowRenderer {
                 .joinVoices([vfVoice])
                 .format([vfVoice], measWidth - 30);
               vfVoice.draw(this.context, measureStave);
+
+              // Draw beams after the voice so they render on top
+              beams.forEach((b) => b.setContext(this.context).draw());
+
+              // ── Ties (drawn first — slur arcs must encompass tie arcs) ──────────
+              // Tie rules: Each tie connects exactly TWO consecutive notes of the SAME pitch.
+              // For 3+ notes of the same pitch, you need separate ties for each pair.
+              // note.tie = true means "tie this note to the next note".
+              if (voice && voice.notes.length > 1) {
+                for (let i = 0; i < voice.notes.length - 1; i++) {
+                  const el = voice.notes[i];
+                  if (!('pitch' in el)) continue;
+                  const n = el as Note;
+                  if (!n.tie) continue;
+                  const tIdx = tickableDataIndices.indexOf(i);
+                  if (tIdx < 0 || tIdx >= tickables.length) continue;
+                  const nextEl = voice.notes[i + 1];
+                  if (!('pitch' in nextEl)) continue;
+                  const nextN = nextEl as Note;
+                  // Ties only connect same-pitch notes (slurs can connect different pitches)
+                  if (nextN.pitch !== n.pitch) continue;
+                  const nextTIdx = tickableDataIndices.indexOf(i + 1);
+                  if (nextTIdx < 0 || nextTIdx >= tickables.length) continue;
+                  try {
+                    const tieDir = n.tieDirection;
+                    if (tieDir && tieDir !== 'auto' && svgEl) {
+                      this.drawTieArc(svgEl, tickables[tIdx], tickables[nextTIdx], tieDir);
+                    } else {
+                      new StaveTie({ first_note: tickables[tIdx], last_note: tickables[nextTIdx] })
+                        .setContext(this.context).draw();
+                    }
+                  } catch (tErr) {
+                    console.warn('Within-measure tie (print) failed:', tErr);
+                  }
+                }
+              }
+
+              // ── Cross-measure tie (same system) ──────────────────────────────
+              // Slurs are handled in the per-system two-pass below.
+              const prevPrintData = prevPrintMeasure.get(staffIdx);
+              if (prevPrintData && voice) {
+                let xLastStaveNote: any = null;
+                let xLastNoteEl: Note | null = null;
+                for (let pi = prevPrintData.dataIndices.length - 1; pi >= 0; pi--) {
+                  const el = prevPrintData.voice?.notes[prevPrintData.dataIndices[pi]];
+                  if (el && 'pitch' in el) {
+                    xLastStaveNote = prevPrintData.tickables[pi];
+                    xLastNoteEl = el as Note;
+                    break;
+                  }
+                }
+                let xFirstStaveNote: any = null;
+                let xFirstNoteEl: Note | null = null;
+                for (let ci = 0; ci < tickableDataIndices.length; ci++) {
+                  const el = voice.notes[tickableDataIndices[ci]];
+                  if (el && 'pitch' in el) {
+                    xFirstStaveNote = tickables[ci];
+                    xFirstNoteEl = el as Note;
+                    break;
+                  }
+                }
+                const canDrawTie = xLastNoteEl?.tie && xFirstNoteEl &&
+                  xLastNoteEl.pitch === xFirstNoteEl.pitch;
+                if (canDrawTie && xLastStaveNote && xFirstStaveNote) {
+                  try {
+                    const tieDir = xLastNoteEl?.tieDirection;
+                    if (tieDir && tieDir !== 'auto' && svgEl) {
+                      this.drawTieArc(svgEl, xLastStaveNote, xFirstStaveNote, tieDir);
+                    } else {
+                      new StaveTie({ first_note: xLastStaveNote, last_note: xFirstStaveNote })
+                        .setContext(this.context).draw();
+                    }
+                  } catch (xErr) {
+                    console.warn('Cross-measure tie (print) failed:', xErr);
+                  }
+                }
+              }
+
+              // ── Collect this measure's note-tickable pairs for slur drawing ──
+              if (voice) {
+                for (let t = 0; t < tickableDataIndices.length; t++) {
+                  const dataIdx = tickableDataIndices[t];
+                  const el = voice.notes[dataIdx];
+                  if (el && 'pitch' in el) {
+                    sysSlurData.push({ tickable: tickables[t], noteEl: el as Note });
+                  }
+                }
+              }
             } catch (err) {
               console.warn(`Print system ${sysIdx} measure ${mIdx} error:`, err);
             }
+
+            // Store this measure's tickable data for the next iteration
+            prevPrintMeasure.set(staffIdx, {
+              tickables,
+              dataIndices: [...tickableDataIndices],
+              voice,
+            });
           }
 
           // ── Measure numbers (first staff only, every measure) ─────────────
@@ -940,6 +1334,58 @@ export class VexFlowRenderer {
 
           // Advance position for next measure
           cumulativeX += measWidth;
+        }
+
+        // ── Two-pass slur drawing for this system row ─────────────────────────
+        // Slurs are ONE smooth arc per phrase. We collected all (note, tickable)
+        // pairs in sysSlurData above; now find chains and draw each as one arc.
+        // For phrases that cross a system break, we draw:
+        //   • departing half-arc  (first_note: startTickable, last_note: null)
+        //   • arriving half-arc   (first_note: null, last_note: endTickable)
+        {
+          const hasCrossSystemArrival = pendingCrossSystemSlur.get(staffIdx) === true;
+          let slurChainStart: { tickable: any } | null = null;
+          let slurChainDir: 'above' | 'below' | 'auto' = 'auto';
+          let isFirstChain = true; // Only the first chain on this row may be a cross-system arrival
+
+          for (let s = 0; s < sysSlurData.length; s++) {
+            const { tickable, noteEl } = sysSlurData[s];
+            if (noteEl.slur) {
+              if (!slurChainStart) {
+                // Start of a new chain.
+                // If the previous system left an open slur, this chain's arc
+                // should start from the left margin (null first_note).
+                slurChainStart = {
+                  tickable: (hasCrossSystemArrival && isFirstChain) ? null : tickable,
+                };
+                slurChainDir = (noteEl.slurDirection ?? 'auto') as 'above' | 'below' | 'auto';
+              }
+              // else: continue the chain (don't overwrite start)
+            } else if (noteEl.tie && slurChainStart) {
+              // Tie WITHIN an active slur: the slur arc must encompass the tie arc.
+              // Don't close the slur chain — let it keep extending.
+              // If this tied note carries a direction override, prefer it.
+              if (noteEl.slurDirection && noteEl.slurDirection !== 'auto') {
+                slurChainDir = noteEl.slurDirection;
+              }
+            } else if (slurChainStart) {
+              // Chain ended — draw ONE arc from start to this note
+              if (slurChainStart.tickable !== tickable && svgEl) {
+                this.drawSlurArc(svgEl, slurChainStart.tickable, tickable, slurChainDir);
+              }
+              isFirstChain = false;
+              slurChainStart = null;
+              slurChainDir = 'auto';
+            }
+          }
+
+          // Chain still open at end of this system → departing half-arc
+          if (slurChainStart) {
+            if (svgEl) this.drawSlurArc(svgEl, slurChainStart.tickable, null, slurChainDir);
+            pendingCrossSystemSlur.set(staffIdx, true);
+          } else {
+            pendingCrossSystemSlur.set(staffIdx, false);
+          }
         }
       });
 

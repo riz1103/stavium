@@ -954,7 +954,7 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
 
       {/* ── Status bar ─────────────────────────────────────────────────── */}
       {selectedNote && !isDragging && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full shadow-lg text-sm pointer-events-none flex items-center gap-2"
+        <div className="hidden sm:flex fixed bottom-20 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full shadow-lg text-sm pointer-events-none items-center gap-2"
              style={{ background: 'var(--sv-panel)', border: '1px solid var(--sv-cyan)', color: 'var(--sv-cyan)', boxShadow: '0 0 16px rgba(0,212,245,0.2)' }}>
           <span className="w-1.5 h-1.5 rounded-full bg-sv-cyan" style={{ background: 'var(--sv-cyan)', boxShadow: '0 0 4px var(--sv-cyan)' }} />
           <span>Note selected</span>
