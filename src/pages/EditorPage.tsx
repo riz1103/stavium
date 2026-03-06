@@ -213,11 +213,11 @@ export const EditorPage = () => {
             <SectionHeader id="notes" icon="♩" label="Notes & Rests" />
             {!collapsedRows.has('notes') && (
               <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
-                <NoteToolbar />
+            <NoteToolbar />
                 <Sep />
-                <RestToolbar />
+            <RestToolbar />
                 <Sep />
-                <UndoRedoToolbar />
+            <UndoRedoToolbar />
               </div>
             )}
           </div>
@@ -227,17 +227,17 @@ export const EditorPage = () => {
             <SectionHeader id="structure" icon="⊞" label="Structure" />
             {!collapsedRows.has('structure') && (
               <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
-                <StaffControls />
+            <StaffControls />
                 <Sep />
-                <MeasureControls />
+            <MeasureControls />
                 <Sep />
-                <ClefSelector />
+            <ClefSelector />
                 <Sep />
-                <InstrumentSelector isReadOnly={false} />
+            <InstrumentSelector isReadOnly={false} />
                 <Sep />
-                <MeasurePropertiesPanel />
+            <MeasurePropertiesPanel />
                 <Sep />
-                <ExportToolbar />
+            <ExportToolbar />
               </div>
             )}
           </div>
@@ -247,9 +247,9 @@ export const EditorPage = () => {
             <SectionHeader id="score" icon="♫" label="Score Settings" />
             {!collapsedRows.has('score') && (
               <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
-                <CompositionControls isReadOnly={false} />
+            <CompositionControls isReadOnly={false} />
                 <Sep />
-                <StaffVolumeControls />
+            <StaffVolumeControls />
               </div>
             )}
           </div>
@@ -259,16 +259,16 @@ export const EditorPage = () => {
             <div className="sv-section-expression">
               <SectionHeader id="expression" icon="✦" label="Note Expression" pulse />
               {!collapsedRows.has('expression') && (
-                <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
-                  <AccidentalToolbar />
+            <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+              <AccidentalToolbar />
                   <Sep />
-                  <TieSlurToolbar />
+              <TieSlurToolbar />
                   <Sep />
-                  <ArticulationToolbar />
+              <ArticulationToolbar />
                   <Sep />
-                  <DynamicToolbar />
+              <DynamicToolbar />
                   <Sep />
-                  <ChordDetectionPanel />
+              <ChordDetectionPanel />
                 </div>
               )}
             </div>

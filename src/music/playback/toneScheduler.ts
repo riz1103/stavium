@@ -547,22 +547,9 @@ export class ToneScheduler {
         fallback.volume.value = volumeDb;
       }
 
-      // Calculate timing offset for measures before startMeasure
-      let timingOffset = 0; // in seconds
-      if (startMeasure !== null && startMeasure !== undefined && startMeasure > 0) {
-        // Calculate total duration of measures before the start measure
-        for (let i = 0; i < startMeasure; i++) {
-          const measure = staff.measures[i];
-          if (!measure) continue;
-          const timeSig = effTimeSig(i);
-          const tempo = effTempo(i);
-          const [beats] = timeSig.split('/').map(Number);
-          const anacrusisBeats = (i === 0 && composition.anacrusis) ? (composition.pickupBeats ?? 1) : beats;
-          timingOffset += beatsToSeconds(anacrusisBeats, tempo);
-        }
-      }
-      
-      let currentMeasureStart = timingOffset; // in seconds
+      // Range playback should start immediately from the selected measure,
+      // not from the full-piece absolute timeline.
+      let currentMeasureStart = 0; // in seconds, relative to playback start
       
       // Determine measure range to play
       const startIdx = startMeasure !== null && startMeasure !== undefined ? startMeasure : 0;
@@ -751,7 +738,7 @@ export class ToneScheduler {
                   const freq = 440 * Math.pow(2, (midi - 69) / 12);
                   Tone.getTransport().schedule((audioTime) => {
                     fallback.triggerAttackRelease(freq, playDuration, audioTime);
-                  }, beatsToSeconds(measureTime, currentTempo));
+                  }, noteTime);
                   hasFallbackNotes = true;
                 }
               }

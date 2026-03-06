@@ -70,15 +70,15 @@ export const TieSlurToolbar = () => {
     <div className="sv-toolbar" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
       {/* ── Connect toggle ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <span className="sv-toolbar-label">Connect</span>
-        <button
-          onClick={toggle}
-          title={isConnected ? `Remove ${label}` : `Add ${label} to next note`}
-          className={isConnected ? 'sv-btn-active' : 'sv-btn-ghost'}
-        >
-          <span className="text-base">⌢</span>
-          <span>{isConnected ? (wouldBeTie ? 'Tied' : 'Slurred') : label}</span>
-        </button>
+      <span className="sv-toolbar-label">Connect</span>
+      <button
+        onClick={toggle}
+        title={isConnected ? `Remove ${label}` : `Add ${label} to next note`}
+        className={isConnected ? 'sv-btn-active' : 'sv-btn-ghost'}
+      >
+        <span className="text-base">⌢</span>
+        <span>{isConnected ? (wouldBeTie ? 'Tied' : 'Slurred') : label}</span>
+      </button>
       </div>
 
       {/* ── Direction picker (only visible when a tie/slur is active) ── */}

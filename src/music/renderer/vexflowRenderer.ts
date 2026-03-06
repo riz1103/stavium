@@ -164,6 +164,8 @@ export class VexFlowRenderer {
     startNote: any | null,
     endNote: any | null,
     direction: 'above' | 'below' | 'auto' = 'auto',
+    leftAnchorX?: number,
+    rightAnchorX?: number,
   ): void {
     try {
       let x1: number, y1: number, x2: number, y2: number;
@@ -174,14 +176,16 @@ export class VexFlowRenderer {
         y1 = (startNote.getYs?.() ?? [])[0] ?? 0;
         y2 = (endNote.getYs?.()   ?? [])[0] ?? 0;
       } else if (startNote) {
-        // Departing half-arc — tail goes 70 px to the right
+        // Departing half-arc — by default tail goes 70 px to the right.
+        // For print cross-system continuation we can anchor to the system right edge.
         x1 = startNote.getAbsoluteX();
-        x2 = x1 + 70;
+        x2 = rightAnchorX ?? (x1 + 70);
         y1 = y2 = (startNote.getYs?.() ?? [])[0] ?? 0;
       } else if (endNote) {
-        // Arriving half-arc — tail comes 70 px from the left
+        // Arriving half-arc — by default tail comes 70 px from the left.
+        // For print cross-system continuation we can anchor to the system left edge.
         x2 = endNote.getAbsoluteX();
-        x1 = x2 - 70;
+        x1 = leftAnchorX ?? (x2 - 70);
         y1 = y2 = (endNote.getYs?.() ?? [])[0] ?? 0;
       } else {
         return;
@@ -277,6 +281,80 @@ export class VexFlowRenderer {
     } catch (err) {
       console.warn('Tie arc draw failed:', err);
     }
+  }
+
+  /**
+   * Draw a tie continuation half-arc for cross-system print rendering.
+   * - startNote only: departing half (to the right)
+   * - endNote only:   arriving half (from the left)
+   */
+  private drawTieContinuationArc(
+    svgEl: SVGElement,
+    startNote: any | null,
+    endNote: any | null,
+    direction: 'above' | 'below' | 'auto' = 'auto',
+  ): void {
+    try {
+      let x1: number, y1: number, x2: number, y2: number;
+      if (startNote && endNote) {
+        x1 = startNote.getAbsoluteX();
+        x2 = endNote.getAbsoluteX();
+        y1 = (startNote.getYs?.() ?? [])[0] ?? 0;
+        y2 = (endNote.getYs?.()   ?? [])[0] ?? 0;
+      } else if (startNote) {
+        x1 = startNote.getAbsoluteX();
+        x2 = x1 + 56;
+        y1 = y2 = (startNote.getYs?.() ?? [])[0] ?? 0;
+      } else if (endNote) {
+        x2 = endNote.getAbsoluteX();
+        x1 = x2 - 56;
+        y1 = y2 = (endNote.getYs?.() ?? [])[0] ?? 0;
+      } else {
+        return;
+      }
+
+      const dist = x2 - x1;
+      if (dist < 2) return;
+
+      const curveHeight = Math.max(8, Math.min(18, dist * 0.14));
+      let sign: number;
+      if (direction === 'above') {
+        sign = -1;
+      } else if (direction === 'below') {
+        sign = 1;
+      } else {
+        const stemDir: number =
+          startNote?.getStemDirection?.() ?? endNote?.getStemDirection?.() ?? 1;
+        sign = stemDir >= 0 ? 1 : -1;
+      }
+
+      const midY = (y1 + y2) / 2;
+      const cpY  = midY + sign * curveHeight;
+      const cp1x = x1 + dist * 0.3;
+      const cp2x = x1 + dist * 0.7;
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${x1 + 3},${y1} C ${cp1x},${cpY} ${cp2x},${cpY} ${x2 - 3},${y2}`);
+      path.setAttribute('stroke', '#000');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('stroke-linecap', 'round');
+      svgEl.appendChild(path);
+    } catch (err) {
+      console.warn('Tie continuation arc draw failed:', err);
+    }
+  }
+
+  /** Resolve 'auto' slur direction once so multi-segment slurs stay consistent. */
+  private resolveSlurDirection(
+    direction: 'above' | 'below' | 'auto',
+    startNote: any | null,
+    endNote: any | null,
+  ): 'above' | 'below' {
+    if (direction === 'above' || direction === 'below') return direction;
+    const stemDir: number =
+      startNote?.getStemDirection?.() ?? endNote?.getStemDirection?.() ?? 1;
+    return stemDir >= 0 ? 'below' : 'above';
   }
 
   /** Returns the exact note-head positions captured during the last render(). */
@@ -603,21 +681,21 @@ export class VexFlowRenderer {
                 if (nextNote.pitch !== note.pitch) continue;
                 const nextTickableIdx = tickableDataIndices.indexOf(i + 1);
                 if (nextTickableIdx < 0 || nextTickableIdx >= tickables.length) continue;
-                try {
+                    try {
                   const tieDir = note.tieDirection;
                   if (tieDir && tieDir !== 'auto') {
                     // User-specified direction — use custom SVG arc
                     const svgEl = this.getSvgElement();
                     if (svgEl) {
                       this.drawTieArc(svgEl, tickables[tickableIdx], tickables[nextTickableIdx], tieDir);
-                    }
-                  } else {
+                  }
+                } else {
                     new StaveTie({
                       first_note: tickables[tickableIdx],
                       last_note: tickables[nextTickableIdx],
                     }).setContext(this.context).draw();
                   }
-                } catch (err) {
+                      } catch (err) {
                   console.warn('Failed to draw tie:', err);
                 }
               }
@@ -1069,6 +1147,18 @@ export class VexFlowRenderer {
       svgEl.insertBefore(bg, svgEl.firstChild);
     }
 
+    // Horizontal note area bounds per system (used for cross-system slur anchors).
+    const systemXBounds: Array<{ left: number; right: number }> = [];
+    for (let s = 0; s < numSystems; s++) {
+      const sStart = s * measPerSys;
+      const sEnd = Math.min(sStart + measPerSys, maxMeasures);
+      let widthSum = 0;
+      for (let m = sStart; m < sEnd; m++) widthSum += (measureWidths[m] ?? PRINT_MEAS_W);
+      const left = labelWidth + PRINT_CLEF_W;
+      const right = left + widthSum;
+      systemXBounds[s] = { left, right };
+    }
+
     // ── Render each system ────────────────────────────────────────────────
     // Cross-measure/cross-system tie tracking.
     // Keyed by staffIdx; persists across sysIdx iterations.
@@ -1076,12 +1166,16 @@ export class VexFlowRenderer {
       tickables: any[];
       dataIndices: number[];
       voice: any;
+      measureIdx: number;
     }>();
 
-    // Slur chain state across systems (keyed by staffIdx).
-    // When a slur chain reaches the end of a system, we record that the
-    // next system should start with an arriving half-arc.
-    const pendingCrossSystemSlur = new Map<number, boolean>();
+    // Collect all print-note draw data (in rendered order) so slur chains can be
+    // resolved in one global pass per staff after systems are laid out.
+    const printSlurDataByStaff = new Map<number, Array<{
+      sysIdx: number;
+      tickable: any;
+      noteEl: Note;
+    }>>();
 
     for (let sysIdx = 0; sysIdx < numSystems; sysIdx++) {
       const sysStartM = sysIdx * measPerSys;
@@ -1281,7 +1375,13 @@ export class VexFlowRenderer {
                 if (canDrawTie && xLastStaveNote && xFirstStaveNote) {
                   try {
                     const tieDir = xLastNoteEl?.tieDirection;
-                    if (tieDir && tieDir !== 'auto' && svgEl) {
+                    const isCrossSystemTie = prevPrintData.measureIdx < sysStartM;
+                    if (isCrossSystemTie && svgEl) {
+                      // System break: draw two half-ties instead of a long diagonal tie
+                      // spanning whitespace between systems.
+                      this.drawTieContinuationArc(svgEl, xLastStaveNote, null, tieDir ?? 'auto');
+                      this.drawTieContinuationArc(svgEl, null, xFirstStaveNote, tieDir ?? 'auto');
+                    } else if (tieDir && tieDir !== 'auto' && svgEl) {
                       this.drawTieArc(svgEl, xLastStaveNote, xFirstStaveNote, tieDir);
                     } else {
                       new StaveTie({ first_note: xLastStaveNote, last_note: xFirstStaveNote })
@@ -1295,11 +1395,17 @@ export class VexFlowRenderer {
 
               // ── Collect this measure's note-tickable pairs for slur drawing ──
               if (voice) {
+                if (!printSlurDataByStaff.has(staffIdx)) {
+                  printSlurDataByStaff.set(staffIdx, []);
+                }
+                const staffSlurData = printSlurDataByStaff.get(staffIdx)!;
                 for (let t = 0; t < tickableDataIndices.length; t++) {
                   const dataIdx = tickableDataIndices[t];
                   const el = voice.notes[dataIdx];
                   if (el && 'pitch' in el) {
-                    sysSlurData.push({ tickable: tickables[t], noteEl: el as Note });
+                    const noteEl = el as Note;
+                    sysSlurData.push({ tickable: tickables[t], noteEl });
+                    staffSlurData.push({ sysIdx, tickable: tickables[t], noteEl });
                   }
                 }
               }
@@ -1312,6 +1418,7 @@ export class VexFlowRenderer {
               tickables,
               dataIndices: [...tickableDataIndices],
               voice,
+              measureIdx: mIdx,
             });
           }
 
@@ -1336,57 +1443,8 @@ export class VexFlowRenderer {
           cumulativeX += measWidth;
         }
 
-        // ── Two-pass slur drawing for this system row ─────────────────────────
-        // Slurs are ONE smooth arc per phrase. We collected all (note, tickable)
-        // pairs in sysSlurData above; now find chains and draw each as one arc.
-        // For phrases that cross a system break, we draw:
-        //   • departing half-arc  (first_note: startTickable, last_note: null)
-        //   • arriving half-arc   (first_note: null, last_note: endTickable)
-        {
-          const hasCrossSystemArrival = pendingCrossSystemSlur.get(staffIdx) === true;
-          let slurChainStart: { tickable: any } | null = null;
-          let slurChainDir: 'above' | 'below' | 'auto' = 'auto';
-          let isFirstChain = true; // Only the first chain on this row may be a cross-system arrival
-
-          for (let s = 0; s < sysSlurData.length; s++) {
-            const { tickable, noteEl } = sysSlurData[s];
-            if (noteEl.slur) {
-              if (!slurChainStart) {
-                // Start of a new chain.
-                // If the previous system left an open slur, this chain's arc
-                // should start from the left margin (null first_note).
-                slurChainStart = {
-                  tickable: (hasCrossSystemArrival && isFirstChain) ? null : tickable,
-                };
-                slurChainDir = (noteEl.slurDirection ?? 'auto') as 'above' | 'below' | 'auto';
-              }
-              // else: continue the chain (don't overwrite start)
-            } else if (noteEl.tie && slurChainStart) {
-              // Tie WITHIN an active slur: the slur arc must encompass the tie arc.
-              // Don't close the slur chain — let it keep extending.
-              // If this tied note carries a direction override, prefer it.
-              if (noteEl.slurDirection && noteEl.slurDirection !== 'auto') {
-                slurChainDir = noteEl.slurDirection;
-              }
-            } else if (slurChainStart) {
-              // Chain ended — draw ONE arc from start to this note
-              if (slurChainStart.tickable !== tickable && svgEl) {
-                this.drawSlurArc(svgEl, slurChainStart.tickable, tickable, slurChainDir);
-              }
-              isFirstChain = false;
-              slurChainStart = null;
-              slurChainDir = 'auto';
-            }
-          }
-
-          // Chain still open at end of this system → departing half-arc
-          if (slurChainStart) {
-            if (svgEl) this.drawSlurArc(svgEl, slurChainStart.tickable, null, slurChainDir);
-            pendingCrossSystemSlur.set(staffIdx, true);
-          } else {
-            pendingCrossSystemSlur.set(staffIdx, false);
-          }
-        }
+        // Slurs for print are drawn in one global pass after all systems are
+        // rendered, so cross-system chains are resolved consistently.
       });
 
       // ── Left bracket connecting all staves in this system ─────────────────
@@ -1411,6 +1469,66 @@ export class VexFlowRenderer {
           svgEl.appendChild(serif);
         }
       }
+    }
+
+    // ── Global slur pass for print/PDF ───────────────────────────────────────
+    // Mirror editor chain logic, then split only when the chain crosses systems.
+    if (svgEl) {
+      printSlurDataByStaff.forEach((staffData) => {
+        let chainStartIdx: number | null = null;
+        let chainDir: 'above' | 'below' | 'auto' = 'auto';
+
+        const drawChain = (endIdx: number) => {
+          if (chainStartIdx === null) return;
+          const start = staffData[chainStartIdx];
+          const end = staffData[endIdx];
+          if (!start || !end) return;
+          if (start.tickable === end.tickable) return;
+          const resolvedDir = this.resolveSlurDirection(chainDir, start.tickable, end.tickable);
+
+          if (start.sysIdx === end.sysIdx) {
+            this.drawSlurArc(svgEl, start.tickable, end.tickable, resolvedDir);
+          } else {
+            // Cross-system slur: split into standard continuation arcs.
+            const startBounds = systemXBounds[start.sysIdx];
+            const endBounds = systemXBounds[end.sysIdx];
+            this.drawSlurArc(
+              svgEl,
+              start.tickable,
+              null,
+              resolvedDir,
+              undefined,
+              startBounds?.right
+            ); // depart to right system edge
+            this.drawSlurArc(
+              svgEl,
+              null,
+              end.tickable,
+              resolvedDir,
+              endBounds?.left,
+              undefined
+            ); // arrive from left system edge
+          }
+        };
+
+        for (let i = 0; i < staffData.length; i++) {
+          const note = staffData[i].noteEl;
+          if (note.slur) {
+            if (chainStartIdx === null) {
+              chainStartIdx = i;
+              chainDir = (note.slurDirection ?? 'auto') as 'above' | 'below' | 'auto';
+            }
+          } else if (note.tie && chainStartIdx !== null) {
+            if (note.slurDirection && note.slurDirection !== 'auto') {
+              chainDir = note.slurDirection;
+            }
+          } else if (chainStartIdx !== null) {
+            drawChain(i);
+            chainStartIdx = null;
+            chainDir = 'auto';
+          }
+        }
+      });
     }
 
     return svgEl;
