@@ -6,7 +6,7 @@ import { getUserCompositions, deleteComposition } from '../services/compositionS
 import { Composition } from '../types/music';
 import { logout } from '../services/authService';
 import { sharedScheduler } from '../music/playback/toneScheduler';
-import { importCompositionFromFile, importCompositionFromImages } from '../utils/importUtils';
+import { importCompositionFromFile } from '../utils/importUtils';
 
 type Tab = 'mine' | 'shared' | 'public';
 
@@ -104,34 +104,26 @@ export const Dashboard = () => {
     if (!e.target.files || e.target.files.length === 0) return;
     const files = Array.from(e.target.files);
     e.target.value = '';
-    
+
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.tiff', '.tif'];
+    const isPDF = (f: File) => f.name.toLowerCase().endsWith('.pdf');
+    const isImage = (f: File) => imageExtensions.some((ext) => f.name.toLowerCase().endsWith(ext));
+
+    // PDF and images require async OCR — send user to the Imports page instead
+    if (files.some(isPDF) || files.every(isImage)) {
+      navigate('/imports');
+      return;
+    }
+
+    // Direct import for MIDI / MusicXML (no OCR needed)
     try {
       setImporting(true);
-      
-      // Check if all selected files are images
-      const imageExtensions = ['.jpg', '.jpeg', '.png', '.tiff', '.tif'];
-      const allImages = files.every(file => {
-        const lower = file.name.toLowerCase();
-        return imageExtensions.some(ext => lower.endsWith(ext));
-      });
-      
       let imported: Composition;
-      
-      if (allImages && files.length > 0) {
-        // Multiple images: use image conversion endpoint
-        // Auto-generate sequential page numbers
-        const pageNumbers = files.map((_, index) => index + 1);
-        imported = await importCompositionFromImages(files, pageNumbers);
-      } else if (files.length === 1) {
-        // Single file: use regular import
+      if (files.length === 1) {
         imported = await importCompositionFromFile(files[0]);
       } else {
-        // Mixed file types or multiple non-image files
-        throw new Error('Please select either a single file (PDF, MIDI, MusicXML) or multiple image files (JPEG, PNG, TIFF)');
+        throw new Error('Please select a single MIDI or MusicXML file, or go to the Imports page for PDFs and image scans.');
       }
-      
-      // Set the imported composition in the store, then navigate to the editor.
-      // Pass { imported: true } in route state so EditorPage knows not to reset.
       setComposition({ ...imported, userId: user?.uid });
       navigate('/editor', { state: { imported: true } });
     } catch (error) {
@@ -209,13 +201,29 @@ export const Dashboard = () => {
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className="flex-shrink-0 border-b border-sv-border bg-sv-card">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-          {/* Logo */}
-          <div className="flex items-center gap-3">
-            <img src="/stavium_logo.png" alt="Stavium" className="w-9 h-9 rounded-lg object-cover" />
-            <div>
-              <span className="text-lg font-bold tracking-widest text-sv-text uppercase">STAVIUM</span>
-              <span className="hidden sm:block text-xs text-sv-text-dim tracking-[0.2em] uppercase -mt-0.5">Compose · Play · Create</span>
+          {/* Logo + nav */}
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3">
+              <img src="/stavium_logo.png" alt="Stavium" className="w-9 h-9 rounded-lg object-cover" />
+              <div>
+                <span className="text-lg font-bold tracking-widest text-sv-text uppercase">STAVIUM</span>
+                <span className="hidden sm:block text-xs text-sv-text-dim tracking-[0.2em] uppercase -mt-0.5">Compose · Play · Create</span>
+              </div>
             </div>
+            {/* Nav links */}
+            <nav className="hidden sm:flex items-center gap-1">
+              <button
+                className="px-3 py-1.5 rounded-md text-sm font-medium text-sv-cyan bg-sv-cyan/10 border border-sv-cyan/20"
+              >
+                Compositions
+              </button>
+              <button
+                onClick={() => navigate('/imports')}
+                className="px-3 py-1.5 rounded-md text-sm text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated transition-colors"
+              >
+                Imports
+              </button>
+            </nav>
           </div>
 
           {/* Avatar Dropdown */}
@@ -316,34 +324,50 @@ export const Dashboard = () => {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-semibold text-sv-text">Compositions</h2>
             <div className="flex items-center gap-2">
-              {/* Hidden file input for import */}
+              {/* Hidden file input — MIDI / MusicXML only (PDFs/images go to Imports page) */}
               <input
                 ref={importInputRef}
                 type="file"
-                multiple
-                accept=".mid,.midi,.musicxml,.xml,.mxl,.pdf,.jpg,.jpeg,.png,.tiff,.tif"
+                accept=".mid,.midi,.musicxml,.xml,.mxl"
                 onChange={handleImportFile}
                 style={{ display: 'none' }}
               />
+              {/* OCR Imports page link */}
+              <button
+                onClick={() => navigate('/imports')}
+                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold
+                           border border-sv-cyan/40 text-sv-cyan bg-sv-cyan/5
+                           hover:bg-sv-cyan/15 hover:border-sv-cyan/60
+                           transition-all cursor-pointer whitespace-nowrap"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <span className="hidden sm:inline">OCR Imports</span>
+                <span className="sm:hidden">Import</span>
+              </button>
+              {/* Direct import for MIDI / MusicXML */}
               <button
                 onClick={handleImportClick}
                 disabled={importing}
                 className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold
-                           border border-sv-cyan/40 text-sv-cyan bg-sv-cyan/5
-                           hover:bg-sv-cyan/15 hover:border-sv-cyan/60
+                           border border-sv-border text-sv-text-muted bg-sv-elevated
+                           hover:bg-sv-panel hover:text-sv-text hover:border-sv-border-lt
                            transition-all cursor-pointer whitespace-nowrap
                            ${importing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title="Import MIDI or MusicXML file directly"
               >
                 {importing ? (
-                  <span className="w-4 h-4 border-2 border-sv-cyan/30 border-t-sv-cyan rounded-full animate-spin" />
+                  <span className="w-4 h-4 border-2 border-sv-text-dim/30 border-t-sv-text-dim rounded-full animate-spin" />
                 ) : (
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                   </svg>
                 )}
-                <span className="hidden sm:inline">{importing ? 'Importing…' : 'Import File'}</span>
-                <span className="sm:hidden">{importing ? '…' : 'Import'}</span>
+                <span className="hidden sm:inline">{importing ? 'Importing…' : 'MIDI / XML'}</span>
+                <span className="sm:hidden">{importing ? '…' : 'MIDI'}</span>
               </button>
               <button onClick={handleCreateNew} className="sv-btn-primary gap-2">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

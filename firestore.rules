@@ -52,6 +52,18 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isOwner(resource.data);
     }
 
+    // Scanned / OCR import jobs — owner only
+    match /scanned/{jobId} {
+      // Read: owner only (backend sets owner = request.auth.uid)
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.owner;
+
+      // Delete: owner only
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.owner;
+
+      // No create/update from the client — the backend writes these docs
+      allow create, update: if false;
+    }
+
     // Deny everything else
     match /{document=**} {
       allow read, write: if false;

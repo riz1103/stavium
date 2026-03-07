@@ -16,6 +16,20 @@ export interface MusicXMLResponse {
   format: 'musicxml';
 }
 
+/**
+ * Response returned by the backend when a conversion is queued asynchronously.
+ * `file_content` is the Firestore document ID in the `scanned` collection —
+ * NOT the actual MusicXML content. Listen to that document for status updates.
+ */
+export interface QueuedConversionResponse {
+  success: boolean;
+  message: string;
+  file_url: string | null;
+  /** Firestore document ID in the `scanned` collection */
+  file_content: string;
+  format: string;
+}
+
 export interface VexFlowResponse {
   success: boolean;
   message: string;
@@ -244,6 +258,61 @@ class OMRService {
       default:
         throw new Error(`Unsupported format: ${format}`);
     }
+  }
+
+  /**
+   * Queue a PDF → MusicXML conversion asynchronously.
+   * The backend responds immediately with a Firestore document ID.
+   * Monitor `scanned/{file_content}` in Firestore for status updates.
+   */
+  async queuePDFConversion(file: File): Promise<QueuedConversionResponse> {
+    validatePDFFile(file);
+    const token = await getFirebaseToken();
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${this.baseURL}/api/convert/musicxml`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      await handleApiError(response);
+    }
+
+    return await response.json();
+  }
+
+  /**
+   * Queue an images → MusicXML conversion asynchronously.
+   * The backend responds immediately with a Firestore document ID.
+   * Monitor `scanned/{file_content}` in Firestore for status updates.
+   */
+  async queueImagesConversion(
+    files: File[],
+    pageNumbers: number[]
+  ): Promise<QueuedConversionResponse> {
+    validateImageFiles(files);
+    validatePageNumbers(files, pageNumbers);
+
+    const token = await getFirebaseToken();
+    const formData = new FormData();
+
+    files.forEach((file) => formData.append('files', file));
+    formData.append('page_numbers', pageNumbers.join(','));
+
+    const response = await fetch(`${this.baseURL}/api/convert/images/musicxml`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      await handleApiError(response);
+    }
+
+    return await response.json();
   }
 
   /**
