@@ -19,6 +19,11 @@ export interface ScannedJobFileInfo {
   storage_path?: string;
 }
 
+export interface ScannedJobError {
+  message: string;
+  type?: string;
+}
+
 export interface ScannedJob {
   id: string;
   conversion_type: string;
@@ -29,11 +34,15 @@ export interface ScannedJob {
   owner: string;
   preprocess: boolean;
   status: JobStatus;
+  /** Estimated processing time in seconds */
+  estimated_time?: number;
   /** MusicXML text content — populated by the backend when status = 'completed' */
   file_content?: string;
   /** Storage download URL — alternative delivery for large results */
   file_url?: string;
-  /** Human-readable error details when status = 'failed' */
+  /** Error object when status = 'failed' - contains message and type */
+  error?: ScannedJobError;
+  /** Legacy error_message field for backward compatibility */
   error_message?: string;
   /** Allow arbitrary extra fields the backend may write on completion */
   [key: string]: unknown;

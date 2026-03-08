@@ -264,14 +264,22 @@ class OMRService {
    * Queue a PDF → MusicXML conversion asynchronously.
    * The backend responds immediately with a Firestore document ID.
    * Monitor `scanned/{file_content}` in Firestore for status updates.
+   * @param file The PDF file to convert
+   * @param pageRange Optional page range string (e.g., "1-3", "1,3,5", "1-3,5-7")
    */
-  async queuePDFConversion(file: File): Promise<QueuedConversionResponse> {
+  async queuePDFConversion(file: File, pageRange?: string): Promise<QueuedConversionResponse> {
     validatePDFFile(file);
     const token = await getFirebaseToken();
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${this.baseURL}/api/convert/musicxml`, {
+    // Build URL with page_range query parameter if provided
+    let url = `${this.baseURL}/api/convert/musicxml`;
+    if (pageRange && pageRange.trim()) {
+      url += `?page_range=${encodeURIComponent(pageRange.trim())}`;
+    }
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
       body: formData,

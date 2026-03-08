@@ -38,6 +38,33 @@ function getFilename(job: ScannedJob): string {
   );
 }
 
+// ─── Time formatting helpers ──────────────────────────────────────────────────
+
+function formatEstimatedTime(seconds: number): string {
+  if (!seconds || seconds <= 0) return '—';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  if (mins > 0) {
+    return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+  }
+  return `${secs}s`;
+}
+
+function calculateProgress(job: ScannedJob, currentTime: Date): number {
+  if (job.status !== 'processing' || !job.estimated_time || job.estimated_time <= 0) {
+    return 0;
+  }
+  
+  const now = currentTime.getTime();
+  const updatedAt = job.updated_at?.getTime() || job.created_at?.getTime() || now;
+  const timeSpent = (now - updatedAt) / 1000; // Convert to seconds
+  
+  const percentage = (timeSpent / job.estimated_time) * 100;
+  
+  // Cap at 99% as requested
+  return Math.min(99, Math.max(0, percentage));
+}
+
 // ─── Status badge ────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<
@@ -191,6 +218,9 @@ export const ImportsPage = () => {
   const [dragOver, setDragOver]   = useState(false);
   const [avatarDropdownOpen, setAvatarDropdownOpen] = useState(false);
   const [avatarImageError, setAvatarImageError]     = useState(false);
+  const [selectedPDF, setSelectedPDF] = useState<File | null>(null);
+  const [pageRange, setPageRange] = useState<string>('');
+  const [currentTime, setCurrentTime] = useState(new Date()); // For real-time progress updates
   const avatarDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef      = useRef<HTMLInputElement>(null);
 
@@ -221,6 +251,15 @@ export const ImportsPage = () => {
     return () => unsub();
   }, [user, navigate]);
 
+  // ── Update current time for progress calculation ───────────────────────────
+  useEffect(() => {
+    // Update every second for real-time progress
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ── Close avatar dropdown when clicking outside ────────────────────────────
   useEffect(() => {
     if (!avatarDropdownOpen) return;
@@ -247,20 +286,44 @@ export const ImportsPage = () => {
       if (allImages) {
         const pageNumbers = files.map((_, i) => i + 1);
         await omrService.queueImagesConversion(files, pageNumbers);
+        // Reset state after successful upload
+        setSelectedPDF(null);
+        setPageRange('');
       } else if (files.length === 1 && files[0].name.toLowerCase().endsWith('.pdf')) {
-        await omrService.queuePDFConversion(files[0]);
+        // For PDFs, show the page range input instead of uploading immediately
+        setSelectedPDF(files[0]);
+        // Don't upload yet - wait for user to optionally set page range and click upload
       } else {
         throw new Error(
           'Please upload a single PDF or one or more image files (JPEG, PNG, TIFF) for OCR conversion.'
         );
       }
-      // Success — the Firestore listener will automatically pick up the new job
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
     } finally {
       setUploading(false);
     }
   }, []);
+
+  // ── Upload PDF with optional page range ────────────────────────────────────
+  const handlePDFUpload = useCallback(async () => {
+    if (!selectedPDF) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      await omrService.queuePDFConversion(selectedPDF, pageRange || undefined);
+      // Success — the Firestore listener will automatically pick up the new job
+      setSelectedPDF(null);
+      setPageRange('');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  }, [selectedPDF, pageRange]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -674,6 +737,92 @@ export const ImportsPage = () => {
             </div>
           </div>
 
+          {/* ── PDF Page Range Input (shown when PDF is selected) ───────────────── */}
+          {selectedPDF && !uploading && (
+            <div className="mb-6 p-4 rounded-xl bg-sv-card border border-sv-border">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-sv-elevated border border-sv-border flex items-center justify-center">
+                  <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-sv-text truncate">{selectedPDF.name}</p>
+                  <p className="text-xs text-sv-text-muted mt-0.5">
+                    {(selectedPDF.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setSelectedPDF(null);
+                    setPageRange('');
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = '';
+                    }
+                  }}
+                  className="flex-shrink-0 text-sv-text-dim hover:text-sv-text transition-colors"
+                  title="Remove file"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="page-range" className="block text-xs font-medium text-sv-text mb-1.5">
+                    Page Range (Optional)
+                  </label>
+                  <input
+                    id="page-range"
+                    type="text"
+                    value={pageRange}
+                    onChange={(e) => setPageRange(e.target.value)}
+                    placeholder="e.g., 1-3, 1,3,5, or 1-3,5-7"
+                    className="w-full px-3 py-2 rounded-lg bg-sv-elevated border border-sv-border text-sv-text text-sm
+                               placeholder:text-sv-text-dim focus:outline-none focus:ring-2 focus:ring-sv-cyan/50 focus:border-sv-cyan/50
+                               transition-all"
+                  />
+                  <p className="text-xs text-sv-text-muted mt-1.5">
+                    Leave empty to process all pages. Examples: <code className="text-sv-cyan">1-3</code>, <code className="text-sv-cyan">1,3,5</code>, <code className="text-sv-cyan">1-3,5-7</code>
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handlePDFUpload}
+                    disabled={uploading}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold
+                               bg-sv-cyan/10 border border-sv-cyan/30 text-sv-cyan
+                               hover:bg-sv-cyan/20 hover:border-sv-cyan/50 transition-all
+                               disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    Upload PDF
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedPDF(null);
+                      setPageRange('');
+                      if (fileInputRef.current) {
+                        fileInputRef.current.value = '';
+                      }
+                    }}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-sv-text-dim hover:text-sv-text
+                               hover:bg-sv-elevated border border-sv-border transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Upload error */}
           {uploadError && (
             <div className="mb-6 p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-start gap-3">
@@ -785,11 +934,55 @@ export const ImportsPage = () => {
                             )}
                           </div>
 
+                          {/* Estimated time / Progress */}
+                          {(job.status === 'on_queue' || job.status === 'processing') && job.estimated_time && (
+                            <div className="mt-2">
+                              {job.status === 'on_queue' ? (
+                                <div className="flex items-center gap-2 text-xs text-sv-text-dim">
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  <span>Estimated: {formatEstimatedTime(job.estimated_time)}</span>
+                                </div>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-sv-text-dim">Processing...</span>
+                                    <span className="text-sv-cyan font-medium">
+                                      {Math.round(calculateProgress(job, currentTime))}%
+                                    </span>
+                                  </div>
+                                  <div className="w-full h-1.5 bg-sv-elevated rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-sv-cyan transition-all duration-500 ease-out"
+                                      style={{ width: `${calculateProgress(job, currentTime)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {/* Error message */}
-                          {job.status === 'failed' && job.error_message && (
-                            <p className="mt-2 text-xs text-rose-400/80 bg-rose-500/10 border border-rose-500/20 rounded-md px-2 py-1">
-                              {job.error_message}
-                            </p>
+                          {job.status === 'failed' && (job.error?.message || job.error_message) && (
+                            <div className="mt-2 p-3 rounded-md bg-rose-500/10 border border-rose-500/20">
+                              <div className="flex items-start gap-2">
+                                <svg className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-semibold text-rose-400 mb-1">Conversion Failed</p>
+                                  <p className="text-xs text-rose-300/90 whitespace-pre-wrap break-words">
+                                    {job.error?.message || job.error_message}
+                                  </p>
+                                  {job.error?.type && (
+                                    <p className="text-xs text-rose-400/60 mt-1">Error Type: {job.error.type}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           )}
 
                           {/* Actions */}
