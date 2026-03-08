@@ -1,0 +1,25 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Uploads path - preserve existing behavior (read and write for authenticated users)
+    match /uploads/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Results path - allow authenticated users to read conversion results (MusicXML files)
+    // File IDs are UUIDs, so they're hard to guess, and Firestore rules
+    // already protect the job documents that reference these files
+    // Allow delete for cleanup when jobs are deleted
+    match /results/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow delete: if request.auth != null;
+      allow write: if false;
+    }
+    
+    // Deny all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

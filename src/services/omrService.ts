@@ -330,6 +330,27 @@ class OMRService {
   }
 
   /**
+   * Download file from Firebase Storage via backend API (avoids CORS issues)
+   * This requires the backend to have an endpoint like GET /api/storage/download?path={storagePath}
+   */
+  async downloadFromStorageViaBackend(storagePath: string): Promise<string> {
+    const token = await getFirebaseToken();
+    const encodedPath = encodeURIComponent(storagePath);
+    const response = await fetch(`${this.baseURL}/api/storage/download?path=${encodedPath}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      await handleApiError(response);
+    }
+
+    return await response.text();
+  }
+
+  /**
    * Convert PDF with retry logic
    */
   async convertWithRetry(

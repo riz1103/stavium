@@ -14,6 +14,8 @@ import {
 import { saveComposition } from '../services/compositionService';
 import { importCompositionFromFile } from '../utils/importUtils';
 import { Composition } from '../types/music';
+import { storage } from '../services/firebase';
+import { ref, getBytes } from 'firebase/storage';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -108,10 +110,42 @@ async function fetchJobResult(jobId: string): Promise<string> {
     return val;
   };
 
-  // 1. result.content  — the structure confirmed by the backend (map → content field)
+  // Helper: download from Firebase Storage using storage_path
+  // First tries direct Firebase SDK access, falls back to backend API if CORS fails
+  const downloadFromStorage = async (storagePath: string): Promise<string> => {
+    try {
+      // Try direct Firebase SDK access first
+      const storageRef = ref(storage, storagePath);
+      const bytes = await getBytes(storageRef);
+      // Convert bytes to text (assuming UTF-8 encoding for MusicXML)
+      return new TextDecoder('utf-8').decode(bytes);
+    } catch (err) {
+      // If CORS error or other access issue, try backend API as fallback
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes('CORS') || errorMessage.includes('cors') || errorMessage.includes('Access-Control')) {
+        try {
+          return await omrService.downloadFromStorageViaBackend(storagePath);
+        } catch (backendErr) {
+          throw new Error(
+            `Failed to download from Firebase Storage. Direct access failed (CORS), and backend fallback also failed: ${backendErr instanceof Error ? backendErr.message : String(backendErr)}`
+          );
+        }
+      }
+      throw new Error(`Failed to download from Firebase Storage: ${errorMessage}`);
+    }
+  };
+
+  // 1. NEW FORMAT: result.storage_path — download from Firebase Storage
   const resultMap = raw['result'];
   if (resultMap && typeof resultMap === 'object' && !Array.isArray(resultMap)) {
     const resultObj = resultMap as Record<string, unknown>;
+    
+    // Check for new format: result.storage_path
+    if (typeof resultObj['storage_path'] === 'string' && resultObj['storage_path'].trim().length > 0) {
+      return await downloadFromStorage(resultObj['storage_path']);
+    }
+    
+    // OLD FORMAT: result.content — the structure confirmed by the backend (map → content field)
     if (typeof resultObj['content'] === 'string' && resultObj['content'].trim().length > 0) {
       return await resolveString(resultObj['content'], 'result.content');
     }
@@ -135,7 +169,7 @@ async function fetchJobResult(jobId: string): Promise<string> {
   throw new Error(
     `No result content found for this job. ` +
     `Available fields: [${knownKeys}]. ` +
-    `If "result" is listed, its sub-fields may be missing "content".`
+    `If "result" is listed, its sub-fields may be missing "content" or "storage_path".`
   );
 }
 
@@ -289,6 +323,184 @@ export const ImportsPage = () => {
     } catch (err) {
       console.error('Failed to save composition:', err);
       alert(err instanceof Error ? err.message : 'Failed to save composition.');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // ── Download original file(s) ─────────────────────────────────────────────
+  const handleDownloadOriginal = async (job: ScannedJob) => {
+    try {
+      setActionLoading(job.id + '_download');
+      
+      const raw = job as Record<string, unknown>;
+      
+      // Check if there are multiple files (images)
+      const hasMultipleFiles = job.filenames && job.filenames.length > 1;
+      
+      if (hasMultipleFiles) {
+        // Download all files individually
+        // Try multiple path patterns since backend might store them differently
+        for (let i = 0; i < job.filenames.length; i++) {
+          const filename = job.filenames[i];
+          const fileExtension = filename.split('.').pop()?.toLowerCase() || 'png';
+          
+          // Try multiple storage path patterns
+          const possiblePaths: string[] = [];
+          
+          if (job.file_info?.file_id) {
+            // Pattern 1: file_id_0.png, file_id_1.png, etc.
+            possiblePaths.push(`uploads/${job.file_info.file_id}_${i}.${fileExtension}`);
+            // Pattern 2: file_id-0.png, file_id-1.png, etc.
+            possiblePaths.push(`uploads/${job.file_info.file_id}-${i}.${fileExtension}`);
+            // Pattern 3: file_id/page_0.png, file_id/page_1.png, etc.
+            possiblePaths.push(`uploads/${job.file_info.file_id}/page_${i}.${fileExtension}`);
+            // Pattern 4: file_id/page_0001.png, file_id/page_0002.png, etc.
+            const paddedIndex = String(i + 1).padStart(4, '0');
+            possiblePaths.push(`uploads/${job.file_info.file_id}/page_${paddedIndex}.${fileExtension}`);
+            // Pattern 5: file_id with original filename
+            possiblePaths.push(`uploads/${job.file_info.file_id}/${filename}`);
+          }
+          
+          // Pattern 6: Direct filename match
+          possiblePaths.push(`uploads/${filename}`);
+          
+          // Try each path until one works
+          let downloaded = false;
+          for (const storagePath of possiblePaths) {
+            try {
+              const storageRef = ref(storage, storagePath);
+              const bytes = await getBytes(storageRef);
+              
+              const mimeTypes: Record<string, string> = {
+                'pdf': 'application/pdf',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'png': 'image/png',
+                'tiff': 'image/tiff',
+                'tif': 'image/tiff',
+              };
+              const mimeType = mimeTypes[fileExtension] || 'application/octet-stream';
+              
+              const blob = new Blob([bytes], { type: mimeType });
+              const url = window.URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = filename;
+              document.body.appendChild(a);
+              a.click();
+              window.URL.revokeObjectURL(url);
+              document.body.removeChild(a);
+              
+              downloaded = true;
+              break; // Success, move to next file
+            } catch (pathErr) {
+              // Try next path
+              continue;
+            }
+          }
+          
+          if (!downloaded) {
+            console.warn(`Failed to download ${filename} - tried paths:`, possiblePaths);
+          }
+          
+          // Small delay between downloads to avoid browser blocking
+          if (i < job.filenames.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        }
+      } else {
+        // Single file download
+        let storagePath = job.file_info?.storage_path;
+        
+        // Fallback: construct path from file_id if storage_path not available
+        if (!storagePath && job.file_info?.file_id) {
+          // Get file extension from filename or file_type
+          const filename = getFilename(job);
+          let fileExtension = job.file_info?.file_type;
+          
+          // If file_type is not a valid extension, extract from filename
+          if (!fileExtension || fileExtension === 'images') {
+            fileExtension = filename.split('.').pop()?.toLowerCase() || 'pdf';
+          }
+          
+          // Normalize common extensions
+          if (fileExtension === 'jpg') fileExtension = 'jpeg';
+          
+          storagePath = `uploads/${job.file_info.file_id}.${fileExtension}`;
+        }
+        
+        if (!storagePath) {
+          throw new Error('Original file path not found');
+        }
+
+        // Try downloading with the constructed path
+        let downloaded = false;
+        const pathsToTry = [storagePath];
+        
+        // If the first path fails, try alternative patterns
+        if (job.file_info?.file_id) {
+          const filename = getFilename(job);
+          const fileExtension = filename.split('.').pop()?.toLowerCase() || 'pdf';
+          pathsToTry.push(`uploads/${job.file_info.file_id}/${filename}`);
+          pathsToTry.push(`uploads/${filename}`);
+        }
+        
+        for (const pathToTry of pathsToTry) {
+          try {
+            const storageRef = ref(storage, pathToTry);
+            const bytes = await getBytes(storageRef);
+            
+            // Get the original filename
+            const filename = getFilename(job);
+            let fileExtension = job.file_info?.file_type;
+            
+            // If file_type is not a valid extension, extract from filename
+            if (!fileExtension || fileExtension === 'images' || !fileExtension.match(/^(pdf|jpg|jpeg|png|tiff|tif)$/i)) {
+              fileExtension = filename.split('.').pop()?.toLowerCase() || 'pdf';
+            }
+            
+            const downloadFilename = filename.endsWith(`.${fileExtension}`) 
+              ? filename 
+              : `${filename}.${fileExtension}`;
+
+            // Determine MIME type
+            const mimeTypes: Record<string, string> = {
+              'pdf': 'application/pdf',
+              'jpg': 'image/jpeg',
+              'jpeg': 'image/jpeg',
+              'png': 'image/png',
+              'tiff': 'image/tiff',
+              'tif': 'image/tiff',
+            };
+            const mimeType = mimeTypes[fileExtension.toLowerCase()] || 'application/octet-stream';
+
+            // Create blob and download
+            const blob = new Blob([bytes], { type: mimeType });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = downloadFilename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            downloaded = true;
+            break; // Success, exit loop
+          } catch (pathErr) {
+            // Try next path
+            continue;
+          }
+        }
+        
+        if (!downloaded) {
+          throw new Error(`Failed to download file. Tried paths: ${pathsToTry.join(', ')}`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to download original file:', err);
+      alert(err instanceof Error ? err.message : 'Failed to download original file.');
     } finally {
       setActionLoading(null);
     }
@@ -528,7 +740,7 @@ export const ImportsPage = () => {
               <div className="space-y-3 animate-fade-in">
                 {jobs.map((job) => {
                   const filename = getFilename(job);
-                  const isActioning = actionLoading === job.id || actionLoading === job.id + '_save';
+                  const isActioning = actionLoading === job.id || actionLoading === job.id + '_save' || actionLoading === job.id + '_download';
                   const isDeleting  = deletingId === job.id;
 
                   return (
@@ -582,6 +794,34 @@ export const ImportsPage = () => {
 
                           {/* Actions */}
                           <div className="flex items-center gap-2 mt-3 flex-wrap">
+                            {/* Download original file(s) - available for all jobs with file info */}
+                            {(job.file_info?.storage_path || job.file_info?.file_id || (job.filenames && job.filenames.length > 0)) && (
+                              <button
+                                onClick={() => handleDownloadOriginal(job)}
+                                disabled={isActioning}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                                           bg-blue-500/10 border border-blue-500/30 text-blue-400
+                                           hover:bg-blue-500/20 hover:border-blue-500/50 transition-all
+                                           disabled:opacity-50 disabled:cursor-not-allowed
+                                           cursor-pointer active:scale-95"
+                                title={job.filenames && job.filenames.length > 1 
+                                  ? `Download ${job.filenames.length} original files` 
+                                  : "Download original uploaded file"}
+                              >
+                                {isActioning && actionLoading === job.id + '_download' ? (
+                                  <span className="w-3 h-3 border border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
+                                ) : (
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                  </svg>
+                                )}
+                                {job.filenames && job.filenames.length > 1 
+                                  ? `Download (${job.filenames.length})` 
+                                  : 'Download Original'}
+                              </button>
+                            )}
+
                             {job.status === 'completed' && (
                               <>
                                 <button

@@ -7,7 +7,8 @@ import {
   doc,
   getDoc,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { ref, deleteObject } from 'firebase/storage';
+import { db, storage } from './firebase';
 
 export type JobStatus = 'on_queue' | 'processing' | 'completed' | 'failed';
 
@@ -15,6 +16,7 @@ export interface ScannedJobFileInfo {
   file_id: string;
   file_type: string;
   filename: string;
+  storage_path?: string;
 }
 
 export interface ScannedJob {
@@ -95,9 +97,78 @@ export const getScannedJob = async (jobId: string): Promise<ScannedJob | null> =
 };
 
 /**
- * Delete a scanned job document from Firestore.
+ * Delete a scanned job document from Firestore and associated storage files.
+ * Deletes upload files and result files. If files don't exist, still proceeds with deletion.
  */
 export const deleteScannedJob = async (jobId: string): Promise<void> => {
+  // First, get the job data to find file paths
+  const job = await getScannedJob(jobId);
+  if (!job) {
+    // Job doesn't exist, nothing to delete
+    return;
+  }
+
+  const filesToDelete = new Set<string>();
+
+  // Collect upload file paths
+  if (job.file_info?.storage_path) {
+    filesToDelete.add(job.file_info.storage_path);
+  }
+  
+  if (job.file_info?.file_id) {
+    // For single file
+    if (!job.filenames || job.filenames.length === 1) {
+      const filename = job.file_info.filename || job.filenames?.[0];
+      if (filename) {
+        let fileExtension = job.file_info.file_type;
+        // If file_type is invalid (like "images"), extract from filename
+        if (!fileExtension || fileExtension === 'images' || !fileExtension.match(/^(pdf|jpg|jpeg|png|tiff|tif)$/i)) {
+          fileExtension = filename.split('.').pop()?.toLowerCase() || 'pdf';
+        }
+        filesToDelete.add(`uploads/${job.file_info.file_id}.${fileExtension}`);
+      }
+    }
+    
+    // For multiple images, try to delete all of them with various patterns
+    if (job.filenames && job.filenames.length > 1) {
+      job.filenames.forEach((filename, index) => {
+        const fileExtension = filename.split('.').pop()?.toLowerCase() || 'png';
+        // Try multiple storage patterns
+        filesToDelete.add(`uploads/${job.file_info.file_id}_${index}.${fileExtension}`);
+        filesToDelete.add(`uploads/${job.file_info.file_id}-${index}.${fileExtension}`);
+        filesToDelete.add(`uploads/${job.file_info.file_id}/page_${index}.${fileExtension}`);
+        const paddedIndex = String(index + 1).padStart(4, '0');
+        filesToDelete.add(`uploads/${job.file_info.file_id}/page_${paddedIndex}.${fileExtension}`);
+      });
+    }
+  }
+
+  // Collect result file paths
+  const raw = job as Record<string, unknown>;
+  const resultMap = raw['result'];
+  if (resultMap && typeof resultMap === 'object' && !Array.isArray(resultMap)) {
+    const resultObj = resultMap as Record<string, unknown>;
+    if (typeof resultObj['storage_path'] === 'string') {
+      filesToDelete.add(resultObj['storage_path']);
+    }
+  }
+
+  // Delete storage files (ignore errors if files don't exist)
+  for (const filePath of filesToDelete) {
+    try {
+      const storageRef = ref(storage, filePath);
+      await deleteObject(storageRef);
+    } catch (err) {
+      // File might not exist, that's okay - continue with deletion
+      const errorCode = (err as any)?.code;
+      if (errorCode !== 'storage/object-not-found') {
+        // Log other errors but don't fail the deletion
+        console.warn(`Failed to delete storage file ${filePath}:`, err);
+      }
+    }
+  }
+
+  // Finally, delete the Firestore document
   const docRef = doc(db, SCANNED_COLLECTION, jobId);
   await deleteDoc(docRef);
 };
