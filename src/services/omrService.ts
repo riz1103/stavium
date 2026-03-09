@@ -273,11 +273,13 @@ class OMRService {
     const formData = new FormData();
     formData.append('file', file);
 
-    // Build URL with page_range query parameter if provided
-    let url = `${this.baseURL}/api/convert/musicxml`;
+    // Build URL with query parameters
+    const params = new URLSearchParams();
+    params.append('preprocess', 'true');
     if (pageRange && pageRange.trim()) {
-      url += `?page_range=${encodeURIComponent(pageRange.trim())}`;
+      params.append('page_range', pageRange.trim());
     }
+    const url = `${this.baseURL}/api/convert/musicxml?${params.toString()}`;
 
     const response = await fetch(url, {
       method: 'POST',
@@ -310,7 +312,9 @@ class OMRService {
     files.forEach((file) => formData.append('files', file));
     formData.append('page_numbers', pageNumbers.join(','));
 
-    const response = await fetch(`${this.baseURL}/api/convert/images/musicxml`, {
+    const url = `${this.baseURL}/api/convert/images/musicxml?preprocess=true`;
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
       body: formData,

@@ -54,6 +54,48 @@ const toFirestoreTimestamp = (value: unknown): Timestamp => {
   return Timestamp.now();
 };
 
+/**
+ * Recursively remove all undefined values from an object/array.
+ * Firestore does not allow undefined values, so we need to clean them out.
+ * Preserves null values (Firestore allows null) but removes undefined.
+ */
+const removeUndefinedValues = (obj: any): any => {
+  // Return null as-is (Firestore allows null)
+  if (obj === null) {
+    return null;
+  }
+
+  // Skip undefined values entirely
+  if (obj === undefined) {
+    return undefined; // Will be filtered out by caller
+  }
+
+  // Handle arrays - recursively clean and filter out undefined
+  if (Array.isArray(obj)) {
+    return obj
+      .map(removeUndefinedValues)
+      .filter(item => item !== undefined);
+  }
+
+  // Handle plain objects - recursively clean and exclude undefined values
+  if (typeof obj === 'object' && obj.constructor === Object) {
+    const cleaned: any = {};
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        const value = removeUndefinedValues(obj[key]);
+        // Only include the key if the value is not undefined
+        if (value !== undefined) {
+          cleaned[key] = value;
+        }
+      }
+    }
+    return cleaned;
+  }
+
+  // Return primitives and other objects (Date, Timestamp, etc.) as-is
+  return obj;
+};
+
 export const saveComposition = async (
   composition: Composition,
   userId: string,
@@ -71,23 +113,19 @@ export const saveComposition = async (
     };
 
     // Firestore does not allow fields with value `undefined`
-    // Strip out any undefined top-level properties before saving.
-    Object.keys(compositionData).forEach((key) => {
-      if (compositionData[key] === undefined) {
-        delete compositionData[key];
-      }
-    });
+    // Recursively strip out all undefined values (including nested objects and arrays)
+    const cleanedData = removeUndefinedValues(compositionData);
 
     if (composition.id) {
       // Update existing composition
       const docRef = doc(db, COMPOSITIONS_COLLECTION, composition.id);
-      await updateDoc(docRef, compositionData);
+      await updateDoc(docRef, cleanedData);
       return composition.id;
     } else {
       // Create new composition
       const docRef = doc(collection(db, COMPOSITIONS_COLLECTION));
       await setDoc(docRef, {
-        ...compositionData,
+        ...cleanedData,
         id: docRef.id,
       });
       return docRef.id;
