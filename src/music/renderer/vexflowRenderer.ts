@@ -1043,13 +1043,14 @@ export class VexFlowRenderer {
           }
 
           // ── Tempo markings ───────────────────────────────────────────────────
-          // Show tempo marking when this measure introduces a tempo change
+          // Show tempo marking at the first measure or when this measure introduces a tempo change
           const prevTempo = measureIndex > 0
             ? effectiveTempo(refMeasures, measureIndex - 1, composition.tempo)
             : composition.tempo;
           const currentTempo = effectiveTempo(refMeasures, measureIndex, composition.tempo);
-          
-          if (currentTempo !== prevTempo) {
+          const isTempoChange = measureIndex === 0 || currentTempo !== prevTempo;
+
+          if (isTempoChange) {
             const svgElement = this.getSvgElement();
             if (svgElement) {
               // Position tempo marking above the staff, centered in the measure
@@ -1663,14 +1664,15 @@ export class VexFlowRenderer {
               svgEl.appendChild(numTxt);
             }
 
-            // Tempo marking (if this measure introduces a tempo change)
+            // Tempo marking at first measure or when this measure introduces a tempo change
             const refMeasures = composition.staves[0]?.measures ?? [];
             const prevTempo = mIdx > 0
               ? effectiveTempo(refMeasures, mIdx - 1, composition.tempo)
               : composition.tempo;
             const currentTempo = effectiveTempo(refMeasures, mIdx, composition.tempo);
-            
-            if (currentTempo !== prevTempo) {
+            const isTempoChange = mIdx === 0 || currentTempo !== prevTempo;
+
+            if (isTempoChange) {
               // Position tempo marking centered in the measure, above the staff
               const tempoX = measX + measWidth / 2;
               const tempoY = staveY + STAFF_LINE_OFFSET - 14; // Above measure numbers

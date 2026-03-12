@@ -820,8 +820,17 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     if (!composition) return;
     saveToHistory(composition);
 
+    // Clear measure 0's per-measure tempo so playback uses the score BPM instead of
+    // any scanned/imported value (e.g. wrong ♩=7). Later measures keep their tempo marks.
+    const newStaves = composition.staves.map((staff) => ({
+      ...staff,
+      measures: staff.measures.map((m, mi) =>
+        mi === 0 ? { ...m, tempo: undefined } : m
+      ),
+    }));
+
     set({
-      composition: updateCompositionWithDates(composition, { tempo }),
+      composition: updateCompositionWithDates(composition, { tempo, staves: newStaves }),
       canUndo: historyIndex >= 0,
       canRedo: false,
     });
