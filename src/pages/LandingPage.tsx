@@ -333,16 +333,24 @@ export const LandingPage = () => {
               <div className="text-[10px] text-sv-text-dim tracking-[0.22em] uppercase -mt-0.5">Compose · Play · Create</div>
             </div>
           </div>
-          <button
-            onClick={goLogin}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-sv-bg transition-all duration-200 hover:scale-105 hover:opacity-90"
-            style={{ background: 'linear-gradient(135deg, #00d4f5, #00a8c2)', boxShadow: '0 2px 14px rgba(0,212,245,0.25)' }}
-          >
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate('/help')}
+              className="px-4 py-2.5 rounded-lg text-sm font-medium text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated transition-colors"
+            >
+              Help
+            </button>
+            <button
+              onClick={goLogin}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-sv-bg transition-all duration-200 hover:scale-105 hover:opacity-90"
+              style={{ background: 'linear-gradient(135deg, #00d4f5, #00a8c2)', boxShadow: '0 2px 14px rgba(0,212,245,0.25)' }}
+            >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" />
             </svg>
             Sign In
-          </button>
+            </button>
+          </div>
         </nav>
 
         {/* ── Hero ────────────────────────────────────────────────────────── */}
@@ -713,6 +721,7 @@ export const LandingPage = () => {
           </div>
           <div className="flex items-center gap-6 text-xs text-sv-text-dim">
             <span>Compose · Play · Create</span>
+            <button onClick={() => navigate('/help')} className="hover:text-sv-cyan transition-colors">Help</button>
             <button onClick={goLogin} className="hover:text-sv-cyan transition-colors">Sign In</button>
           </div>
         </footer>

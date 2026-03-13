@@ -8,6 +8,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { EditorPage } from './pages/EditorPage';
 import { ImportsPage } from './pages/ImportsPage';
+import { HelpPage } from './pages/HelpPage';
 import { sharedScheduler } from './music/playback/toneScheduler';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,6 +29,7 @@ function AnimatedRoutes({ user }: { user: User | null }) {
         <Route path="/editor"     element={user ? <EditorPage />   : <Navigate to="/" replace />} />
         <Route path="/editor/:id" element={user ? <EditorPage />   : <Navigate to="/" replace />} />
         <Route path="/imports"    element={user ? <ImportsPage />  : <Navigate to="/" replace />} />
+        <Route path="/help"      element={<HelpPage />} />
       </Routes>
     </div>
   );

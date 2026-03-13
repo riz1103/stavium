@@ -1,0 +1,351 @@
+import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useUserStore } from '../app/store/userStore';
+import { sendChatMessage, type ChatMessage } from '../services/helpChatService';
+
+type Tab = 'overview' | 'getting-started' | 'features' | 'faq' | 'chat';
+
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'overview', label: 'Overview', icon: '📖' },
+  { id: 'getting-started', label: 'Getting Started', icon: '🚀' },
+  { id: 'features', label: 'Features', icon: '🎼' },
+  { id: 'faq', label: 'FAQ', icon: '❓' },
+  { id: 'chat', label: 'AI Assistant', icon: '💬' },
+];
+
+const FAQ_ITEMS = [
+  {
+    q: 'How do I add notes to my score?',
+    a: 'Click a duration in the Notes toolbar (whole, half, quarter, etc.), then click on the staff where you want the note. The note will appear at the nearest valid position. You can also use the Rest toolbar to add rests.',
+  },
+  {
+    q: 'How do I change a note\'s pitch after placing it?',
+    a: 'Click the note to select it, then drag it up or down on the staff. You can also use the Accidental toolbar (sharp, flat, natural) when a note is selected.',
+  },
+  {
+    q: 'Can I add lyrics to my composition?',
+    a: 'Yes! Select a note, then use the Lyrics toolbar to add text. Lyrics are attached to individual notes and will display below the staff.',
+  },
+  {
+    q: 'How do I share my composition with others?',
+    a: 'Open Score Info (ℹ️ button in the editor header), then use the Sharing section. You can keep it Private, share with specific people by email (view or edit access), or make it Public for everyone.',
+  },
+  {
+    q: 'What file formats can I import?',
+    a: 'Stavium supports MIDI (.mid, .midi), MusicXML (.xml, .musicxml, .mxl), and PDF/image scans. For MIDI and MusicXML, use the Import button on the Dashboard. For PDFs and scanned images, go to the OCR Imports page.',
+  },
+  {
+    q: 'How do I export my composition?',
+    a: 'Use the Export toolbar in the editor. You can export to PDF (for printing) or MIDI (for use in DAWs and other music software).',
+  },
+  {
+    q: 'What keyboard shortcuts are available?',
+    a: 'Ctrl+Z (or Cmd+Z) undo, Ctrl+Y (or Cmd+Y) redo, and Ctrl+S (or Cmd+S) save. More shortcuts may be added in future updates.',
+  },
+  {
+    q: 'Why is playback silent or delayed?',
+    a: 'Browsers require a user gesture before playing audio. Click the Play button once to start. Some instruments may need time to load (soundfonts). On first use, the app preloads instruments in the background.',
+  },
+  {
+    q: 'How do I add more staves (e.g., for SATB choir)?',
+    a: 'Use the Structure section in the toolbar. Click "Add Staff" to add a new staff. You can rename staves (Soprano, Alto, Tenor, Bass) and set each staff\'s clef and instrument.',
+  },
+  {
+    q: 'Can I add chord symbols?',
+    a: 'Yes! Select a note, then use the Chord Editor or Chord Detection panel. Chord symbols are displayed above the staff.',
+  },
+];
+
+export const HelpPage = () => {
+  const navigate = useNavigate();
+  const user = useUserStore((state) => state.user);
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  const handleSendChat = async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatLoading) return;
+
+    setChatInput('');
+    setChatMessages((prev) => [...prev, { role: 'user', text: msg }]);
+    setChatLoading(true);
+    setChatError(null);
+
+    const { text, error } = await sendChatMessage(chatMessages, msg);
+
+    setChatLoading(false);
+    if (error) {
+      setChatError(error);
+    } else if (text) {
+      setChatMessages((prev) => [...prev, { role: 'model', text }]);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendChat();
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-sv-bg flex flex-col overflow-hidden">
+      {/* Header */}
+      <header className="flex-shrink-0 border-b border-sv-border bg-sv-card">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate(user ? '/dashboard' : '/')}
+              className="flex items-center gap-2 text-sv-text-muted hover:text-sv-text transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              <span className="hidden sm:inline">Back</span>
+            </button>
+            <div className="flex items-center gap-3">
+              <img src="/stavium_logo.png" alt="Stavium" className="w-9 h-9 rounded-lg object-cover" />
+              <div>
+                <span className="text-lg font-bold tracking-widest text-sv-text uppercase">Help</span>
+                <span className="hidden sm:block text-xs text-sv-text-dim tracking-[0.2em] uppercase -mt-0.5">Documentation · FAQ · AI Assistant</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Tabs */}
+      <div className="flex-shrink-0 border-b border-sv-border bg-sv-card">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <nav className="flex gap-1 overflow-x-auto py-2">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeTab === tab.id
+                    ? 'bg-sv-cyan/15 text-sv-cyan border border-sv-cyan/40'
+                    : 'text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated'
+                }`}
+              >
+                <span>{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </div>
+
+      {/* Content */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+          {activeTab === 'overview' && (
+            <section className="space-y-8">
+              <div>
+                <h2 className="text-2xl font-bold text-sv-text mb-4">What is Stavium?</h2>
+                <p className="text-sv-text-muted leading-relaxed">
+                  Stavium is a web-based music composition and notation platform. Compose multi-staff scores for choirs and ensembles,
+                  hear instant playback with high-quality soundfonts, and export to MIDI or PDF — all in your browser.
+                </p>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-sv-text mb-2">Key capabilities</h3>
+                <ul className="space-y-2 text-sv-text-muted">
+                  <li className="flex items-start gap-2">
+                    <span className="text-sv-cyan mt-0.5">•</span>
+                    Multi-staff scores (SATB, instrumental ensembles, etc.)
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-sv-cyan mt-0.5">•</span>
+                    Live playback with tempo, instruments, and per-staff volume
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-sv-cyan mt-0.5">•</span>
+                    Export to MIDI and PDF
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-sv-cyan mt-0.5">•</span>
+                    Share and collaborate (private, shared, or public)
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-sv-cyan mt-0.5">•</span>
+                    Import from MIDI, MusicXML, PDF, and scanned images
+                  </li>
+                </ul>
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'getting-started' && (
+            <section className="space-y-8">
+              <div>
+                <h2 className="text-2xl font-bold text-sv-text mb-4">Getting Started</h2>
+                <ol className="space-y-6 list-decimal list-inside text-sv-text-muted">
+                  <li>
+                    <span className="font-medium text-sv-text">Sign in</span> — Use your Google account to sign in. No setup required.
+                  </li>
+                  <li>
+                    <span className="font-medium text-sv-text">Create or open</span> — From the Dashboard, click "New Composition" or open an existing one.
+                  </li>
+                  <li>
+                    <span className="font-medium text-sv-text">Add notes</span> — Select a note duration in the toolbar, then click on the staff to place notes.
+                  </li>
+                  <li>
+                    <span className="font-medium text-sv-text">Play back</span> — Use the Play button at the bottom to hear your composition.
+                  </li>
+                  <li>
+                    <span className="font-medium text-sv-text">Save & export</span> — Save your work, then export to PDF or MIDI when ready.
+                  </li>
+                </ol>
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'features' && (
+            <section className="space-y-8">
+              <div>
+                <h2 className="text-2xl font-bold text-sv-text mb-4">Editor Features</h2>
+                <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Notes & Rests</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Add whole, half, quarter, eighth, and sixteenth notes and rests. Click a duration, then click the staff. Select notes to adjust pitch, accidentals, ties, slurs, articulations, and dynamics.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Structure</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Add or remove staves, change clefs (treble/bass), set instruments per staff, and adjust time signatures and measures. Use Measure Properties for key signature and tempo.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Score Settings</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Set tempo (BPM), per-staff volume, and instrument sounds. Playback uses high-quality soundfonts that load in the background.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Expression (when note selected)</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Add accidentals, ties, slurs, articulations (staccato, accent), dynamics (p, pp, f, ff), lyrics, and chord symbols.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Export</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Export to PDF for printing or sharing, or MIDI for use in DAWs, notation software, or other music tools.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'faq' && (
+            <section className="space-y-6">
+              <h2 className="text-2xl font-bold text-sv-text mb-4">Frequently Asked Questions</h2>
+              {FAQ_ITEMS.map((item, i) => (
+                <div
+                  key={i}
+                  className="p-4 rounded-xl bg-sv-card border border-sv-border hover:border-sv-cyan/30 transition-colors"
+                >
+                  <h3 className="font-semibold text-sv-text mb-2">{item.q}</h3>
+                  <p className="text-sv-text-muted text-sm leading-relaxed">{item.a}</p>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {activeTab === 'chat' && (
+            <section className="flex flex-col h-[calc(100vh-280px)] min-h-[400px]">
+              <div className="mb-4">
+                <h2 className="text-2xl font-bold text-sv-text mb-1">AI Assistant</h2>
+                <p className="text-sv-text-muted text-sm">
+                  Ask questions about Stavium, music composition, or notation. Get instant help with the editor, features, and workflows.
+                </p>
+              </div>
+              <div
+                ref={chatContainerRef}
+                className="flex-1 flex flex-col rounded-xl border border-sv-border bg-sv-card overflow-hidden"
+              >
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {chatMessages.length === 0 && !chatLoading && (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <div className="text-4xl mb-4 opacity-60">💬</div>
+                      <p className="text-sv-text-muted text-sm mb-2">Ask anything about Stavium</p>
+                      <p className="text-sv-text-dim text-xs">e.g. "How do I add a tie between two notes?"</p>
+                    </div>
+                  )}
+                  {chatMessages.map((m, i) => (
+                    <div
+                      key={i}
+                      className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-lg px-4 py-2.5 text-sm ${
+                          m.role === 'user'
+                            ? 'bg-sv-cyan/20 text-sv-text border border-sv-cyan/30'
+                            : 'bg-sv-elevated text-sv-text-muted border border-sv-border'
+                        }`}
+                      >
+                        {m.text}
+                      </div>
+                    </div>
+                  ))}
+                  {chatLoading && (
+                    <div className="flex justify-start">
+                      <div className="rounded-lg px-4 py-2.5 bg-sv-elevated border border-sv-border">
+                        <span className="inline-flex gap-1">
+                          <span className="w-2 h-2 rounded-full bg-sv-cyan animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <span className="w-2 h-2 rounded-full bg-sv-cyan animate-bounce" style={{ animationDelay: '150ms' }} />
+                          <span className="w-2 h-2 rounded-full bg-sv-cyan animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {chatError && (
+                    <div className="rounded-lg px-4 py-2.5 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm">
+                      {chatError}
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+                <div className="p-2 border-t border-sv-border">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Ask a question..."
+                      className="flex-1 px-4 py-2.5 rounded-lg bg-sv-elevated border border-sv-border text-sv-text placeholder-sv-text-dim
+                                 focus:outline-none focus:ring-2 focus:ring-sv-cyan/40 focus:border-sv-cyan/60"
+                      disabled={chatLoading}
+                    />
+                    <button
+                      onClick={handleSendChat}
+                      disabled={!chatInput.trim() || chatLoading}
+                      className="px-4 py-2.5 rounded-lg bg-sv-cyan text-sv-bg font-medium disabled:opacity-50 disabled:cursor-not-allowed
+                                 hover:bg-sv-cyan-dim transition-colors"
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+};

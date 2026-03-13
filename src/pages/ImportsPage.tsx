@@ -610,6 +610,12 @@ export const ImportsPage = () => {
               >
                 Imports
               </button>
+              <button
+                onClick={() => navigate('/help')}
+                className="px-3 py-1.5 rounded-md text-sm text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated transition-colors"
+              >
+                Help
+              </button>
             </nav>
           </div>
 
