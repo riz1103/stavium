@@ -1057,7 +1057,12 @@ export const ImportsPage = () => {
                               </>
                             )}
 
-                            {(job.status === 'on_queue' || job.status === 'processing') && (
+                            {job.status === 'on_queue' && (
+                              <span className="text-xs text-sv-text-dim italic">
+                                Waiting in queue…
+                              </span>
+                            )}
+                            {job.status === 'processing' && (
                               <span className="text-xs text-sv-text-dim italic">
                                 Conversion in progress…
                               </span>

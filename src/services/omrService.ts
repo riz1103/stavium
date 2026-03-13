@@ -275,7 +275,7 @@ class OMRService {
 
     // Build URL with query parameters
     const params = new URLSearchParams();
-    params.append('preprocess', 'true');
+    params.append('preprocess', 'false'); // TODO: re-enable when done testing
     if (pageRange && pageRange.trim()) {
       params.append('page_range', pageRange.trim());
     }
@@ -312,7 +312,7 @@ class OMRService {
     files.forEach((file) => formData.append('files', file));
     formData.append('page_numbers', pageNumbers.join(','));
 
-    const url = `${this.baseURL}/api/convert/images/musicxml?preprocess=true`;
+    const url = `${this.baseURL}/api/convert/images/musicxml?preprocess=false`; // TODO: re-enable when done testing
 
     const response = await fetch(url, {
       method: 'POST',
