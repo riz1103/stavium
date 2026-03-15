@@ -20,7 +20,9 @@ export const Dashboard = () => {
   const [activeTab, setActiveTab] = useState<Tab>('mine');
   const [searchQuery, setSearchQuery] = useState('');
   const [avatarDropdownOpen, setAvatarDropdownOpen] = useState(false);
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
   const avatarDropdownRef = useRef<HTMLDivElement>(null);
+  const navMenuRef = useRef<HTMLDivElement>(null);
   const [avatarImageError, setAvatarImageError] = useState(false);
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -82,6 +84,18 @@ export const Dashboard = () => {
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [avatarDropdownOpen]);
+
+  // Close mobile nav when clicking outside
+  useEffect(() => {
+    if (!navMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (navMenuRef.current && !navMenuRef.current.contains(e.target as Node)) {
+        setNavMenuOpen(false);
+      }
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [navMenuOpen]);
 
   const loadCompositions = async () => {
     if (!user) return;
@@ -199,18 +213,22 @@ export const Dashboard = () => {
   return (
     <div className="min-h-screen bg-sv-bg flex flex-col overflow-hidden">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="flex-shrink-0 border-b border-sv-border bg-sv-card">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-          {/* Logo + nav */}
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3">
-              <img src="/stavium_logo.png" alt="Stavium" className="w-9 h-9 rounded-lg object-cover" />
-              <div>
-                <span className="text-lg font-bold tracking-widest text-sv-text uppercase">STAVIUM</span>
+      <header className="flex-shrink-0 border-b border-sv-border bg-sv-card relative">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-2">
+          {/* Logo + nav (desktop) + hamburger (mobile) */}
+          <div ref={navMenuRef} className="flex items-center gap-3 sm:gap-6 min-w-0 flex-1">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="flex items-center gap-2 sm:gap-3 flex-shrink-0 hover:opacity-80 transition-opacity"
+            >
+              <img src="/stavium_logo.png" alt="Stavium" className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg object-cover" />
+              <div className="min-w-0">
+                <span className="text-base sm:text-lg font-bold tracking-widest text-sv-text uppercase">STAVIUM</span>
                 <span className="hidden sm:block text-xs text-sv-text-dim tracking-[0.2em] uppercase -mt-0.5">Compose · Play · Create</span>
               </div>
-            </div>
-            {/* Nav links */}
+            </button>
+
+            {/* Nav links — desktop */}
             <nav className="hidden sm:flex items-center gap-1">
               <button
                 className="px-3 py-1.5 rounded-md text-sm font-medium text-sv-cyan bg-sv-cyan/10 border border-sv-cyan/20"
@@ -230,7 +248,52 @@ export const Dashboard = () => {
                 Help
               </button>
             </nav>
+
+            {/* Hamburger — mobile only */}
+            <button
+              type="button"
+              onClick={() => { setNavMenuOpen((o) => !o); setAvatarDropdownOpen(false); }}
+              className="sm:hidden flex items-center justify-center w-10 h-10 rounded-lg text-sv-text hover:bg-sv-elevated transition-colors ml-auto"
+              aria-label="Open menu"
+              aria-expanded={navMenuOpen}
+            >
+              {navMenuOpen ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
           </div>
+
+          {/* Mobile nav menu */}
+          {navMenuOpen && (
+            <div className="sm:hidden absolute top-full left-0 right-0 z-40 bg-sv-card border-b border-sv-border shadow-lg">
+              <nav className="px-3 py-2 flex flex-col gap-0.5 max-w-6xl mx-auto">
+                <button
+                  onClick={() => setNavMenuOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-sv-cyan bg-sv-cyan/10 border border-sv-cyan/20"
+                >
+                  Compositions
+                </button>
+                <button
+                  onClick={() => { navigate('/imports'); setNavMenuOpen(false); }}
+                  className="flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated transition-colors"
+                >
+                  Imports
+                </button>
+                <button
+                  onClick={() => { navigate('/help'); setNavMenuOpen(false); }}
+                  className="flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated transition-colors"
+                >
+                  Help
+                </button>
+              </nav>
+            </div>
+          )}
 
           {/* Avatar Dropdown */}
           <div className="relative" ref={avatarDropdownRef}>

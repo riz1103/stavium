@@ -266,8 +266,9 @@ class OMRService {
    * Monitor `scanned/{file_content}` in Firestore for status updates.
    * @param file The PDF file to convert
    * @param pageRange Optional page range string (e.g., "1-3", "1,3,5", "1-3,5-7")
+   * @param preprocess If true, apply image pre-processing before OCR (default false)
    */
-  async queuePDFConversion(file: File, pageRange?: string): Promise<QueuedConversionResponse> {
+  async queuePDFConversion(file: File, pageRange?: string, preprocess: boolean = false): Promise<QueuedConversionResponse> {
     validatePDFFile(file);
     const token = await getFirebaseToken();
     const formData = new FormData();
@@ -275,7 +276,7 @@ class OMRService {
 
     // Build URL with query parameters
     const params = new URLSearchParams();
-    params.append('preprocess', 'false'); // TODO: re-enable when done testing
+    params.append('preprocess', String(preprocess));
     if (pageRange && pageRange.trim()) {
       params.append('page_range', pageRange.trim());
     }
@@ -298,10 +299,12 @@ class OMRService {
    * Queue an images → MusicXML conversion asynchronously.
    * The backend responds immediately with a Firestore document ID.
    * Monitor `scanned/{file_content}` in Firestore for status updates.
+   * @param preprocess If true, apply image pre-processing before OCR (default false)
    */
   async queueImagesConversion(
     files: File[],
-    pageNumbers: number[]
+    pageNumbers: number[],
+    preprocess: boolean = false
   ): Promise<QueuedConversionResponse> {
     validateImageFiles(files);
     validatePageNumbers(files, pageNumbers);
@@ -312,7 +315,7 @@ class OMRService {
     files.forEach((file) => formData.append('files', file));
     formData.append('page_numbers', pageNumbers.join(','));
 
-    const url = `${this.baseURL}/api/convert/images/musicxml?preprocess=false`; // TODO: re-enable when done testing
+    const url = `${this.baseURL}/api/convert/images/musicxml?preprocess=${preprocess}`;
 
     const response = await fetch(url, {
       method: 'POST',

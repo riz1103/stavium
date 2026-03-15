@@ -220,8 +220,11 @@ export const ImportsPage = () => {
   const [avatarImageError, setAvatarImageError]     = useState(false);
   const [selectedPDF, setSelectedPDF] = useState<File | null>(null);
   const [pageRange, setPageRange] = useState<string>('');
+  const [preprocess, setPreprocess] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date()); // For real-time progress updates
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
   const avatarDropdownRef = useRef<HTMLDivElement>(null);
+  const navMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef      = useRef<HTMLInputElement>(null);
 
   // ── Avatar helpers ─────────────────────────────────────────────────────────
@@ -268,9 +271,21 @@ export const ImportsPage = () => {
         setAvatarDropdownOpen(false);
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
   }, [avatarDropdownOpen]);
+
+  // Close mobile nav when clicking outside
+  useEffect(() => {
+    if (!navMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (navMenuRef.current && !navMenuRef.current.contains(e.target as Node)) {
+        setNavMenuOpen(false);
+      }
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [navMenuOpen]);
 
   // ── Upload logic ───────────────────────────────────────────────────────────
   const handleFiles = useCallback(async (files: File[]) => {
@@ -285,7 +300,7 @@ export const ImportsPage = () => {
 
       if (allImages) {
         const pageNumbers = files.map((_, i) => i + 1);
-        await omrService.queueImagesConversion(files, pageNumbers);
+        await omrService.queueImagesConversion(files, pageNumbers, preprocess);
         // Reset state after successful upload
         setSelectedPDF(null);
         setPageRange('');
@@ -303,7 +318,7 @@ export const ImportsPage = () => {
     } finally {
       setUploading(false);
     }
-  }, []);
+  }, [preprocess]);
 
   // ── Upload PDF with optional page range ────────────────────────────────────
   const handlePDFUpload = useCallback(async () => {
@@ -311,7 +326,7 @@ export const ImportsPage = () => {
     setUploadError(null);
     setUploading(true);
     try {
-      await omrService.queuePDFConversion(selectedPDF, pageRange || undefined);
+      await omrService.queuePDFConversion(selectedPDF, pageRange || undefined, preprocess);
       // Success — the Firestore listener will automatically pick up the new job
       setSelectedPDF(null);
       setPageRange('');
@@ -323,7 +338,7 @@ export const ImportsPage = () => {
     } finally {
       setUploading(false);
     }
-  }, [selectedPDF, pageRange]);
+  }, [selectedPDF, pageRange, preprocess]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -580,24 +595,24 @@ export const ImportsPage = () => {
     <div className="min-h-screen bg-sv-bg flex flex-col overflow-hidden">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="flex-shrink-0 border-b border-sv-border bg-sv-card">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-          {/* Logo + nav */}
-          <div className="flex items-center gap-6">
+      <header className="flex-shrink-0 border-b border-sv-border bg-sv-card relative">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-2">
+          {/* Logo + nav (desktop) + hamburger (mobile) */}
+          <div ref={navMenuRef} className="flex items-center gap-3 sm:gap-6 min-w-0 flex-1">
             <button
               onClick={() => navigate('/dashboard')}
-              className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+              className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity flex-shrink-0"
             >
-              <img src="/stavium_logo.png" alt="Stavium" className="w-9 h-9 rounded-lg object-cover" />
-              <div>
-                <span className="text-lg font-bold tracking-widest text-sv-text uppercase">STAVIUM</span>
+              <img src="/stavium_logo.png" alt="Stavium" className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg object-cover" />
+              <div className="min-w-0">
+                <span className="text-base sm:text-lg font-bold tracking-widest text-sv-text uppercase">STAVIUM</span>
                 <span className="hidden sm:block text-xs text-sv-text-dim tracking-[0.2em] uppercase -mt-0.5">
                   Compose · Play · Create
                 </span>
               </div>
             </button>
 
-            {/* Nav links */}
+            {/* Nav links — desktop */}
             <nav className="hidden sm:flex items-center gap-1">
               <button
                 onClick={() => navigate('/dashboard')}
@@ -617,7 +632,51 @@ export const ImportsPage = () => {
                 Help
               </button>
             </nav>
+
+            {/* Hamburger — mobile only */}
+            <button
+              type="button"
+              onClick={() => { setNavMenuOpen((o) => !o); setAvatarDropdownOpen(false); }}
+              className="sm:hidden flex items-center justify-center w-10 h-10 rounded-lg text-sv-text hover:bg-sv-elevated transition-colors ml-auto"
+              aria-label="Open menu"
+              aria-expanded={navMenuOpen}
+            >
+              {navMenuOpen ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
           </div>
+
+          {/* Mobile nav menu */}
+          {navMenuOpen && (
+            <div className="sm:hidden absolute top-full left-0 right-0 z-40 bg-sv-card border-b border-sv-border shadow-lg">
+              <nav className="px-3 py-2 flex flex-col gap-0.5 max-w-6xl mx-auto">
+                <button
+                  onClick={() => { navigate('/dashboard'); setNavMenuOpen(false); }}
+                  className="flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated transition-colors"
+                >
+                  Compositions
+                </button>
+                <button
+                  className="flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-sv-cyan bg-sv-cyan/10 border border-sv-cyan/20"
+                >
+                  Imports
+                </button>
+                <button
+                  onClick={() => { navigate('/help'); setNavMenuOpen(false); }}
+                  className="flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated transition-colors"
+                >
+                  Help
+                </button>
+              </nav>
+            </div>
+          )}
 
           {/* Avatar dropdown */}
           <div className="relative" ref={avatarDropdownRef}>
@@ -685,7 +744,7 @@ export const ImportsPage = () => {
 
       {/* ── Main ───────────────────────────────────────────────────────────── */}
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
 
           {/* Page title */}
           <div className="mb-6">
@@ -741,6 +800,23 @@ export const ImportsPage = () => {
                 </>
               )}
             </div>
+          </div>
+
+          {/* ── Pre-processing option ───────────────────────────────────────────── */}
+          <div className="mb-6 flex items-start gap-3 p-3 rounded-lg bg-sv-card/50 border border-sv-border">
+            <input
+              id="preprocess"
+              type="checkbox"
+              checked={preprocess}
+              onChange={(e) => setPreprocess(e.target.checked)}
+              className="mt-1 w-4 h-4 rounded border-sv-border bg-sv-elevated text-sv-cyan focus:ring-sv-cyan/50"
+            />
+            <label htmlFor="preprocess" className="flex-1 cursor-pointer">
+              <span className="text-sm font-medium text-sv-text">Enable pre-processing</span>
+              <p className="text-xs text-sv-text-muted mt-0.5">
+                Improve OCR on scans by enhancing contrast and cleaning the image before conversion. Turn on for low-quality or noisy scans.
+              </p>
+            </label>
           </div>
 
           {/* ── PDF Page Range Input (shown when PDF is selected) ───────────────── */}
