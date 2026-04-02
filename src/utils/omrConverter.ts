@@ -1,5 +1,6 @@
 import { Composition, Staff, Measure, Note, Rest, NoteDuration, Clef } from '../types/music';
 import type { VexFlowData, Staff as OMRStaff, Voice as OMRVoice } from '../services/omrService';
+import { durationToBeats } from './durationUtils';
 
 /**
  * Convert OMR VexFlow duration string to app NoteDuration
@@ -107,33 +108,12 @@ export function convertOMRVexFlowToComposition(
     }
     
     // Distribute notes across measures based on time signature
-    // Calculate beats per note/rest
-    const durationToBeats: Record<NoteDuration, number> = {
-      'whole': 4,
-      'half': 2,
-      'quarter': 1,
-      'eighth': 0.5,
-      'sixteenth': 0.25,
-      'thirty-second': 0.125,
-      'dotted-whole': 6,
-      'dotted-half': 3,
-      'dotted-quarter': 1.5,
-      'dotted-eighth': 0.75,
-      'dotted-sixteenth': 0.375,
-      'dotted-thirty-second': 0.1875,
-      'triplet-half': 4 / 3,
-      'triplet-quarter': 2 / 3,
-      'triplet-eighth': 1 / 3,
-      'triplet-sixteenth': 1 / 6,
-      'triplet-thirty-second': 1 / 12,
-    };
-    
     let currentMeasure: Measure | null = null;
     let currentMeasureBeats = 0;
     let measureNumber = 1;
     
     allNotes.forEach((element) => {
-      const elementBeats = durationToBeats[element.duration] || 1;
+      const elementBeats = durationToBeats(element.duration as NoteDuration);
       
       // Start a new measure if needed
       if (!currentMeasure || currentMeasureBeats + elementBeats > beatsPerMeasure) {

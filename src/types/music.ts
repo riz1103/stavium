@@ -17,9 +17,24 @@ export type NoteDuration =
   | 'triplet-quarter'
   | 'triplet-eighth'
   | 'triplet-sixteenth'
-  | 'triplet-thirty-second';
+  | 'triplet-thirty-second'
+  | 'quintuplet-half'
+  | 'quintuplet-quarter'
+  | 'quintuplet-eighth'
+  | 'quintuplet-sixteenth'
+  | 'quintuplet-thirty-second'
+  | 'sextuplet-half'
+  | 'sextuplet-quarter'
+  | 'sextuplet-eighth'
+  | 'sextuplet-sixteenth'
+  | 'sextuplet-thirty-second'
+  | 'septuplet-half'
+  | 'septuplet-quarter'
+  | 'septuplet-eighth'
+  | 'septuplet-sixteenth'
+  | 'septuplet-thirty-second';
 
-export type Accidental = 'sharp' | 'flat' | 'natural' | null;
+export type Accidental = 'sharp' | 'flat' | 'natural' | 'double-sharp' | 'double-flat' | null;
 
 export type Pitch = string; // e.g., "C4", "E#5", "Bb3"
 

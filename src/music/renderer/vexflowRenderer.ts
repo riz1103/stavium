@@ -635,7 +635,7 @@ export class VexFlowRenderer {
                 const rawDuration = (el as Note).duration;
                 const base = rawDuration
                   .replace('dotted-', '')
-                  .replace('triplet-', '');
+                  .replace(/^(triplet|quintuplet|sextuplet|septuplet)-/, '');
                 if (base !== 'eighth' && base !== 'sixteenth' && base !== 'thirty-second') continue;
                 const dist = Math.abs(pitchToMidi((el as Note).pitch) - middleLineMidi);
                 if (dist > measureMaxDist) {
@@ -672,7 +672,7 @@ export class VexFlowRenderer {
                   const note = element as Note;
                   const base = note.duration
                     .replace('dotted-', '')
-                    .replace('triplet-', '');
+                    .replace(/^(triplet|quintuplet|sextuplet|septuplet)-/, '');
                   const isBeamable = base === 'eighth' || base === 'sixteenth' || base === 'thirty-second';
 
                   if (isBeamable) {
@@ -694,13 +694,38 @@ export class VexFlowRenderer {
               flushBeamGroup(); // flush any trailing group
             }
 
+            const extraVoiceData = (measure.voices ?? [])
+              .slice(1)
+              .map((v, extraIdx) => {
+                const extraTickables: any[] = [];
+                const extraDataIndices: number[] = [];
+                v.notes.forEach((element, dataIndex) => {
+                  if ('pitch' in element) {
+                    const sn = this.createStaveNote(element as Note, effClef, effKeySig, measure, dataIndex);
+                    if (sn) { extraDataIndices.push(dataIndex); extraTickables.push(sn); }
+                  } else {
+                    const rn = this.createRestNote(element as Rest, effClef);
+                    if (rn) { extraDataIndices.push(dataIndex); extraTickables.push(rn); }
+                  }
+                });
+                return { voiceIndex: extraIdx + 1, voice: v, tickables: extraTickables, dataIndices: extraDataIndices };
+              })
+              .filter((v) => v.tickables.length > 0);
+
             const vfVoice = new Voice({ num_beats: voiceBeats, beat_value: effBeatType });
             vfVoice.setStrict(false);
             vfVoice.addTickables(tickables);
+            const extraVfVoices = extraVoiceData.map((ev) => {
+              const vv = new Voice({ num_beats: voiceBeats, beat_value: effBeatType });
+              vv.setStrict(false);
+              vv.addTickables(ev.tickables);
+              return vv;
+            });
             new Formatter()
-              .joinVoices([vfVoice])
-              .format([vfVoice], mw - 30);
+              .joinVoices([vfVoice, ...extraVfVoices])
+              .format([vfVoice, ...extraVfVoices], mw - 30);
             vfVoice.draw(this.context, measureStave);
+            extraVfVoices.forEach((ev) => ev.draw(this.context, measureStave));
 
             // Draw beams after the voice so they render on top
             beams.forEach((b) => b.setContext(this.context).draw());
@@ -942,6 +967,28 @@ export class VexFlowRenderer {
                 }
               } catch (_) { /* skip if note not fully positioned */ }
             });
+
+            // Capture positions for additional voices (rendered for imported chords/polyphony).
+            extraVoiceData.forEach((ev) => {
+              ev.tickables.forEach((sn, ti) => {
+                try {
+                  const nx = sn.getAbsoluteX();
+                  const ys: number[] = sn.getYs?.() ?? [];
+                  const ny = ys.length > 0 ? ys[0] : 0;
+                  if (nx && ny) {
+                    this.notePositions.push({
+                      staffIndex,
+                      measureIndex,
+                      voiceIndex: ev.voiceIndex,
+                      noteIndex: ti,
+                      noteDataIndex: ev.dataIndices[ti],
+                      x: nx,
+                      y: ny,
+                    });
+                  }
+                } catch (_) { /* skip */ }
+              });
+            });
           } catch (err) {
             console.warn(`Measure ${measureIndex + 1} render error:`, err);
           }
@@ -1137,14 +1184,18 @@ export class VexFlowRenderer {
   private getDurationInfo(duration: NoteDuration): {
     baseDuration: NoteDuration;
     isDotted: boolean;
-    isTriplet: boolean;
+    tupletKind: 'triplet' | 'quintuplet' | 'sextuplet' | 'septuplet' | null;
   } {
     const isDotted = duration.startsWith('dotted-');
-    const isTriplet = duration.startsWith('triplet-');
+    const tupletMatch = duration.match(/^(triplet|quintuplet|sextuplet|septuplet)-/);
+    const tupletKind = (tupletMatch?.[1] as 'triplet' | 'quintuplet' | 'sextuplet' | 'septuplet' | undefined) ?? null;
     const baseDuration = duration
       .replace('dotted-', '')
-      .replace('triplet-', '') as NoteDuration;
-    return { baseDuration, isDotted, isTriplet };
+      .replace('triplet-', '')
+      .replace('quintuplet-', '')
+      .replace('sextuplet-', '')
+      .replace('septuplet-', '') as NoteDuration;
+    return { baseDuration, isDotted, tupletKind };
   }
 
   private buildTuplets(voice: any, tickables: any[], tickableDataIndices: number[]): Tuplet[] {
@@ -1160,32 +1211,49 @@ export class VexFlowRenderer {
     while (i < voice.notes.length) {
       const element = voice.notes[i];
       const duration = element?.duration as NoteDuration | undefined;
-      if (!duration || !duration.startsWith('triplet-')) {
+      if (!duration) {
         i++;
         continue;
       }
 
-      const base = duration.replace('triplet-', '');
+      const kindMatch = duration.match(/^(triplet|quintuplet|sextuplet|septuplet)-(.+)$/);
+      if (!kindMatch) {
+        i++;
+        continue;
+      }
+      const [, kind, base] = kindMatch;
+      const kindSpec: Record<string, { groupSize: number; notesOccupied: number }> = {
+        triplet: { groupSize: 3, notesOccupied: 2 },
+        quintuplet: { groupSize: 5, notesOccupied: 4 },
+        sextuplet: { groupSize: 6, notesOccupied: 4 },
+        septuplet: { groupSize: 7, notesOccupied: 4 },
+      };
+      const spec = kindSpec[kind];
+      if (!spec) {
+        i++;
+        continue;
+      }
       const groupStart = i;
       while (i < voice.notes.length) {
         const d = (voice.notes[i]?.duration as NoteDuration | undefined) ?? '';
-        if (!d.startsWith('triplet-') || d.replace('triplet-', '') !== base) break;
+        const m = d.match(/^(triplet|quintuplet|sextuplet|septuplet)-(.+)$/);
+        if (!m || m[1] !== kind || m[2] !== base) break;
         i++;
       }
 
       const groupLen = i - groupStart;
-      const fullTriplets = Math.floor(groupLen / 3);
-      for (let g = 0; g < fullTriplets; g++) {
-        const start = groupStart + g * 3;
-        const groupTickables = [start, start + 1, start + 2]
+      const fullGroups = Math.floor(groupLen / spec.groupSize);
+      for (let g = 0; g < fullGroups; g++) {
+        const start = groupStart + g * spec.groupSize;
+        const groupTickables = Array.from({ length: spec.groupSize }, (_, offset) => start + offset)
           .map((dataIndex) => tickableByDataIndex.get(dataIndex))
           .filter(Boolean);
-        if (groupTickables.length === 3) {
+        if (groupTickables.length === spec.groupSize) {
           try {
             tuplets.push(
               new Tuplet(groupTickables, {
-                num_notes: 3,
-                notes_occupied: 2,
+                num_notes: spec.groupSize,
+                notes_occupied: spec.notesOccupied,
                 ratioed: false,
               })
             );
@@ -1236,8 +1304,12 @@ export class VexFlowRenderer {
       const explicitAccidental = note.accidental;
 
       if (showAccidental || explicitAccidental) {
-        if (accidental === '#' || explicitAccidental === 'sharp') {
+        if (accidental === '##' || accidental === 'x' || explicitAccidental === 'double-sharp') {
+          staveNote.addModifier(new Accidental('##'), 0);
+        } else if (accidental === '#' || explicitAccidental === 'sharp') {
           staveNote.addModifier(new Accidental('#'), 0);
+        } else if (accidental === 'bb' || explicitAccidental === 'double-flat') {
+          staveNote.addModifier(new Accidental('bb'), 0);
         } else if (accidental === 'b' || explicitAccidental === 'flat') {
           staveNote.addModifier(new Accidental('b'), 0);
         } else if (accidental === 'n' || explicitAccidental === 'natural') {
@@ -1509,7 +1581,7 @@ export class VexFlowRenderer {
                   const rawDuration = (el as Note).duration;
                   const base = rawDuration
                     .replace('dotted-', '')
-                    .replace('triplet-', '');
+                    .replace(/^(triplet|quintuplet|sextuplet|septuplet)-/, '');
                   if (base !== 'eighth' && base !== 'sixteenth' && base !== 'thirty-second') continue;
                   const dist = Math.abs(pitchToMidi((el as Note).pitch) - printMiddleLineMidi);
                   if (dist > printMeasureMaxDist) {
@@ -1543,7 +1615,7 @@ export class VexFlowRenderer {
                     const note = element as Note;
                     const base = note.duration
                       .replace('dotted-', '')
-                      .replace('triplet-', '');
+                      .replace(/^(triplet|quintuplet|sextuplet|septuplet)-/, '');
                     const isBeamable =
                       base === 'eighth' || base === 'sixteenth' || base === 'thirty-second';
 
@@ -1568,10 +1640,33 @@ export class VexFlowRenderer {
               const vfVoice = new Voice({ num_beats: voiceBeats, beat_value: beatTypeValue });
               vfVoice.setStrict(false);
               vfVoice.addTickables(tickables);
+              const extraVoiceData = (measure.voices ?? [])
+                .slice(1)
+                .map((v) => {
+                  const extraTickables: any[] = [];
+                  v.notes.forEach((element) => {
+                    if ('pitch' in element) {
+                      const sn = this.createStaveNote(element as Note, staff.clef, composition.keySignature);
+                      if (sn) extraTickables.push(sn);
+                    } else {
+                      const rn = this.createRestNote(element as Rest, staff.clef);
+                      if (rn) extraTickables.push(rn);
+                    }
+                  });
+                  return extraTickables;
+                })
+                .filter((arr) => arr.length > 0);
+              const extraVfVoices = extraVoiceData.map((extraTickables) => {
+                const vv = new Voice({ num_beats: voiceBeats, beat_value: beatTypeValue });
+                vv.setStrict(false);
+                vv.addTickables(extraTickables);
+                return vv;
+              });
               new Formatter()
-                .joinVoices([vfVoice])
-                .format([vfVoice], measWidth - 30);
+                .joinVoices([vfVoice, ...extraVfVoices])
+                .format([vfVoice, ...extraVfVoices], measWidth - 30);
               vfVoice.draw(this.context, measureStave);
+              extraVfVoices.forEach((ev) => ev.draw(this.context, measureStave));
 
               // Draw beams after the voice so they render on top
               beams.forEach((b) => b.setContext(this.context).draw());

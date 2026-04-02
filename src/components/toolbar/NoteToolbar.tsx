@@ -12,15 +12,27 @@ const BASE_DURATIONS: { value: NoteDuration; label: string }[] = [
 ];
 
 const DOTABLE = new Set<NoteDuration>(['whole', 'half', 'quarter', 'eighth', 'sixteenth', 'thirty-second']);
-const TRIPLETABLE = new Set<NoteDuration>(['half', 'quarter', 'eighth', 'sixteenth', 'thirty-second']);
+const TUPLETABLE = new Set<NoteDuration>(['half', 'quarter', 'eighth', 'sixteenth', 'thirty-second']);
 const toDotted = (base: NoteDuration): NoteDuration => `dotted-${base}` as NoteDuration;
-const toTriplet = (base: NoteDuration): NoteDuration => `triplet-${base}` as NoteDuration;
+type TupletKind = 'straight' | 'triplet' | 'quintuplet' | 'sextuplet' | 'septuplet';
+const TUPLET_OPTIONS: Array<{ value: TupletKind; label: string; short: string }> = [
+  { value: 'straight', label: 'Straight', short: '—' },
+  { value: 'triplet', label: 'Triplet (3:2)', short: '3' },
+  { value: 'quintuplet', label: 'Quintuplet (5:4)', short: '5' },
+  { value: 'sextuplet', label: 'Sextuplet (6:4)', short: '6' },
+  { value: 'septuplet', label: 'Septuplet (7:4)', short: '7' },
+];
+const toTuplet = (kind: Exclude<TupletKind, 'straight'>, base: NoteDuration): NoteDuration =>
+  `${kind}-${base}` as NoteDuration;
 const toBase = (dur: NoteDuration): NoteDuration =>
-  (dur.startsWith('dotted-') || dur.startsWith('triplet-'))
-    ? (dur.replace('dotted-', '').replace('triplet-', '') as NoteDuration)
+  (dur.startsWith('dotted-') || /^(triplet|quintuplet|sextuplet|septuplet)-/.test(dur))
+    ? (dur.replace('dotted-', '').replace(/^(triplet|quintuplet|sextuplet|septuplet)-/, '') as NoteDuration)
     : dur;
 const isDotted = (dur: NoteDuration) => dur.startsWith('dotted-');
-const isTriplet = (dur: NoteDuration) => dur.startsWith('triplet-');
+const getTupletKind = (dur: NoteDuration): TupletKind => {
+  const m = dur.match(/^(triplet|quintuplet|sextuplet|septuplet)-/);
+  return (m?.[1] as TupletKind | undefined) ?? 'straight';
+};
 
 export const NoteToolbar = () => {
   const selectedDuration        = useScoreStore((s) => s.selectedDuration);
@@ -29,14 +41,14 @@ export const NoteToolbar = () => {
   const selectedRestDuration    = useScoreStore((s) => s.selectedRestDuration);
 
   const dotActive = isDotted(selectedDuration);
-  const tripletActive = isTriplet(selectedDuration);
+  const tupletKind = getTupletKind(selectedDuration);
   const baseDur   = toBase(selectedDuration);
   const noteMode  = !selectedRestDuration; // note mode is active when no rest selected
 
   const handleSelectBase = (base: NoteDuration) => {
     setSelectedRestDuration(null);
-    if (tripletActive && TRIPLETABLE.has(base)) {
-      setSelectedDuration(toTriplet(base));
+    if (tupletKind !== 'straight' && TUPLETABLE.has(base)) {
+      setSelectedDuration(toTuplet(tupletKind, base));
       return;
     }
     if (dotActive && DOTABLE.has(base)) {
@@ -52,14 +64,18 @@ export const NoteToolbar = () => {
     setSelectedDuration(dotActive ? baseDur : toDotted(baseDur));
   };
 
-  const handleToggleTriplet = () => {
+  const handleTupletChange = (kind: TupletKind) => {
     setSelectedRestDuration(null);
-    if (!TRIPLETABLE.has(baseDur)) return;
-    setSelectedDuration(tripletActive ? baseDur : toTriplet(baseDur));
+    if (kind === 'straight') {
+      setSelectedDuration(baseDur);
+      return;
+    }
+    if (!TUPLETABLE.has(baseDur)) return;
+    setSelectedDuration(toTuplet(kind, baseDur));
   };
 
   const dotSupported = DOTABLE.has(baseDur);
-  const tripletSupported = TRIPLETABLE.has(baseDur);
+  const tupletSupported = TUPLETABLE.has(baseDur);
 
   return (
     <div className="sv-toolbar">
@@ -97,15 +113,22 @@ export const NoteToolbar = () => {
         <span>Dot</span>
       </button>
 
-      <button
-        onClick={handleToggleTriplet}
-        disabled={!tripletSupported}
-        title={!tripletSupported ? 'This duration cannot be tripletized' : tripletActive ? 'Remove triplet' : 'Set to triplet (3 in the time of 2)'}
-        className={tripletActive && noteMode ? 'sv-btn-active' : tripletSupported ? 'sv-btn-ghost' : 'sv-btn-ghost opacity-30 cursor-not-allowed'}
-      >
-        <span className="font-semibold">3</span>
-        <span>Triplet</span>
-      </button>
+      <div className={`flex items-center gap-1 ${!tupletSupported ? 'opacity-40' : ''}`}>
+        <span className="text-xs text-sv-text-dim">Tuplet</span>
+        <select
+          value={tupletKind}
+          disabled={!tupletSupported}
+          onChange={(e) => handleTupletChange(e.target.value as TupletKind)}
+          className="sv-select w-24 text-xs"
+          title="Tuplet ratio"
+        >
+          {TUPLET_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.short} {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 };

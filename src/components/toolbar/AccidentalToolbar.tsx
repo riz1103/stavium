@@ -3,7 +3,9 @@ import { Accidental } from '../../types/music';
 import { parsePitch } from '../../utils/noteUtils';
 
 const ACCIDENTALS: { value: Accidental | null; symbol: string; label: string }[] = [
+  { value: 'double-sharp', symbol: '𝄪', label: 'Double Sharp'   },
   { value: 'sharp',   symbol: '♯', label: 'Sharp'          },
+  { value: 'double-flat',  symbol: '𝄫', label: 'Double Flat'    },
   { value: 'flat',    symbol: '♭', label: 'Flat'           },
   { value: 'natural', symbol: '♮', label: 'Natural'        },
   { value: null,      symbol: '—', label: 'Key Signature'  },
@@ -25,7 +27,9 @@ export const AccidentalToolbar = () => {
 
   const applyAccidental = (accidental: Accidental) => {
     let newPitch: string;
-    if (accidental === 'sharp')   newPitch = `${noteName}#${octave}`;
+    if (accidental === 'double-sharp') newPitch = `${noteName}##${octave}`;
+    else if (accidental === 'sharp')   newPitch = `${noteName}#${octave}`;
+    else if (accidental === 'double-flat') newPitch = `${noteName}bb${octave}`;
     else if (accidental === 'flat')    newPitch = `${noteName}b${octave}`;
     else if (accidental === 'natural') newPitch = `${noteName}n${octave}`;
     else                               newPitch = `${noteName}${octave}`;

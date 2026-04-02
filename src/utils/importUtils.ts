@@ -14,18 +14,33 @@ const DURATION_BY_BEATS: Array<{ beats: number; duration: NoteDuration }> = [
   { beats: 3, duration: 'dotted-half' },
   { beats: 2, duration: 'half' },
   { beats: 4 / 3, duration: 'triplet-half' },
+  { beats: 4 / 5, duration: 'quintuplet-half' },
+  { beats: 4 / 6, duration: 'sextuplet-half' },
+  { beats: 4 / 7, duration: 'septuplet-half' },
   { beats: 1.5, duration: 'dotted-quarter' },
   { beats: 1, duration: 'quarter' },
   { beats: 2 / 3, duration: 'triplet-quarter' },
+  { beats: 4 / 5, duration: 'quintuplet-quarter' },
+  { beats: 2 / 3, duration: 'sextuplet-quarter' },
+  { beats: 4 / 7, duration: 'septuplet-quarter' },
   { beats: 0.75, duration: 'dotted-eighth' },
   { beats: 0.5, duration: 'eighth' },
   { beats: 1 / 3, duration: 'triplet-eighth' },
+  { beats: 2 / 5, duration: 'quintuplet-eighth' },
+  { beats: 1 / 3, duration: 'sextuplet-eighth' },
+  { beats: 2 / 7, duration: 'septuplet-eighth' },
   { beats: 0.375, duration: 'dotted-sixteenth' },
   { beats: 0.25, duration: 'sixteenth' },
   { beats: 1 / 6, duration: 'triplet-sixteenth' },
+  { beats: 1 / 5, duration: 'quintuplet-sixteenth' },
+  { beats: 1 / 6, duration: 'sextuplet-sixteenth' },
+  { beats: 1 / 7, duration: 'septuplet-sixteenth' },
   { beats: 0.1875, duration: 'dotted-thirty-second' },
   { beats: 0.125, duration: 'thirty-second' },
   { beats: 1 / 12, duration: 'triplet-thirty-second' },
+  { beats: 1 / 10, duration: 'quintuplet-thirty-second' },
+  { beats: 1 / 12, duration: 'sextuplet-thirty-second' },
+  { beats: 1 / 14, duration: 'septuplet-thirty-second' },
 ];
 
 function nearestDuration(beats: number): NoteDuration {
@@ -44,7 +59,7 @@ function nearestDuration(beats: number): NoteDuration {
 function decomposeBeats(beats: number): NoteDuration[] {
   const out: NoteDuration[] = [];
   let remain = Math.max(0, beats);
-  const MIN = 1 / 12;
+  const MIN = 1 / 14;
   while (remain >= MIN * 0.5) {
     const pick = DURATION_BY_BEATS.find((d) => d.beats <= remain + 1e-6);
     if (!pick) break;
@@ -752,10 +767,6 @@ async function importFromMusicXml(file: File, currentTitle?: string): Promise<Co
         const vEvents = voiceEvents.get(voiceId);
         if (!vEvents) continue; // voice not seen during pre-scan
 
-        // Skip a second note at the exact same tick in the same voice
-        // (two pitches at one position = chord; we keep just the first for monophonic rendering).
-        if (vEvents.some((e) => e.timeDivs === timeDivs && !e.isRest)) continue;
-
         if (n.querySelector('rest')) {
           vEvents.push({ timeDivs, durationDivs, isRest: true });
           continue;
@@ -783,8 +794,7 @@ async function importFromMusicXml(file: File, currentTitle?: string): Promise<Co
       voiceIds.forEach((vid) => {
         const staff = voiceStaves.get(vid)!;
         const events = (voiceEvents.get(vid) ?? []).sort((a, b) => a.timeDivs - b.timeDivs);
-
-        const outMeasure: Measure = { number: mi + 1, voices: [{ notes: [] }] };
+        const outMeasure: Measure = { number: mi + 1, voices: [] };
 
         // Propagate time/key signature changes vs the previous measure of THIS staff.
         if (mi > 0) {
@@ -809,34 +819,50 @@ async function importFromMusicXml(file: File, currentTitle?: string): Promise<Co
           outMeasure.chords = chords;
         }
 
-        let cursorDivs = 0;
+        // Distribute simultaneous events to lanes so stacked chord notes are preserved.
+        const lanes: RawEvent[][] = [];
+        const laneCursorDivs: number[] = [];
         for (const evt of events) {
-          // Fill any gap before this event with rests.
-          if (evt.timeDivs > cursorDivs) {
-            const restBeats = (evt.timeDivs - cursorDivs) / divisions;
-            appendElementBeats(outMeasure.voices[0].notes, { duration: 'quarter' } as Rest, restBeats);
+          let laneIdx = laneCursorDivs.findIndex((cursor) => evt.timeDivs >= cursor);
+          if (laneIdx < 0) {
+            laneIdx = lanes.length;
+            lanes.push([]);
+            laneCursorDivs.push(0);
           }
-          const beats = evt.durationDivs / divisions;
-          if (evt.isRest) {
-            appendElementBeats(outMeasure.voices[0].notes, { duration: 'quarter' } as Rest, beats);
-          } else {
-            const note: Note = {
-              pitch: evt.pitch!,
-              duration: nearestDuration(beats),
-              lyric: evt.lyric,
-              tie: evt.tieStart || undefined,
-              slur: evt.slurStart || undefined,
-            };
-            appendElementBeats(outMeasure.voices[0].notes, note, beats);
-          }
-          cursorDivs = Math.max(cursorDivs, evt.timeDivs + evt.durationDivs);
+          lanes[laneIdx].push(evt);
+          laneCursorDivs[laneIdx] = Math.max(laneCursorDivs[laneIdx], evt.timeDivs + evt.durationDivs);
         }
+        if (lanes.length === 0) lanes.push([]);
 
-        // Pad the tail of the measure with rests if the voice ended early.
-        if (cursorDivs < measureTotalDivs) {
-          const restBeats = (measureTotalDivs - cursorDivs) / divisions;
-          appendElementBeats(outMeasure.voices[0].notes, { duration: 'quarter' } as Rest, restBeats);
-        }
+        outMeasure.voices = lanes.map((laneEvents) => {
+          const outVoice = { notes: [] as Array<Note | Rest> };
+          let cursorDivs = 0;
+          for (const evt of laneEvents) {
+            if (evt.timeDivs > cursorDivs) {
+              const restBeats = (evt.timeDivs - cursorDivs) / divisions;
+              appendElementBeats(outVoice.notes, { duration: 'quarter' } as Rest, restBeats);
+            }
+            const beats = evt.durationDivs / divisions;
+            if (evt.isRest) {
+              appendElementBeats(outVoice.notes, { duration: 'quarter' } as Rest, beats);
+            } else {
+              const note: Note = {
+                pitch: evt.pitch!,
+                duration: nearestDuration(beats),
+                lyric: evt.lyric,
+                tie: evt.tieStart || undefined,
+                slur: evt.slurStart || undefined,
+              };
+              appendElementBeats(outVoice.notes, note, beats);
+            }
+            cursorDivs = Math.max(cursorDivs, evt.timeDivs + evt.durationDivs);
+          }
+          if (cursorDivs < measureTotalDivs) {
+            const restBeats = (measureTotalDivs - cursorDivs) / divisions;
+            appendElementBeats(outVoice.notes, { duration: 'quarter' } as Rest, restBeats);
+          }
+          return outVoice;
+        });
 
         staff.measures.push(outMeasure);
       });

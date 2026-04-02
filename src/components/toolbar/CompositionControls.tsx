@@ -1,7 +1,7 @@
 import { useScoreStore } from '../../app/store/scoreStore';
 import { usePlaybackStore } from '../../app/store/playbackStore';
 
-const TIME_SIGNATURES = ['2/4', '3/4', '4/4', '6/8', '9/8', '12/8'];
+const TIME_SIGNATURES = ['2/2', '2/4', '3/8', '3/4', '4/4', '5/4', '5/8', '6/4', '6/8', '7/4', '7/8', '9/8', '12/8', '12/16'];
 
 const KEY_SIGNATURES: { value: string; display: string; description: string }[] = [
   { value: 'C',  display: 'C',       description: 'No sharps or flats'              },
@@ -11,12 +11,29 @@ const KEY_SIGNATURES: { value: string; display: string; description: string }[] 
   { value: 'E',  display: 'E (4♯)',  description: '4 sharps: F♯, C♯, G♯, D♯'      },
   { value: 'B',  display: 'B (5♯)',  description: '5 sharps: F♯, C♯, G♯, D♯, A♯' },
   { value: 'F#', display: 'F♯ (6♯)', description: '6 sharps'                        },
+  { value: 'C#', display: 'C♯ (7♯)', description: '7 sharps'                        },
   { value: 'F',  display: 'F (1♭)',  description: '1 flat: B♭'                      },
   { value: 'Bb', display: 'B♭ (2♭)', description: '2 flats: B♭, E♭'               },
   { value: 'Eb', display: 'E♭ (3♭)', description: '3 flats: B♭, E♭, A♭'           },
   { value: 'Ab', display: 'A♭ (4♭)', description: '4 flats: B♭, E♭, A♭, D♭'      },
   { value: 'Db', display: 'D♭ (5♭)', description: '5 flats: B♭, E♭, A♭, D♭, G♭' },
   { value: 'Gb', display: 'G♭ (6♭)', description: '6 flats'                         },
+  { value: 'Cb', display: 'C♭ (7♭)', description: '7 flats'                         },
+  { value: 'Am', display: 'A minor', description: 'Relative minor of C major' },
+  { value: 'Em', display: 'E minor', description: 'Relative minor of G major' },
+  { value: 'Bm', display: 'B minor', description: 'Relative minor of D major' },
+  { value: 'F#m', display: 'F♯ minor', description: 'Relative minor of A major' },
+  { value: 'C#m', display: 'C♯ minor', description: 'Relative minor of E major' },
+  { value: 'G#m', display: 'G♯ minor', description: 'Relative minor of B major' },
+  { value: 'D#m', display: 'D♯ minor', description: 'Relative minor of F♯ major' },
+  { value: 'A#m', display: 'A♯ minor', description: 'Relative minor of C♯ major' },
+  { value: 'Dm', display: 'D minor', description: 'Relative minor of F major' },
+  { value: 'Gm', display: 'G minor', description: 'Relative minor of B♭ major' },
+  { value: 'Cm', display: 'C minor', description: 'Relative minor of E♭ major' },
+  { value: 'Fm', display: 'F minor', description: 'Relative minor of A♭ major' },
+  { value: 'Bbm', display: 'B♭ minor', description: 'Relative minor of D♭ major' },
+  { value: 'Ebm', display: 'E♭ minor', description: 'Relative minor of G♭ major' },
+  { value: 'Abm', display: 'A♭ minor', description: 'Relative minor of C♭ major' },
 ];
 
 function pickupBeatOptions(ts: string): number[] {

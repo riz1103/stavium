@@ -4,27 +4,38 @@ import { NoteDuration } from '../types/music';
  * Converts a note duration to beats (assuming 4/4 time)
  */
 export const durationToBeats = (duration: NoteDuration): number => {
-  const durationMap: Record<NoteDuration, number> = {
-    'whole': 4,
-    'half': 2,
-    'quarter': 1,
-    'eighth': 0.5,
-    'sixteenth': 0.25,
+  const baseMap: Record<'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' | 'thirty-second', number> = {
+    whole: 4,
+    half: 2,
+    quarter: 1,
+    eighth: 0.5,
+    sixteenth: 0.25,
     'thirty-second': 0.125,
-    'dotted-whole': 6,
-    'dotted-half': 3,
-    'dotted-quarter': 1.5,
-    'dotted-eighth': 0.75,
-    'dotted-sixteenth': 0.375,
-    'dotted-thirty-second': 0.1875,
-    'triplet-half': 4 / 3,
-    'triplet-quarter': 2 / 3,
-    'triplet-eighth': 1 / 3,
-    'triplet-sixteenth': 1 / 6,
-    'triplet-thirty-second': 1 / 12,
   };
 
-  return durationMap[duration] || 1;
+  const tuplets: Record<string, number> = {
+    triplet: 2 / 3,
+    quintuplet: 4 / 5,
+    sextuplet: 4 / 6,
+    septuplet: 4 / 7,
+  };
+
+  const tupleMatch = duration.match(/^(triplet|quintuplet|sextuplet|septuplet)-(.+)$/);
+  if (tupleMatch) {
+    const [, kind, rawBase] = tupleMatch;
+    const base = rawBase as keyof typeof baseMap;
+    const baseBeats = baseMap[base];
+    if (baseBeats !== undefined) return baseBeats * tuplets[kind];
+  }
+
+  if (duration.startsWith('dotted-')) {
+    const base = duration.replace('dotted-', '') as keyof typeof baseMap;
+    const baseBeats = baseMap[base];
+    if (baseBeats !== undefined) return baseBeats * 1.5;
+  }
+
+  const base = duration as keyof typeof baseMap;
+  return baseMap[base] ?? 1;
 };
 
 /**
@@ -38,27 +49,28 @@ export const beatsToSeconds = (beats: number, tempo: number): number => {
  * Gets the VexFlow duration string
  */
 export const durationToVexFlow = (duration: NoteDuration): string => {
-  const vexFlowMap: Record<NoteDuration, string> = {
-    'whole': 'w',
-    'half': 'h',
-    'quarter': 'q',
-    'eighth': '8',
-    'sixteenth': '16',
+  const baseMap: Record<'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' | 'thirty-second', string> = {
+    whole: 'w',
+    half: 'h',
+    quarter: 'q',
+    eighth: '8',
+    sixteenth: '16',
     'thirty-second': '32',
-    'dotted-whole': 'wd',
-    'dotted-half': 'hd',
-    'dotted-quarter': 'qd',
-    'dotted-eighth': '8d',
-    'dotted-sixteenth': '16d',
-    'dotted-thirty-second': '32d',
-    'triplet-half': 'h',
-    'triplet-quarter': 'q',
-    'triplet-eighth': '8',
-    'triplet-sixteenth': '16',
-    'triplet-thirty-second': '32',
   };
 
-  return vexFlowMap[duration] || 'q';
+  const tupleMatch = duration.match(/^(triplet|quintuplet|sextuplet|septuplet)-(.+)$/);
+  if (tupleMatch) {
+    const base = tupleMatch[2] as keyof typeof baseMap;
+    return baseMap[base] ?? 'q';
+  }
+
+  if (duration.startsWith('dotted-')) {
+    const base = duration.replace('dotted-', '') as keyof typeof baseMap;
+    const vfBase = baseMap[base] ?? 'q';
+    return `${vfBase}d`;
+  }
+
+  return baseMap[duration as keyof typeof baseMap] ?? 'q';
 };
 
 /**

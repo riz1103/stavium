@@ -24,7 +24,11 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do I write triplets?',
-    a: 'In Notes & Rests, pick a base value (for example quarter or eighth), then click the Triplet button (3). The selected duration becomes a triplet, and notes/rests you place will render with triplet grouping.',
+    a: 'In Notes & Rests, pick a base value (for example quarter or eighth), then set Tuplet to 3:2, 5:4, 6:4, or 7:4. Notes/rests you place will render with the matching tuplet number.',
+  },
+  {
+    q: 'Can I use double-sharps and double-flats?',
+    a: 'Yes. Select a note, then use the Accidental toolbar to apply double-sharp (𝄪) or double-flat (𝄫).',
   },
   {
     q: 'Can I add lyrics to my composition?',
@@ -186,6 +190,30 @@ export const HelpPage = () => {
                   </li>
                 </ul>
               </div>
+              <div>
+                <h3 className="text-lg font-semibold text-sv-text mb-3">Notation Support Matrix</h3>
+                <div className="space-y-3">
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h4 className="font-semibold text-emerald-400 mb-2">Fully Supported</h4>
+                    <p className="text-sv-text-muted text-sm">
+                      Notes/rests (whole to 32nd), dotted values, tuplets (3:2, 5:4, 6:4, 7:4), key/time signatures, anacrusis, clef changes,
+                      accidentals (including double-sharp and double-flat), ties, slurs, articulations, dynamics, lyrics, chord symbols, multi-staff scores.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h4 className="font-semibold text-amber-400 mb-2">Partially Supported / Workflow Dependent</h4>
+                    <p className="text-sv-text-muted text-sm">
+                      Polyphonic/chord-like imported content is preserved and rendered via multiple voices, but advanced manual voice editing workflows are still evolving.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h4 className="font-semibold text-sv-cyan mb-2">Planned Improvements</h4>
+                    <p className="text-sv-text-muted text-sm">
+                      Additional engraving refinements and expanded advanced notation workflows will continue to be improved in upcoming updates.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </section>
           )}
 
@@ -222,7 +250,7 @@ export const HelpPage = () => {
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Notes & Rests</h3>
                     <p className="text-sv-text-muted text-sm">
-                      Add whole through 32nd notes and rests, including dotted values and triplets. Click a duration, then click the staff. Select notes to adjust pitch, accidentals, ties, slurs, articulations, and dynamics.
+                      Add whole through 32nd notes and rests, including dotted values and tuplets (3:2, 5:4, 6:4, 7:4). Click a duration, then click the staff. Select notes to adjust pitch, accidentals, ties, slurs, articulations, and dynamics.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">

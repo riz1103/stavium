@@ -4,7 +4,7 @@ import { Pitch, NoteDuration } from '../types/music';
  * Converts a pitch string (e.g., "C4", "E#5") to MIDI note number
  */
 export const pitchToMidi = (pitch: Pitch): number => {
-  const match = pitch.match(/^([A-G])([#bn]?)(\d+)$/);
+  const match = pitch.match(/^([A-G])((?:##|bb|x|#|b|n)?)(\d+)$/);
   if (!match) return 60; // Default to C4
 
   const [, note, accidental, octave] = match;
@@ -29,6 +29,8 @@ export const pitchToMidi = (pitch: Pitch): number => {
   // Apply accidental
   if (accidental === '#') midiNote += 1;
   if (accidental === 'b') midiNote -= 1;
+  if (accidental === '##' || accidental === 'x') midiNote += 2;
+  if (accidental === 'bb') midiNote -= 2;
   // 'n' (natural) doesn't change the MIDI note - it's just the base note
 
   return midiNote;
@@ -79,7 +81,7 @@ export const pitchToStaffPosition = (pitch: Pitch, clef: 'treble' | 'bass'): num
  */
 export const parsePitch = (pitch: Pitch): { note: string; accidental: string | null; octave: number } => {
   // Match patterns like "C4", "G#3", "Bb5", "C#4", "Ab2", "An4" (natural)
-  const match = pitch.match(/^([A-G])([#bn]?)(\d+)$/);
+  const match = pitch.match(/^([A-G])((?:##|bb|x|#|b|n)?)(\d+)$/);
   if (!match) {
     return { note: 'C', accidental: null, octave: 4 };
   }
@@ -110,10 +112,17 @@ export const pitchToVexFlowKey = (pitch: Pitch): string => {
  */
 export const keySignatureToVexFlow = (keySignature: string): string => {
   // Normalize: "B♭" → "Bb", "F♯" → "F#", etc.
-  return keySignature
+  const normalized = keySignature
     .replace(/♭/g, 'b')
     .replace(/♯/g, '#')
     .trim();
+
+  const minorToMajor: Record<string, string> = {
+    Am: 'C', Em: 'G', Bm: 'D', 'F#m': 'A', 'C#m': 'E', 'G#m': 'B', 'D#m': 'F#', 'A#m': 'C#',
+    Dm: 'F', Gm: 'Bb', Cm: 'Eb', Fm: 'Ab', Bbm: 'Db', Ebm: 'Gb', Abm: 'Cb',
+  };
+
+  return minorToMajor[normalized] ?? normalized;
 };
 
 /**
@@ -129,6 +138,11 @@ export const getKeySignatureAccidentals = (keySignature: string): {
   const flats = new Set<string>();
 
   const key = keySignature.replace(/♭/g, 'b').replace(/♯/g, '#').trim();
+  const minorToMajor: Record<string, string> = {
+    Am: 'C', Em: 'G', Bm: 'D', 'F#m': 'A', 'C#m': 'E', 'G#m': 'B', 'D#m': 'F#', 'A#m': 'C#',
+    Dm: 'F', Gm: 'Bb', Cm: 'Eb', Fm: 'Ab', Bbm: 'Db', Ebm: 'Gb', Abm: 'Cb',
+  };
+  const resolvedKey = minorToMajor[key] ?? key;
 
   // Circle of fifths for major keys
   const sharpKeys: Record<string, string[]> = {
@@ -139,6 +153,7 @@ export const getKeySignatureAccidentals = (keySignature: string): {
     'E': ['F', 'C', 'G', 'D'],
     'B': ['F', 'C', 'G', 'D', 'A'],
     'F#': ['F', 'C', 'G', 'D', 'A', 'E'],
+    'C#': ['F', 'C', 'G', 'D', 'A', 'E', 'B'],
   };
 
   const flatKeys: Record<string, string[]> = {
@@ -148,12 +163,13 @@ export const getKeySignatureAccidentals = (keySignature: string): {
     'Ab': ['B', 'E', 'A', 'D'],
     'Db': ['B', 'E', 'A', 'D', 'G'],
     'Gb': ['B', 'E', 'A', 'D', 'G', 'C'],
+    'Cb': ['B', 'E', 'A', 'D', 'G', 'C', 'F'],
   };
 
-  if (sharpKeys[key]) {
-    sharpKeys[key].forEach((n) => sharps.add(n));
-  } else if (flatKeys[key]) {
-    flatKeys[key].forEach((n) => flats.add(n));
+  if (sharpKeys[resolvedKey]) {
+    sharpKeys[resolvedKey].forEach((n) => sharps.add(n));
+  } else if (flatKeys[resolvedKey]) {
+    flatKeys[resolvedKey].forEach((n) => flats.add(n));
   }
 
   return { sharps, flats };
@@ -206,8 +222,9 @@ export const applyKeySignature = (pitch: Pitch, keySignature: string): Pitch => 
  * @returns The accidental found ('#', 'b', 'n', or null), or null if none found
  */
 export const findMeasureAccidental = (
-  measure: { voices: Array<{ notes: Array<{ pitch?: string; accidental?: 'sharp' | 'flat' | 'natural' | null }> }> },
+  measure: { voices: Array<{ notes: Array<{ pitch?: string; accidental?: 'sharp' | 'flat' | 'natural' | 'double-sharp' | 'double-flat' | null }> }> },
   noteName: string,
+  octave: number,
   upToIndex: number
 ): string | null => {
   // Search backwards through all voices in the measure
@@ -221,19 +238,23 @@ export const findMeasureAccidental = (
       // Only check notes (not rests)
       if (!('pitch' in element) || !element.pitch) continue;
       
-      const { note, accidental } = parsePitch(element.pitch);
+      const { note, accidental, octave: noteOctave } = parsePitch(element.pitch);
       
-      // Check if this is the same pitch class (same note name)
-      if (note === noteName) {
+      // Accidentals are scoped by staff position: same letter name AND octave.
+      if (note === noteName && noteOctave === octave) {
         // Check for explicit accidental on the note object first
         if (element.accidental === 'sharp') return '#';
         if (element.accidental === 'flat') return 'b';
         if (element.accidental === 'natural') return 'n';
+        if (element.accidental === 'double-sharp') return '##';
+        if (element.accidental === 'double-flat') return 'bb';
         
         // Otherwise check the pitch string
         if (accidental === '#') return '#';
         if (accidental === 'b') return 'b';
         if (accidental === 'n') return 'n';
+        if (accidental === '##' || accidental === 'x') return '##';
+        if (accidental === 'bb') return 'bb';
         
         // If no accidental found, continue searching (might be earlier in measure)
       }
@@ -256,9 +277,9 @@ export const findMeasureAccidental = (
 export const applyKeySignatureAndMeasureAccidentals = (
   pitch: Pitch,
   keySignature: string,
-  measure: { voices: Array<{ notes: Array<{ pitch?: string; accidental?: 'sharp' | 'flat' | 'natural' | null }> }> },
+  measure: { voices: Array<{ notes: Array<{ pitch?: string; accidental?: 'sharp' | 'flat' | 'natural' | 'double-sharp' | 'double-flat' | null }> }> },
   noteIndex: number,
-  currentNoteAccidental?: 'sharp' | 'flat' | 'natural' | null
+  currentNoteAccidental?: 'sharp' | 'flat' | 'natural' | 'double-sharp' | 'double-flat' | null
 ): Pitch => {
   const { note, accidental, octave } = parsePitch(pitch);
   
@@ -274,6 +295,12 @@ export const applyKeySignatureAndMeasureAccidentals = (
   if (currentNoteAccidental === 'flat') {
     return `${note}b${octave}` as Pitch;
   }
+  if (currentNoteAccidental === 'double-sharp') {
+    return `${note}##${octave}` as Pitch;
+  }
+  if (currentNoteAccidental === 'double-flat') {
+    return `${note}bb${octave}` as Pitch;
+  }
   
   // If pitch string has an explicit accidental, use it (including natural)
   if (accidental === 'n') {
@@ -286,9 +313,15 @@ export const applyKeySignatureAndMeasureAccidentals = (
   if (accidental === 'b') {
     return pitch;
   }
+  if (accidental === '##' || accidental === 'x') {
+    return `${note}##${octave}` as Pitch;
+  }
+  if (accidental === 'bb') {
+    return `${note}bb${octave}` as Pitch;
+  }
   
   // Check for measure-level accidental (from previous notes in same measure)
-  const measureAccidental = findMeasureAccidental(measure, note, noteIndex);
+  const measureAccidental = findMeasureAccidental(measure, note, octave, noteIndex);
   if (measureAccidental === '#') {
     return `${note}#${octave}` as Pitch;
   }
@@ -298,6 +331,12 @@ export const applyKeySignatureAndMeasureAccidentals = (
   if (measureAccidental === 'n') {
     // Measure-level natural → return natural pitch (overrides key signature)
     return `${note}${octave}` as Pitch;
+  }
+  if (measureAccidental === '##') {
+    return `${note}##${octave}` as Pitch;
+  }
+  if (measureAccidental === 'bb') {
+    return `${note}bb${octave}` as Pitch;
   }
   
   // No explicit or measure-level accidental → apply key signature
@@ -330,9 +369,13 @@ export const shouldShowAccidental = (
   if (accidental === '#') {
     // Note is sharp - show only if key doesn't already make it sharp
     return !sharps.has(note);
+  } else if (accidental === '##' || accidental === 'x') {
+    return true;
   } else if (accidental === 'b') {
     // Note is flat - show only if key doesn't already make it flat
     return !flats.has(note);
+  } else if (accidental === 'bb') {
+    return true;
   } else if (accidental === 'n') {
     // Natural - show if key signature would make this note sharp or flat
     return sharps.has(note) || flats.has(note);

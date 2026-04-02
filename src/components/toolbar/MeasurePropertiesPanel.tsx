@@ -4,15 +4,24 @@ import { useScoreStore } from '../../app/store/scoreStore';
 import { Clef } from '../../types/music';
 import { effectiveTimeSig, effectiveKeySig, effectiveTempo, effectiveClef } from '../../music/renderer/vexflowRenderer';
 
-const TIME_SIGNATURES = ['2/4', '3/4', '4/4', '6/8', '9/8', '12/8'];
+const TIME_SIGNATURES = ['2/2', '2/4', '3/8', '3/4', '4/4', '5/4', '5/8', '6/4', '6/8', '7/4', '7/8', '9/8', '12/8', '12/16'];
 const KEY_SIGNATURES: { value: string; display: string }[] = [
   { value: 'C',  display: 'C'      }, { value: 'G',  display: 'G (1♯)' },
   { value: 'D',  display: 'D (2♯)' }, { value: 'A',  display: 'A (3♯)' },
   { value: 'E',  display: 'E (4♯)' }, { value: 'B',  display: 'B (5♯)' },
-  { value: 'F#', display: 'F♯ (6♯)' }, { value: 'F',  display: 'F (1♭)' },
+  { value: 'F#', display: 'F♯ (6♯)' }, { value: 'C#', display: 'C♯ (7♯)' },
+  { value: 'F',  display: 'F (1♭)' },
   { value: 'Bb', display: 'B♭ (2♭)' }, { value: 'Eb', display: 'E♭ (3♭)' },
   { value: 'Ab', display: 'A♭ (4♭)' }, { value: 'Db', display: 'D♭ (5♭)' },
-  { value: 'Gb', display: 'G♭ (6♭)' },
+  { value: 'Gb', display: 'G♭ (6♭)' }, { value: 'Cb', display: 'C♭ (7♭)' },
+  { value: 'Am', display: 'A minor' }, { value: 'Em', display: 'E minor' },
+  { value: 'Bm', display: 'B minor' }, { value: 'F#m', display: 'F♯ minor' },
+  { value: 'C#m', display: 'C♯ minor' }, { value: 'G#m', display: 'G♯ minor' },
+  { value: 'D#m', display: 'D♯ minor' }, { value: 'A#m', display: 'A♯ minor' },
+  { value: 'Dm', display: 'D minor' }, { value: 'Gm', display: 'G minor' },
+  { value: 'Cm', display: 'C minor' }, { value: 'Fm', display: 'F minor' },
+  { value: 'Bbm', display: 'B♭ minor' }, { value: 'Ebm', display: 'E♭ minor' },
+  { value: 'Abm', display: 'A♭ minor' },
 ];
 const CLEFS: { value: Clef; label: string }[] = [
   { value: 'treble', label: 'Treble' }, { value: 'bass',  label: 'Bass'  },
