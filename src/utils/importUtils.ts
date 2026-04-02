@@ -13,13 +13,19 @@ const DURATION_BY_BEATS: Array<{ beats: number; duration: NoteDuration }> = [
   { beats: 4, duration: 'whole' },
   { beats: 3, duration: 'dotted-half' },
   { beats: 2, duration: 'half' },
+  { beats: 4 / 3, duration: 'triplet-half' },
   { beats: 1.5, duration: 'dotted-quarter' },
   { beats: 1, duration: 'quarter' },
+  { beats: 2 / 3, duration: 'triplet-quarter' },
   { beats: 0.75, duration: 'dotted-eighth' },
   { beats: 0.5, duration: 'eighth' },
+  { beats: 1 / 3, duration: 'triplet-eighth' },
   { beats: 0.375, duration: 'dotted-sixteenth' },
   { beats: 0.25, duration: 'sixteenth' },
+  { beats: 1 / 6, duration: 'triplet-sixteenth' },
+  { beats: 0.1875, duration: 'dotted-thirty-second' },
   { beats: 0.125, duration: 'thirty-second' },
+  { beats: 1 / 12, duration: 'triplet-thirty-second' },
 ];
 
 function nearestDuration(beats: number): NoteDuration {
@@ -38,7 +44,7 @@ function nearestDuration(beats: number): NoteDuration {
 function decomposeBeats(beats: number): NoteDuration[] {
   const out: NoteDuration[] = [];
   let remain = Math.max(0, beats);
-  const MIN = 0.125;
+  const MIN = 1 / 12;
   while (remain >= MIN * 0.5) {
     const pick = DURATION_BY_BEATS.find((d) => d.beats <= remain + 1e-6);
     if (!pick) break;

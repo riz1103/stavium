@@ -120,6 +120,12 @@ export function convertOMRVexFlowToComposition(
       'dotted-quarter': 1.5,
       'dotted-eighth': 0.75,
       'dotted-sixteenth': 0.375,
+      'dotted-thirty-second': 0.1875,
+      'triplet-half': 4 / 3,
+      'triplet-quarter': 2 / 3,
+      'triplet-eighth': 1 / 3,
+      'triplet-sixteenth': 1 / 6,
+      'triplet-thirty-second': 1 / 12,
     };
     
     let currentMeasure: Measure | null = null;

@@ -16,11 +16,15 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 const FAQ_ITEMS = [
   {
     q: 'How do I add notes to my score?',
-    a: 'Click a duration in the Notes toolbar (whole, half, quarter, etc.), then click on the staff where you want the note. The note will appear at the nearest valid position. You can also use the Rest toolbar to add rests.',
+    a: 'Click a duration in the Notes toolbar (whole, half, quarter, etc.), then click on the staff where you want the note. Use Dot to create dotted values, and Triplet to switch the selected duration to a triplet value. You can also use the Rest toolbar to add rests.',
   },
   {
     q: 'How do I change a note\'s pitch after placing it?',
     a: 'Click the note to select it, then drag it up or down on the staff. You can also use the Accidental toolbar (sharp, flat, natural) when a note is selected.',
+  },
+  {
+    q: 'How do I write triplets?',
+    a: 'In Notes & Rests, pick a base value (for example quarter or eighth), then click the Triplet button (3). The selected duration becomes a triplet, and notes/rests you place will render with triplet grouping.',
   },
   {
     q: 'Can I add lyrics to my composition?',
@@ -218,7 +222,7 @@ export const HelpPage = () => {
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Notes & Rests</h3>
                     <p className="text-sv-text-muted text-sm">
-                      Add whole, half, quarter, eighth, and sixteenth notes and rests. Click a duration, then click the staff. Select notes to adjust pitch, accidentals, ties, slurs, articulations, and dynamics.
+                      Add whole through 32nd notes and rests, including dotted values and triplets. Click a duration, then click the staff. Select notes to adjust pitch, accidentals, ties, slurs, articulations, and dynamics.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">

@@ -16,6 +16,12 @@ export const durationToBeats = (duration: NoteDuration): number => {
     'dotted-quarter': 1.5,
     'dotted-eighth': 0.75,
     'dotted-sixteenth': 0.375,
+    'dotted-thirty-second': 0.1875,
+    'triplet-half': 4 / 3,
+    'triplet-quarter': 2 / 3,
+    'triplet-eighth': 1 / 3,
+    'triplet-sixteenth': 1 / 6,
+    'triplet-thirty-second': 1 / 12,
   };
 
   return durationMap[duration] || 1;
@@ -44,6 +50,12 @@ export const durationToVexFlow = (duration: NoteDuration): string => {
     'dotted-quarter': 'qd',
     'dotted-eighth': '8d',
     'dotted-sixteenth': '16d',
+    'dotted-thirty-second': '32d',
+    'triplet-half': 'h',
+    'triplet-quarter': 'q',
+    'triplet-eighth': '8',
+    'triplet-sixteenth': '16',
+    'triplet-thirty-second': '32',
   };
 
   return vexFlowMap[duration] || 'q';

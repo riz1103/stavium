@@ -139,11 +139,15 @@ const REST_ICONS: Partial<Record<NoteDuration, JSX.Element>> = {
  * base icon — the dot modifier is shown separately by the toolbar toggle.
  */
 export const NoteIcon = ({ duration }: { duration: NoteDuration }) => {
-  const base = duration.startsWith('dotted-')
-    ? (duration.replace('dotted-', '') as NoteDuration)
+  const base = (duration.startsWith('dotted-') || duration.startsWith('triplet-'))
+    ? (duration.replace('dotted-', '').replace('triplet-', '') as NoteDuration)
     : duration;
   return NOTE_ICONS[base] ?? null;
 };
 
 export const RestIcon = ({ duration }: { duration: NoteDuration }) =>
-  REST_ICONS[duration] ?? null;
+  REST_ICONS[
+    (duration.startsWith('dotted-') || duration.startsWith('triplet-'))
+      ? (duration.replace('dotted-', '').replace('triplet-', '') as NoteDuration)
+      : duration
+  ] ?? null;

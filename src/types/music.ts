@@ -11,7 +11,13 @@ export type NoteDuration =
   | 'dotted-half'
   | 'dotted-quarter'
   | 'dotted-eighth'
-  | 'dotted-sixteenth';
+  | 'dotted-sixteenth'
+  | 'dotted-thirty-second'
+  | 'triplet-half'
+  | 'triplet-quarter'
+  | 'triplet-eighth'
+  | 'triplet-sixteenth'
+  | 'triplet-thirty-second';
 
 export type Accidental = 'sharp' | 'flat' | 'natural' | null;
 

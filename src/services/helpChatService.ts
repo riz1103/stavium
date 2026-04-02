@@ -31,9 +31,14 @@ To scan or import from PDF or scanned images:
 - Bottom: Playback controls (Play, tempo, progress bar)
 
 ## Adding notes
-1. Select a duration in the Notes toolbar (whole, half, quarter, eighth, sixteenth)
-2. Click on the staff where you want the note
-3. Select a note to change pitch (drag), add accidentals, ties, slurs, articulations, dynamics, lyrics, chords
+1. Select a duration in the Notes toolbar (whole, half, quarter, eighth, sixteenth, 32nd)
+2. Optional: click "Dot" for dotted values, or "Triplet" (3) for triplet values
+3. Click on the staff where you want the note
+4. Select a note to change pitch (drag), add accidentals, ties, slurs, articulations, dynamics, lyrics, chords
+
+## Adding rests
+- Use the Rest toolbar for whole through 32nd rests
+- Triplet rests are supported via the Rest toolbar Triplet (3) toggle
 
 ## Sharing
 Click "Score Info" in the editor header → use the Sharing section to set Private, Shared (by email), or Public

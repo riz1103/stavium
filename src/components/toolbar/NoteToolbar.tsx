@@ -11,10 +11,16 @@ const BASE_DURATIONS: { value: NoteDuration; label: string }[] = [
   { value: 'thirty-second', label: '32nd'      },
 ];
 
-const DOTABLE = new Set<NoteDuration>(['whole', 'half', 'quarter', 'eighth', 'sixteenth']);
+const DOTABLE = new Set<NoteDuration>(['whole', 'half', 'quarter', 'eighth', 'sixteenth', 'thirty-second']);
+const TRIPLETABLE = new Set<NoteDuration>(['half', 'quarter', 'eighth', 'sixteenth', 'thirty-second']);
 const toDotted = (base: NoteDuration): NoteDuration => `dotted-${base}` as NoteDuration;
-const toBase   = (dur: NoteDuration): NoteDuration  => dur.startsWith('dotted-') ? (dur.replace('dotted-', '') as NoteDuration) : dur;
+const toTriplet = (base: NoteDuration): NoteDuration => `triplet-${base}` as NoteDuration;
+const toBase = (dur: NoteDuration): NoteDuration =>
+  (dur.startsWith('dotted-') || dur.startsWith('triplet-'))
+    ? (dur.replace('dotted-', '').replace('triplet-', '') as NoteDuration)
+    : dur;
 const isDotted = (dur: NoteDuration) => dur.startsWith('dotted-');
+const isTriplet = (dur: NoteDuration) => dur.startsWith('triplet-');
 
 export const NoteToolbar = () => {
   const selectedDuration        = useScoreStore((s) => s.selectedDuration);
@@ -23,24 +29,37 @@ export const NoteToolbar = () => {
   const selectedRestDuration    = useScoreStore((s) => s.selectedRestDuration);
 
   const dotActive = isDotted(selectedDuration);
+  const tripletActive = isTriplet(selectedDuration);
   const baseDur   = toBase(selectedDuration);
   const noteMode  = !selectedRestDuration; // note mode is active when no rest selected
 
   const handleSelectBase = (base: NoteDuration) => {
     setSelectedRestDuration(null);
-    setSelectedDuration(dotActive && DOTABLE.has(base) ? toDotted(base) : base);
+    if (tripletActive && TRIPLETABLE.has(base)) {
+      setSelectedDuration(toTriplet(base));
+      return;
+    }
+    if (dotActive && DOTABLE.has(base)) {
+      setSelectedDuration(toDotted(base));
+      return;
+    }
+    setSelectedDuration(base);
   };
 
   const handleToggleDot = () => {
     setSelectedRestDuration(null);
-    if (dotActive) {
-      setSelectedDuration(baseDur);
-    } else if (DOTABLE.has(baseDur)) {
-      setSelectedDuration(toDotted(baseDur));
-    }
+    if (!DOTABLE.has(baseDur)) return;
+    setSelectedDuration(dotActive ? baseDur : toDotted(baseDur));
+  };
+
+  const handleToggleTriplet = () => {
+    setSelectedRestDuration(null);
+    if (!TRIPLETABLE.has(baseDur)) return;
+    setSelectedDuration(tripletActive ? baseDur : toTriplet(baseDur));
   };
 
   const dotSupported = DOTABLE.has(baseDur);
+  const tripletSupported = TRIPLETABLE.has(baseDur);
 
   return (
     <div className="sv-toolbar">
@@ -69,13 +88,23 @@ export const NoteToolbar = () => {
       <button
         onClick={handleToggleDot}
         disabled={!dotSupported}
-        title={!dotSupported ? '32nd cannot be dotted' : dotActive ? 'Remove dot' : 'Add augmentation dot (×1.5)'}
+        title={!dotSupported ? 'This duration cannot be dotted' : dotActive ? 'Remove dot' : 'Add augmentation dot (×1.5)'}
         className={dotActive && noteMode ? 'sv-btn-active' : dotSupported ? 'sv-btn-ghost' : 'sv-btn-ghost opacity-30 cursor-not-allowed'}
       >
         <svg viewBox="0 0 10 10" width="8" height="8" aria-hidden>
           <circle cx="5" cy="5" r="4" fill="currentColor" />
         </svg>
         <span>Dot</span>
+      </button>
+
+      <button
+        onClick={handleToggleTriplet}
+        disabled={!tripletSupported}
+        title={!tripletSupported ? 'This duration cannot be tripletized' : tripletActive ? 'Remove triplet' : 'Set to triplet (3 in the time of 2)'}
+        className={tripletActive && noteMode ? 'sv-btn-active' : tripletSupported ? 'sv-btn-ghost' : 'sv-btn-ghost opacity-30 cursor-not-allowed'}
+      >
+        <span className="font-semibold">3</span>
+        <span>Triplet</span>
       </button>
     </div>
   );

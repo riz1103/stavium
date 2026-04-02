@@ -1,4 +1,4 @@
-import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Dot, Articulation, StaveTie, Beam, Stem, RendererBackends } from 'vexflow';
+import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Dot, Articulation, StaveTie, Beam, Stem, Tuplet, RendererBackends } from 'vexflow';
 import { Clef, Composition, Measure, Note, Rest, NoteDuration } from '../../types/music';
 import { parsePitch, pitchToVexFlowKey, pitchToMidi, keySignatureToVexFlow, shouldShowAccidental, findMeasureAccidental, getKeySignatureAccidentals } from '../../utils/noteUtils';
 import { durationToBeats, durationToVexFlow } from '../../utils/durationUtils';
@@ -632,9 +632,10 @@ export class VexFlowRenderer {
               let measureStemDir = Stem.DOWN; // equal-distance default
               for (const el of voice.notes) {
                 if (!('pitch' in el)) continue;
-                const base = (el as Note).duration.startsWith('dotted-')
-                  ? (el as Note).duration.replace('dotted-', '')
-                  : (el as Note).duration;
+                const rawDuration = (el as Note).duration;
+                const base = rawDuration
+                  .replace('dotted-', '')
+                  .replace('triplet-', '');
                 if (base !== 'eighth' && base !== 'sixteenth' && base !== 'thirty-second') continue;
                 const dist = Math.abs(pitchToMidi((el as Note).pitch) - middleLineMidi);
                 if (dist > measureMaxDist) {
@@ -669,9 +670,9 @@ export class VexFlowRenderer {
 
                 if ('pitch' in element) {
                   const note = element as Note;
-                  const base = note.duration.startsWith('dotted-')
-                    ? note.duration.replace('dotted-', '')
-                    : note.duration;
+                  const base = note.duration
+                    .replace('dotted-', '')
+                    .replace('triplet-', '');
                   const isBeamable = base === 'eighth' || base === 'sixteenth' || base === 'thirty-second';
 
                   if (isBeamable) {
@@ -703,6 +704,10 @@ export class VexFlowRenderer {
 
             // Draw beams after the voice so they render on top
             beams.forEach((b) => b.setContext(this.context).draw());
+
+            // Draw tuplets (triplet durations) after note spacing is finalized.
+            const tuplets = this.buildTuplets(voice, tickables, tickableDataIndices);
+            tuplets.forEach((t) => t.setContext(this.context).draw());
 
             // ── Cross-measure tie / slur ──────────────────────────────────────────
             // If the last note of the PREVIOUS measure had tie or slur = true,
@@ -1129,6 +1134,71 @@ export class VexFlowRenderer {
     return midi >= middleLineMidi ? Stem.DOWN : Stem.UP;
   }
 
+  private getDurationInfo(duration: NoteDuration): {
+    baseDuration: NoteDuration;
+    isDotted: boolean;
+    isTriplet: boolean;
+  } {
+    const isDotted = duration.startsWith('dotted-');
+    const isTriplet = duration.startsWith('triplet-');
+    const baseDuration = duration
+      .replace('dotted-', '')
+      .replace('triplet-', '') as NoteDuration;
+    return { baseDuration, isDotted, isTriplet };
+  }
+
+  private buildTuplets(voice: any, tickables: any[], tickableDataIndices: number[]): Tuplet[] {
+    if (!voice || tickables.length === 0 || tickableDataIndices.length === 0) return [];
+
+    const tuplets: Tuplet[] = [];
+    const tickableByDataIndex = new Map<number, any>();
+    tickableDataIndices.forEach((dataIndex, tickableIndex) => {
+      tickableByDataIndex.set(dataIndex, tickables[tickableIndex]);
+    });
+
+    let i = 0;
+    while (i < voice.notes.length) {
+      const element = voice.notes[i];
+      const duration = element?.duration as NoteDuration | undefined;
+      if (!duration || !duration.startsWith('triplet-')) {
+        i++;
+        continue;
+      }
+
+      const base = duration.replace('triplet-', '');
+      const groupStart = i;
+      while (i < voice.notes.length) {
+        const d = (voice.notes[i]?.duration as NoteDuration | undefined) ?? '';
+        if (!d.startsWith('triplet-') || d.replace('triplet-', '') !== base) break;
+        i++;
+      }
+
+      const groupLen = i - groupStart;
+      const fullTriplets = Math.floor(groupLen / 3);
+      for (let g = 0; g < fullTriplets; g++) {
+        const start = groupStart + g * 3;
+        const groupTickables = [start, start + 1, start + 2]
+          .map((dataIndex) => tickableByDataIndex.get(dataIndex))
+          .filter(Boolean);
+        if (groupTickables.length === 3) {
+          try {
+            tuplets.push(
+              new Tuplet(groupTickables, {
+                num_notes: 3,
+                notes_occupied: 2,
+                ratioed: false,
+              })
+            );
+          } catch {
+            // Skip malformed tuplet groups.
+          }
+        }
+      }
+    }
+
+    return tuplets;
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
   private createStaveNote(
     note: Note,
@@ -1142,11 +1212,8 @@ export class VexFlowRenderer {
     const { accidental } = parsePitch(note.pitch);
     const key = pitchToVexFlowKey(note.pitch);
     
-    // Check if duration is dotted and extract base duration
-    const isDotted = note.duration.startsWith('dotted-');
-    const baseDuration = isDotted
-      ? note.duration.replace('dotted-', '') as NoteDuration
-      : note.duration;
+    // Triplet and dotted modifiers are represented in our duration enum.
+    const { baseDuration, isDotted } = this.getDurationInfo(note.duration);
     const duration = durationToVexFlow(baseDuration);
 
     try {
@@ -1197,11 +1264,7 @@ export class VexFlowRenderer {
   }
 
   private createRestNote(rest: Rest, clef: 'treble' | 'bass' | 'alto' | 'tenor'): any {
-    // Check if duration is dotted and extract base duration
-    const isDotted = rest.duration.startsWith('dotted-');
-    const baseDuration = isDotted
-      ? rest.duration.replace('dotted-', '') as NoteDuration
-      : rest.duration;
+    const { baseDuration, isDotted } = this.getDurationInfo(rest.duration);
     const duration = durationToVexFlow(baseDuration);
     const key      = clef === 'bass' ? 'd/3' : 'b/4';
     try {
@@ -1443,9 +1506,10 @@ export class VexFlowRenderer {
                 let printMeasureStemDir = Stem.DOWN;
                 for (const el of voice.notes) {
                   if (!('pitch' in el)) continue;
-                  const base = (el as Note).duration.startsWith('dotted-')
-                    ? (el as Note).duration.replace('dotted-', '')
-                    : (el as Note).duration;
+                  const rawDuration = (el as Note).duration;
+                  const base = rawDuration
+                    .replace('dotted-', '')
+                    .replace('triplet-', '');
                   if (base !== 'eighth' && base !== 'sixteenth' && base !== 'thirty-second') continue;
                   const dist = Math.abs(pitchToMidi((el as Note).pitch) - printMiddleLineMidi);
                   if (dist > printMeasureMaxDist) {
@@ -1477,9 +1541,9 @@ export class VexFlowRenderer {
 
                   if ('pitch' in element) {
                     const note = element as Note;
-                    const base = note.duration.startsWith('dotted-')
-                      ? note.duration.replace('dotted-', '')
-                      : note.duration;
+                    const base = note.duration
+                      .replace('dotted-', '')
+                      .replace('triplet-', '');
                     const isBeamable =
                       base === 'eighth' || base === 'sixteenth' || base === 'thirty-second';
 
@@ -1511,6 +1575,10 @@ export class VexFlowRenderer {
 
               // Draw beams after the voice so they render on top
               beams.forEach((b) => b.setContext(this.context).draw());
+
+              // Draw tuplets (triplet durations) after note spacing is finalized.
+              const tuplets = this.buildTuplets(voice, tickables, tickableDataIndices);
+              tuplets.forEach((t) => t.setContext(this.context).draw());
 
               // ── Ties (drawn first — slur arcs must encompass tie arcs) ──────────
               // Tie rules: Each tie connects exactly TWO consecutive notes of the SAME pitch.
