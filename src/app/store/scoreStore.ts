@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol, NotationSystem, GregorianChantDivision, GregorianChantSpacingDensity } from '../../types/music';
+import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol, NotationSystem, GregorianChantDivision, GregorianChantSpacingDensity, GregorianChantInterpretation } from '../../types/music';
 
 interface ScoreState {
   composition: Composition | null;
@@ -71,6 +71,7 @@ interface ScoreState {
   updateSharePermission: (permission: 'view' | 'edit') => void;
   updateNotationSystem: (notationSystem: NotationSystem) => void;
   updateChantSpacingDensity: (density: GregorianChantSpacingDensity) => void;
+  updateChantInterpretation: (profile: GregorianChantInterpretation) => void;
   setAnacrusis: (enabled: boolean, pickupBeats?: number) => void;
   setShowMeasureNumbers: (show: boolean) => void;
   setPlayChords: (play: boolean) => void;
@@ -103,6 +104,7 @@ const defaultComposition: Composition = {
   keySignature: 'C',
   notationSystem: 'standard',
   chantSpacingDensity: 'normal',
+  chantInterpretation: 'medium',
   showMeasureNumbers: true,
   privacy: 'private',
   staves: [
@@ -958,6 +960,17 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     saveToHistory(composition);
     set({
       composition: updateCompositionWithDates(composition, { chantSpacingDensity: density }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  updateChantInterpretation: (profile) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+    set({
+      composition: updateCompositionWithDates(composition, { chantInterpretation: profile }),
       canUndo: historyIndex >= 0,
       canRedo: false,
     });

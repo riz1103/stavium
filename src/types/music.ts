@@ -120,6 +120,7 @@ export type GregorianChantSymbol =
 export type GregorianChantOrnament = 'none' | 'episema' | 'mora';
 export type GregorianChantDivision = 'none' | 'minima' | 'minor' | 'major' | 'finalis';
 export type GregorianChantSpacingDensity = 'tight' | 'normal' | 'spacious';
+export type GregorianChantInterpretation = 'subtle' | 'medium' | 'expressive';
 
 export interface Composition {
   id?: string;
@@ -162,6 +163,8 @@ export interface Composition {
   notationSystem?: NotationSystem;
   /** Horizontal spacing profile for Gregorian chant rendering. */
   chantSpacingDensity?: GregorianChantSpacingDensity;
+  /** Performance profile for chant ornaments (interpretive timing). */
+  chantInterpretation?: GregorianChantInterpretation;
 }
 
 export type Instrument = 

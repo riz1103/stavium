@@ -364,6 +364,51 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
     // Empty measure → insert at start
     if (voice.notes.length === 0) return 0;
 
+    // Gregorian chant uses free spacing and custom symbol widths.
+    // Use actual rendered X positions so click-to-insert matches visual gaps.
+    if (composition.notationSystem === 'gregorian-chant' && rendererRef.current) {
+      const positions = rendererRef.current
+        .getNotePositions()
+        .filter(
+          (p) =>
+            p.staffIndex === staffIndex &&
+            p.measureIndex === measureIndex &&
+            p.voiceIndex === voiceIndex
+        )
+        .sort((a, b) => a.noteDataIndex - b.noteDataIndex);
+
+      if (positions.length > 0) {
+        const NOTE_SNAP_RADIUS = 10;
+
+        // 1) Clicks very close to an existing note should insert relative to that note
+        // (left side => before, right side => after) for intuitive placement.
+        const nearest = positions.reduce((best, p) => {
+          const dist = Math.abs(x - p.x);
+          if (!best || dist < best.dist) return { p, dist };
+          return best;
+        }, null as { p: typeof positions[number]; dist: number } | null);
+        if (nearest && nearest.dist <= NOTE_SNAP_RADIUS) {
+          if (x < nearest.p.x) return Math.max(0, nearest.p.noteDataIndex);
+          return Math.min(voice.notes.length, nearest.p.noteDataIndex + 1);
+        }
+
+        // 2) Clicks in open gaps between notes insert between those notes.
+        if (x < positions[0].x - NOTE_SNAP_RADIUS) return Math.max(0, positions[0].noteDataIndex);
+        for (let i = 0; i < positions.length - 1; i++) {
+          const left = positions[i];
+          const right = positions[i + 1];
+          const gapStart = left.x + NOTE_SNAP_RADIUS;
+          const gapEnd = right.x - NOTE_SNAP_RADIUS;
+          if (x >= gapStart && x <= gapEnd) {
+            return Math.min(voice.notes.length, left.noteDataIndex + 1);
+          }
+        }
+
+        // 3) Otherwise append after the last visible note.
+        return Math.min(voice.notes.length, positions[positions.length - 1].noteDataIndex + 1);
+      }
+    }
+
     // Get measure layout
     const layout = getMeasureLayout(composition);
     const { x: measureStartX, width: measureWidth } = layout[measureIndex] ?? {

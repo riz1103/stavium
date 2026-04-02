@@ -444,8 +444,29 @@ export class ToneScheduler {
       duration
         .replace('dotted-', '')
         .replace(/^(triplet|quintuplet|sextuplet|septuplet)-/, '') as NoteDuration;
+    const chantProfile = composition.chantInterpretation ?? 'medium';
+    const chantOrnamentScaling: Record<
+      'subtle' | 'medium' | 'expressive',
+      { mora: number; episema: number }
+    > = {
+      subtle: { mora: 1.45, episema: 1.2 },
+      medium: { mora: 1.8, episema: 1.35 },
+      expressive: { mora: 2.15, episema: 1.55 },
+    };
+    const getChantOrnamentMultiplier = (element: { duration: NoteDuration } | Note): number => {
+      if (!isGregorianChant || !('pitch' in element)) return 1;
+      const ornament = (element as Note).chantOrnament ?? 'none';
+      const profile = chantOrnamentScaling[chantProfile];
+      if (ornament === 'mora') return profile.mora;
+      if (ornament === 'episema') return profile.episema;
+      return 1;
+    };
     const getElementBeats = (duration: NoteDuration): number =>
       isGregorianChant ? durationToBeats(toChantBaseDuration(duration)) : durationToBeats(duration);
+    const getElementPlaybackBeats = (element: { duration: NoteDuration } | Note): number =>
+      getElementBeats(element.duration) * getChantOrnamentMultiplier(element);
+    const getElementDurationSec = (element: { duration: NoteDuration } | Note, tempo: number): number =>
+      beatsToSeconds(getElementPlaybackBeats(element), tempo);
 
     // Normalize requested playback range so stale/out-of-bounds values
     // never result in a silent "played nothing" run.
@@ -562,7 +583,7 @@ export class ToneScheduler {
             if (firstEl.pitch !== lastNote.pitch) break; // different pitch → not a tie
 
             // Accumulate this note's duration into the chain origin
-            const extraSec = beatsToSeconds(getElementBeats(firstEl.duration), effTempo(nextMIdx));
+            const extraSec = getElementDurationSec(firstEl, effTempo(nextMIdx));
             crossTieExtra.set(originKey, (crossTieExtra.get(originKey) ?? 0) + extraSec);
 
             // Mark as silent (will not be scheduled as a new attack)
@@ -637,7 +658,7 @@ export class ToneScheduler {
           ? Math.max(
               ...measure.voices.map((voice) =>
                 beatsToSeconds(
-                  voice.notes.reduce((sum, el) => sum + getElementBeats(el.duration), 0),
+                  voice.notes.reduce((sum, el) => sum + getElementPlaybackBeats(el as any), 0),
                   currentTempo
                 )
               ),
@@ -660,7 +681,7 @@ export class ToneScheduler {
             // in scheduledNotes so the highlight indicator advances through each note.
             if (tiedNotesToSkip > 0) {
               tiedNotesToSkip--;
-              const beats = getElementBeats(element.duration);
+              const beats = getElementPlaybackBeats(element as any);
               if ('pitch' in element) {
                 const skipNoteTime = measureStartTime + beatsToSeconds(measureTime, currentTempo);
                 this.scheduledNotes.push({
@@ -676,7 +697,7 @@ export class ToneScheduler {
             // Skip AUDIO for cross-measure tie continuations, but still highlight them.
             const flatKey = `${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`;
             if (crossTieSkip.has(flatKey)) {
-              const beats = getElementBeats(element.duration);
+              const beats = getElementPlaybackBeats(element as any);
               if ('pitch' in element) {
                 const skipNoteTime = measureStartTime + beatsToSeconds(measureTime, currentTempo);
                 this.scheduledNotes.push({
@@ -689,7 +710,7 @@ export class ToneScheduler {
               return;
             }
             
-            const beats = getElementBeats(element.duration);
+            const beats = getElementPlaybackBeats(element as any);
             const durationSec = beatsToSeconds(beats, currentTempo);
 
             // Check if this note fits in the current measure
@@ -736,8 +757,7 @@ export class ToneScheduler {
                   if ('pitch' in tiedEl && 'pitch' in prevTiedEl &&
                       (tiedEl as Note).pitch === note.pitch &&
                       (prevTiedEl as Note).tie) {
-                    const tiedBeats = getElementBeats(tiedEl.duration);
-                    totalDurationSec += beatsToSeconds(tiedBeats, currentTempo);
+                    totalDurationSec += getElementDurationSec(tiedEl as any, currentTempo);
                     prevTiedIndex = tiedIndex;
                     tiedIndex++;
                   } else {

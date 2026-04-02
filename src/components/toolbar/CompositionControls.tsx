@@ -49,6 +49,7 @@ export const CompositionControls = ({ isReadOnly = false }: CompositionControlsP
   const composition           = useScoreStore((s) => s.composition);
   const updateNotationSystem  = useScoreStore((s) => s.updateNotationSystem);
   const updateChantSpacingDensity = useScoreStore((s) => s.updateChantSpacingDensity);
+  const updateChantInterpretation = useScoreStore((s) => s.updateChantInterpretation);
   const updateTimeSignature   = useScoreStore((s) => s.updateTimeSignature);
   const updateKeySignature    = useScoreStore((s) => s.updateKeySignature);
   const updateTempo           = useScoreStore((s) => s.updateTempo);
@@ -100,6 +101,21 @@ export const CompositionControls = ({ isReadOnly = false }: CompositionControlsP
             <option value="tight">Tight</option>
             <option value="normal">Normal</option>
             <option value="spacious">Spacious</option>
+          </select>
+        </div>
+      )}
+      {!isReadOnly && isGregorianChant && (
+        <div className="flex items-center gap-1.5">
+          <span className="sv-toolbar-label">Interpret</span>
+          <select
+            value={composition.chantInterpretation ?? 'medium'}
+            onChange={(e) => updateChantInterpretation(e.target.value as 'subtle' | 'medium' | 'expressive')}
+            className="sv-select w-28"
+            title="Ornament timing profile for Gregorian playback"
+          >
+            <option value="subtle">Subtle</option>
+            <option value="medium">Medium</option>
+            <option value="expressive">Expressive</option>
           </select>
         </div>
       )}
