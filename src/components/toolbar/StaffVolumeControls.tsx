@@ -3,6 +3,7 @@ import { usePlaybackStore } from '../../app/store/playbackStore';
 
 export const StaffVolumeControls = () => {
   const composition    = useScoreStore((state) => state.composition);
+  const setStaffHidden = useScoreStore((state) => state.setStaffHidden);
   const staffVolumes   = usePlaybackStore((state) => state.staffVolumes);
   const staffMuted     = usePlaybackStore((state) => state.staffMuted);
   const setStaffVolume = usePlaybackStore((state) => state.setStaffVolume);
@@ -14,15 +15,46 @@ export const StaffVolumeControls = () => {
     <div className="sv-toolbar">
       <span className="sv-toolbar-label">Volume</span>
       {composition.staves.map((staff, index) => {
-        const volume     = staffVolumes[index] ?? 100;
-        const muted      = staffMuted[index] ?? false;
+        const volume      = staffVolumes[index] ?? 100;
+        const muted       = staffMuted[index] ?? false;
+        const hidden      = staff.hidden ?? false;
         const displayName = staff.name || `S${index + 1}`;
 
         return (
-          <div key={index} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-sv-elevated border border-sv-border">
+          <div
+            key={index}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md border transition-opacity ${
+              hidden
+                ? 'bg-sv-elevated/50 border-sv-border/50 opacity-50'
+                : 'bg-sv-elevated border-sv-border'
+            }`}
+          >
             <span className="text-xs text-sv-text-muted min-w-[28px] truncate" title={displayName}>
               {displayName}
             </span>
+
+            {/* Hide / Show */}
+            <button
+              onClick={() => setStaffHidden(index, !hidden)}
+              title={hidden ? 'Show in score' : 'Hide from score'}
+              className={`w-6 h-6 flex items-center justify-center rounded text-xs transition-colors ${
+                hidden
+                  ? 'bg-violet-500/30 text-violet-400'
+                  : 'text-sv-text-muted hover:text-sv-text'
+              }`}
+            >
+              {hidden ? (
+                /* eye-off */
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.804 11.804 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78 3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/>
+                </svg>
+              ) : (
+                /* eye */
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                </svg>
+              )}
+            </button>
 
             {/* Mute */}
             <button
