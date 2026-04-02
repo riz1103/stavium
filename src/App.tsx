@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useUserStore } from './app/store/userStore';
 import { onAuthChange } from './services/authService';
@@ -35,12 +35,41 @@ function AnimatedRoutes({ user }: { user: User | null }) {
   );
 }
 
+function ConnectivityBanner({
+  isOffline,
+  showBackOnline,
+}: {
+  isOffline: boolean;
+  showBackOnline: boolean;
+}) {
+  if (!isOffline && !showBackOnline) return null;
+
+  return (
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+      {isOffline ? (
+        <div className="rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-200 backdrop-blur-sm">
+          Offline mode
+        </div>
+      ) : (
+        <div className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-200 backdrop-blur-sm">
+          Back online
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 function App() {
   const setUser    = useUserStore((state) => state.setUser);
   const setLoading = useUserStore((state) => state.setLoading);
   const user       = useUserStore((state) => state.user);
   const isLoading  = useUserStore((state) => state.isLoading);
+  const [isOffline, setIsOffline] = useState<boolean>(
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  );
+  const [showBackOnline, setShowBackOnline] = useState(false);
+  const onlineNoticeTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((u) => {
@@ -58,9 +87,37 @@ function App() {
     return () => unsubscribe();
   }, [setUser, setLoading]);
 
+  useEffect(() => {
+    const handleOffline = () => setIsOffline(true);
+    const handleOnline = () => {
+      setIsOffline(false);
+      setShowBackOnline(true);
+
+      if (onlineNoticeTimeoutRef.current) {
+        window.clearTimeout(onlineNoticeTimeoutRef.current);
+      }
+
+      onlineNoticeTimeoutRef.current = window.setTimeout(() => {
+        setShowBackOnline(false);
+      }, 2200);
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+      if (onlineNoticeTimeoutRef.current) {
+        window.clearTimeout(onlineNoticeTimeoutRef.current);
+      }
+    };
+  }, []);
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-sv-bg gap-4">
+        <ConnectivityBanner isOffline={isOffline} showBackOnline={showBackOnline} />
         <img src="/stavium_logo.png" alt="Stavium"
              className="w-16 h-16 rounded-xl opacity-80 animate-pulse" />
         <div className="w-6 h-6 border-2 border-sv-border border-t-sv-cyan rounded-full animate-spin" />
@@ -70,6 +127,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <ConnectivityBanner isOffline={isOffline} showBackOnline={showBackOnline} />
       <AnimatedRoutes user={user} />
     </BrowserRouter>
   );
