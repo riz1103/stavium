@@ -57,6 +57,10 @@ export interface Note {
   tieDirection?: SlurDirection;
   articulation?: string;
   dynamic?: string;
+  /** Gregorian chant note shape used when notationSystem is gregorian-chant. */
+  chantSymbol?: GregorianChantSymbol;
+  /** Optional chant ornament mark for the note. */
+  chantOrnament?: GregorianChantOrnament;
 }
 
 export interface Rest {
@@ -89,6 +93,8 @@ export interface Measure {
   clef?: Clef;            // clef change for this staff from this measure onward
   /** Chord symbols displayed above the staff */
   chords?: ChordSymbol[];
+  /** Gregorian chant division marker drawn at the end of this measure. */
+  chantDivision?: GregorianChantDivision;
 }
 
 export interface Staff {
@@ -101,6 +107,19 @@ export interface Staff {
 }
 
 export type PrivacyLevel = 'private' | 'shared' | 'public';
+export type NotationSystem = 'standard' | 'gregorian-chant';
+export type GregorianChantSymbol =
+  | 'punctum'
+  | 'virga'
+  | 'podatus'
+  | 'clivis'
+  | 'torculus'
+  | 'porrectus'
+  | 'quilisma'
+  | 'liquescent';
+export type GregorianChantOrnament = 'none' | 'episema' | 'mora';
+export type GregorianChantDivision = 'none' | 'minima' | 'minor' | 'major' | 'finalis';
+export type GregorianChantSpacingDensity = 'tight' | 'normal' | 'spacious';
 
 export interface Composition {
   id?: string;
@@ -139,6 +158,10 @@ export interface Composition {
   userId?: string;
   /** UID of the last user who saved the composition (may differ from userId for public/shared edits) */
   modifiedBy?: string;
+  /** Engraving mode used for score rendering and controls. */
+  notationSystem?: NotationSystem;
+  /** Horizontal spacing profile for Gregorian chant rendering. */
+  chantSpacingDensity?: GregorianChantSpacingDensity;
 }
 
 export type Instrument = 

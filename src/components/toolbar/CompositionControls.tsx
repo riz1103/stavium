@@ -47,6 +47,8 @@ interface CompositionControlsProps {
 
 export const CompositionControls = ({ isReadOnly = false }: CompositionControlsProps) => {
   const composition           = useScoreStore((s) => s.composition);
+  const updateNotationSystem  = useScoreStore((s) => s.updateNotationSystem);
+  const updateChantSpacingDensity = useScoreStore((s) => s.updateChantSpacingDensity);
   const updateTimeSignature   = useScoreStore((s) => s.updateTimeSignature);
   const updateKeySignature    = useScoreStore((s) => s.updateKeySignature);
   const updateTempo           = useScoreStore((s) => s.updateTempo);
@@ -67,12 +69,43 @@ export const CompositionControls = ({ isReadOnly = false }: CompositionControlsP
   const displayTempo = isReadOnly 
     ? (playbackTempo !== null ? playbackTempo : composition.tempo)
     : composition.tempo;
+  const isGregorianChant = composition.notationSystem === 'gregorian-chant';
 
   return (
     <div className="sv-toolbar flex-wrap gap-y-2">
 
-      {/* Time Signature */}
       {!isReadOnly && (
+        <div className="flex items-center gap-1.5">
+          <span className="sv-toolbar-label">Notation</span>
+          <select
+            value={composition.notationSystem ?? 'standard'}
+            onChange={(e) => updateNotationSystem(e.target.value as 'standard' | 'gregorian-chant')}
+            className="sv-select w-36"
+          >
+            <option value="standard">Standard staff</option>
+            <option value="gregorian-chant">Gregorian chant</option>
+          </select>
+        </div>
+      )}
+
+      {!isReadOnly && isGregorianChant && (
+        <div className="flex items-center gap-1.5">
+          <span className="sv-toolbar-label">Spacing</span>
+          <select
+            value={composition.chantSpacingDensity ?? 'normal'}
+            onChange={(e) => updateChantSpacingDensity(e.target.value as 'tight' | 'normal' | 'spacious')}
+            className="sv-select w-24"
+            title="Gregorian chant spacing density"
+          >
+            <option value="tight">Tight</option>
+            <option value="normal">Normal</option>
+            <option value="spacious">Spacious</option>
+          </select>
+        </div>
+      )}
+
+      {/* Time Signature */}
+      {!isReadOnly && !isGregorianChant && (
         <div className="flex items-center gap-1.5">
           <span className="sv-toolbar-label">Time</span>
           <select
@@ -86,7 +119,7 @@ export const CompositionControls = ({ isReadOnly = false }: CompositionControlsP
       )}
 
       {/* Key Signature */}
-      {!isReadOnly && (
+      {!isReadOnly && !isGregorianChant && (
         <div className="flex items-center gap-1.5">
           <span className="sv-toolbar-label">Key</span>
           <select
@@ -127,7 +160,7 @@ export const CompositionControls = ({ isReadOnly = false }: CompositionControlsP
         )}
       </div>
 
-      {!isReadOnly && (
+      {!isReadOnly && !isGregorianChant && (
         <>
           <div className="w-px self-stretch bg-sv-border mx-0.5" />
 

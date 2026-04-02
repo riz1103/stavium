@@ -1,5 +1,5 @@
 import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Dot, Articulation, StaveTie, Beam, Stem, Tuplet, RendererBackends } from 'vexflow';
-import { Clef, Composition, Measure, Note, Rest, NoteDuration } from '../../types/music';
+import { Clef, Composition, GregorianChantDivision, GregorianChantSymbol, Measure, Note, Rest, NoteDuration } from '../../types/music';
 import { parsePitch, pitchToVexFlowKey, pitchToMidi, keySignatureToVexFlow, shouldShowAccidental, findMeasureAccidental, getKeySignatureAccidentals } from '../../utils/noteUtils';
 import { durationToBeats, durationToVexFlow } from '../../utils/durationUtils';
 import { PlayingNoteRef } from '../../app/store/playbackStore';
@@ -33,6 +33,42 @@ export const getPickupMeasureWidth = (pickupBeats: number, beatsPerMeasure: numb
 
 /** Extra pixels added to a measure that starts with change symbols (clef/key/time). */
 export const CHANGE_SYMBOL_WIDTH = 70;
+
+function chantMeasureVisualUnits(measure: Measure | undefined): number {
+  if (!measure?.voices?.length) return 0;
+  const symbolWeight: Record<GregorianChantSymbol, number> = {
+    punctum: 1,
+    virga: 1.15,
+    podatus: 1.45,
+    clivis: 1.45,
+    torculus: 1.8,
+    porrectus: 1.9,
+    quilisma: 1.6,
+    liquescent: 1.1,
+  };
+  // Use the visually widest voice so imported/polyphonic chant doesn't crowd.
+  const maxUnitsInVoice = Math.max(
+    ...measure.voices.map((voice) =>
+      (voice?.notes ?? []).reduce((sum, el) => {
+        if (!('pitch' in el)) return sum + 0.8; // small spacing for rests in chant mode
+        const note = el as Note;
+        const sym = note.chantSymbol ?? 'punctum';
+        const ornamentBonus = note.chantOrnament && note.chantOrnament !== 'none' ? 0.25 : 0;
+        return sum + (symbolWeight[sym] ?? 1) + ornamentBonus;
+      }, 0)
+    ),
+    0
+  );
+  const divisionUnits: Record<GregorianChantDivision, number> = {
+    none: 0,
+    minima: 0.5,
+    minor: 0.75,
+    major: 1,
+    finalis: 1.2,
+  };
+  const div = (measure.chantDivision ?? 'none') as GregorianChantDivision;
+  return maxUnitsInVoice + (divisionUnits[div] ?? 0);
+}
 
 // ── Per-measure effective-value helpers ──────────────────────────────────────
 // Walk backwards through measures to find the most-recently-set override, or
@@ -68,6 +104,13 @@ function measureHasChanges(measure: Measure | undefined): boolean {
  */
 export function getMeasureLayout(composition: Composition): Array<{ x: number; width: number }> {
   const refMeasures = composition.staves[0]?.measures ?? [];
+  const isGregorianChant = composition.notationSystem === 'gregorian-chant';
+  const chantSpacingScale =
+    composition.chantSpacingDensity === 'tight'
+      ? 0.82
+      : composition.chantSpacingDensity === 'spacious'
+      ? 1.2
+      : 1;
   const maxMeasures = Math.max(...composition.staves.map((s) => s.measures.length), 1);
   const layout: Array<{ x: number; width: number }> = [];
   let cx = LEFT_MARGIN + CLEF_WIDTH;
@@ -77,7 +120,15 @@ export function getMeasureLayout(composition: Composition): Array<{ x: number; w
     const measure  = refMeasures[i];
 
     let w: number;
-    if (isPickup) {
+    if (isGregorianChant) {
+      // Gregorian chant is usually free-rhythm and often a single long line.
+      // Expand measure width with note count to avoid visual compression.
+      const chantUnits = Math.max(
+        ...composition.staves.map((staff) => chantMeasureVisualUnits(staff.measures[i])),
+        0
+      );
+      w = Math.max(Math.round(220 * chantSpacingScale), Math.round((120 + chantUnits * 28) * chantSpacingScale));
+    } else if (isPickup) {
       const globalBPM = Number(composition.timeSignature.split('/')[0]);
       w = getPickupMeasureWidth(composition.pickupBeats ?? 1, globalBPM);
     } else {
@@ -357,6 +408,150 @@ export class VexFlowRenderer {
     return stemDir >= 0 ? 'below' : 'above';
   }
 
+  private drawGregorianSymbol(svgEl: SVGElement, x: number, y: number, note: Note): void {
+    const symbol: GregorianChantSymbol = note.chantSymbol ?? 'punctum';
+    const ornament = note.chantOrnament ?? 'none';
+    const size = 8;
+    const half = size / 2;
+    const createRect = (rx: number, ry: number, w = size, h = size, rotateDeg = 0) => {
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', String(rx));
+      rect.setAttribute('y', String(ry));
+      rect.setAttribute('width', String(w));
+      rect.setAttribute('height', String(h));
+      rect.setAttribute('fill', '#111');
+      rect.setAttribute('stroke', '#000');
+      rect.setAttribute('stroke-width', '0.8');
+      if (rotateDeg !== 0) rect.setAttribute('transform', `rotate(${rotateDeg} ${rx + w / 2} ${ry + h / 2})`);
+      svgEl.appendChild(rect);
+    };
+    const createLine = (x1: number, y1: number, x2: number, y2: number, w = 1.3) => {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', String(x1));
+      line.setAttribute('y1', String(y1));
+      line.setAttribute('x2', String(x2));
+      line.setAttribute('y2', String(y2));
+      line.setAttribute('stroke', '#000');
+      line.setAttribute('stroke-width', String(w));
+      line.setAttribute('stroke-linecap', 'round');
+      svgEl.appendChild(line);
+    };
+    const createPath = (d: string, w = 1.2) => {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('stroke', '#000');
+      path.setAttribute('stroke-width', String(w));
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke-linecap', 'round');
+      svgEl.appendChild(path);
+    };
+
+    switch (symbol) {
+      case 'virga':
+        createRect(x - half, y - half);
+        createLine(x, y - half, x, y - 16);
+        break;
+      case 'podatus':
+        createRect(x - 8, y - half);
+        createRect(x, y - 10);
+        break;
+      case 'clivis':
+        createRect(x - 8, y - 10);
+        createRect(x, y - half);
+        break;
+      case 'torculus':
+        createRect(x - 12, y - half);
+        createRect(x - 4, y - 10);
+        createRect(x + 4, y - half);
+        break;
+      case 'porrectus':
+        createRect(x - 10, y - 10);
+        createPath(`M ${x - 2} ${y - 6} L ${x + 8} ${y + 2}`);
+        createRect(x + 8, y - 2);
+        break;
+      case 'quilisma':
+        createPath(`M ${x - 8} ${y - 1} Q ${x - 6} ${y - 6} ${x - 4} ${y - 1} Q ${x - 2} ${y + 4} ${x} ${y - 1}`);
+        createRect(x + 2, y - half);
+        break;
+      case 'liquescent':
+        createRect(x - 3, y - 3, 6, 6, 45);
+        break;
+      case 'punctum':
+      default:
+        createRect(x - half, y - half);
+        break;
+    }
+
+    if (ornament === 'episema') {
+      createLine(x - 6, y - 12, x + 6, y - 12, 1.4);
+    } else if (ornament === 'mora') {
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('cx', String(x + 8));
+      dot.setAttribute('cy', String(y));
+      dot.setAttribute('r', '1.8');
+      dot.setAttribute('fill', '#111');
+      svgEl.appendChild(dot);
+    }
+  }
+
+  private drawGregorianDivision(
+    svgEl: SVGElement,
+    x: number,
+    topY: number,
+    bottomY: number,
+    division: GregorianChantDivision | undefined
+  ): void {
+    const kind = division ?? 'none';
+    if (kind === 'none') return;
+    const addBar = (dx: number, y1: number, y2: number, w = 1.2) => {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', String(x + dx));
+      line.setAttribute('y1', String(y1));
+      line.setAttribute('x2', String(x + dx));
+      line.setAttribute('y2', String(y2));
+      line.setAttribute('stroke', '#000');
+      line.setAttribute('stroke-width', String(w));
+      svgEl.appendChild(line);
+    };
+    const midY = (topY + bottomY) / 2;
+    if (kind === 'minima') addBar(0, midY - 8, midY + 8);
+    if (kind === 'minor') addBar(0, topY + 4, bottomY - 4);
+    if (kind === 'major') {
+      addBar(-2, topY + 2, bottomY - 2);
+      addBar(2, topY + 2, bottomY - 2);
+    }
+    if (kind === 'finalis') {
+      addBar(-2, topY, bottomY, 1.3);
+      addBar(2, topY, bottomY, 2.2);
+    }
+  }
+
+  private getGregorianClefSymbol(clef: Clef): string {
+    // C-clef family (Do) and F-clef family (Fa)
+    if (clef === 'bass') return '𝄢';
+    return '𝄡';
+  }
+
+  private drawGregorianClef(
+    svgEl: SVGElement,
+    clef: Clef,
+    x: number,
+    topY: number,
+    bottomY: number
+  ): void {
+    const symbol = this.getGregorianClefSymbol(clef);
+    const yCenter = (topY + bottomY) / 2;
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', String(x));
+    text.setAttribute('y', String(yCenter + (clef === 'bass' ? 8 : 7)));
+    text.setAttribute('font-family', 'serif');
+    text.setAttribute('font-size', clef === 'bass' ? '28' : '34');
+    text.setAttribute('fill', '#000');
+    text.setAttribute('text-anchor', 'middle');
+    text.textContent = symbol;
+    svgEl.appendChild(text);
+  }
+
   /** Returns the exact note-head positions captured during the last render(). */
   getNotePositions(): RenderedNotePosition[] {
     return this.notePositions;
@@ -373,6 +568,13 @@ export class VexFlowRenderer {
     this.context.clear();
     this.notePositions = []; // reset on every render
 
+    const isGregorianChant = composition.notationSystem === 'gregorian-chant';
+    const staffLineCount = isGregorianChant ? 4 : 5;
+    const staffLineSpan = (staffLineCount - 1) * LINE_SPACING;
+    const showMeasureNumbers = !isGregorianChant && composition.showMeasureNumbers !== false;
+    const showTempoMarkings = !isGregorianChant;
+    const showKeyAndTimeSignatures = !isGregorianChant;
+    const baseKeySignature = isGregorianChant ? 'C' : composition.keySignature;
     const [beatsPerMeasure] = composition.timeSignature.split('/').map(Number);
 
     // Pickup-measure beats (0 means no anacrusis)
@@ -411,7 +613,6 @@ export class VexFlowRenderer {
       : null;
 
     // ── Measure numbers (only on first staff, above the staff) ─────────────
-    const showMeasureNumbers = composition.showMeasureNumbers !== false; // default true
     // Position measure numbers above the top staff line
     const measureNumberY = STAVE_Y_START + STAFF_LINE_OFFSET - 10; // Above the top line
 
@@ -440,11 +641,14 @@ export class VexFlowRenderer {
 
       // ── 1. Header stave: clef + key signature + time signature ──────────────
       const headerStave = new Stave(LEFT_MARGIN, y, CLEF_WIDTH);
-      headerStave.addClef(staff.clef);
+      (headerStave as any).setNumLines?.(staffLineCount);
+      if (!isGregorianChant) {
+        headerStave.addClef(staff.clef);
+      }
       
       // Add key signature (VexFlow expects format like "C", "G", "F", "Bb", etc.)
-      const vfKeySig = keySignatureToVexFlow(composition.keySignature);
-      if (vfKeySig && vfKeySig !== 'C') {
+      const vfKeySig = keySignatureToVexFlow(baseKeySignature);
+      if (showKeyAndTimeSignatures && vfKeySig && vfKeySig !== 'C') {
         // Only add if not C major (no sharps/flats)
         try {
           headerStave.addKeySignature(vfKeySig);
@@ -453,8 +657,18 @@ export class VexFlowRenderer {
         }
       }
       
-      headerStave.addTimeSignature(composition.timeSignature);
+      if (showKeyAndTimeSignatures) {
+        headerStave.addTimeSignature(composition.timeSignature);
+      }
       headerStave.setContext(this.context).draw();
+      if (isGregorianChant) {
+        const svgEl = this.getSvgElement();
+        if (svgEl) {
+          const staffTop = y + STAFF_LINE_OFFSET;
+          const staffBottom = staffTop + staffLineSpan;
+          this.drawGregorianClef(svgEl, staff.clef, LEFT_MARGIN + 20, staffTop, staffBottom);
+        }
+      }
 
       // ── 2. Draw measure highlights (before drawing measures) ────────────────
       // Only highlight the measure on the currently selected staff
@@ -471,7 +685,7 @@ export class VexFlowRenderer {
               
               // Calculate staff bounds (top and bottom of all staff lines)
               const staffTop = y + STAFF_LINE_OFFSET;
-              const staffBottom = staffTop + 4 * LINE_SPACING; // 5 lines = 4 gaps
+              const staffBottom = staffTop + staffLineSpan;
               
               // Draw highlight rectangle
               const highlight = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -523,6 +737,7 @@ export class VexFlowRenderer {
         const [effBPM, effBeatType] = effTimeSig.split('/').map(Number);
 
         const measureStave = new Stave(mx, y, mw);
+        (measureStave as any).setNumLines?.(staffLineCount);
 
         // Add notation-change symbols at the start of this measure (skip measure 0 – already on header)
         if (measureIndex > 0) {
@@ -531,18 +746,39 @@ export class VexFlowRenderer {
           const prevTimeSig = effectiveTimeSig(composition.staves[0]?.measures ?? [], measureIndex - 1, composition.timeSignature);
 
           if (effClef !== prevClef) {
-            try { measureStave.addClef(effClef); } catch (_) { /* skip */ }
+            if (!isGregorianChant) {
+              try { measureStave.addClef(effClef); } catch (_) { /* skip */ }
+            }
           }
-          if (effKeySig !== prevKeySig) {
+          if (showKeyAndTimeSignatures && effKeySig !== prevKeySig) {
             const vfNew = keySignatureToVexFlow(effKeySig);
             try { measureStave.addKeySignature(vfNew || 'C'); } catch (_) { /* skip */ }
           }
-          if (effTimeSig !== prevTimeSig) {
+          if (showKeyAndTimeSignatures && effTimeSig !== prevTimeSig) {
             try { measureStave.addTimeSignature(effTimeSig); } catch (_) { /* skip */ }
           }
         }
 
         measureStave.setContext(this.context).draw();
+        if (isGregorianChant && measureIndex > 0) {
+          const prevClef = effectiveClef(staff.measures, measureIndex - 1, staff.clef);
+          if (effClef !== prevClef) {
+            const svgEl = this.getSvgElement();
+            if (svgEl) {
+              const staffTop = y + STAFF_LINE_OFFSET;
+              const staffBottom = staffTop + staffLineSpan;
+              this.drawGregorianClef(svgEl, effClef, mx + 16, staffTop, staffBottom);
+            }
+          }
+        }
+        if (isGregorianChant) {
+          const svgEl = this.getSvgElement();
+          if (svgEl) {
+            const staffTop = y + STAFF_LINE_OFFSET;
+            const staffBottom = staffTop + staffLineSpan;
+            this.drawGregorianDivision(svgEl, mx + mw - 6, staffTop, staffBottom, measure.chantDivision);
+          }
+        }
 
         // ── Draw chord symbols above the staff ────────────────────────────────────
         if (measure.chords && measure.chords.length > 0) {
@@ -588,9 +824,10 @@ export class VexFlowRenderer {
               const staveNote = this.createStaveNote(
                 element as Note,
                 effClef,
-                effKeySig,
+                baseKeySignature,
                 measure,
-                dataIndex
+                dataIndex,
+                composition.notationSystem ?? 'standard'
               );
               if (staveNote) {
                 tickableDataIndices.push(dataIndex);
@@ -613,7 +850,7 @@ export class VexFlowRenderer {
             // formatter knows to suppress flags on beamed notes. They are drawn
             // after the voice is drawn.
             const beams: Beam[] = [];
-            if (voice) {
+            if (voice && !isGregorianChant) {
               let beamGroup: any[] = [];
               let currentBeat = 0;
               let beamGroupStartBeat = 0;
@@ -701,7 +938,14 @@ export class VexFlowRenderer {
                 const extraDataIndices: number[] = [];
                 v.notes.forEach((element, dataIndex) => {
                   if ('pitch' in element) {
-                    const sn = this.createStaveNote(element as Note, effClef, effKeySig, measure, dataIndex);
+                    const sn = this.createStaveNote(
+                      element as Note,
+                      effClef,
+                      baseKeySignature,
+                      measure,
+                      dataIndex,
+                      composition.notationSystem ?? 'standard'
+                    );
                     if (sn) { extraDataIndices.push(dataIndex); extraTickables.push(sn); }
                   } else {
                     const rn = this.createRestNote(element as Rest, effClef);
@@ -731,7 +975,7 @@ export class VexFlowRenderer {
             beams.forEach((b) => b.setContext(this.context).draw());
 
             // Draw tuplets (triplet durations) after note spacing is finalized.
-            const tuplets = this.buildTuplets(voice, tickables, tickableDataIndices);
+            const tuplets = isGregorianChant ? [] : this.buildTuplets(voice, tickables, tickableDataIndices);
             tuplets.forEach((t) => t.setContext(this.context).draw());
 
             // ── Cross-measure tie / slur ──────────────────────────────────────────
@@ -868,7 +1112,7 @@ export class VexFlowRenderer {
 
             // ── Draw lyrics (below staff) ─────────────────────────────────────────
             if (voice) {
-              const lyricBaselineY = y + STAFF_LINE_OFFSET + 4 * LINE_SPACING + 28;
+              const lyricBaselineY = y + STAFF_LINE_OFFSET + staffLineSpan + 28;
               voice.notes.forEach((element, dataIndex) => {
                 if (!('pitch' in element) || !element.lyric) return;
                 const tickableIdx = tickableDataIndices.indexOf(dataIndex);
@@ -903,6 +1147,10 @@ export class VexFlowRenderer {
                 if (nx && ny) {
                   const noteDataIndex = tickableDataIndices[ti];
                   const noteElement = voice.notes[noteDataIndex];
+                  if (isGregorianChant && 'pitch' in noteElement) {
+                    const svgEl = this.getSvgElement();
+                    if (svgEl) this.drawGregorianSymbol(svgEl, nx, ny, noteElement as Note);
+                  }
                   
                   this.notePositions.push({
                     staffIndex,
@@ -1102,7 +1350,7 @@ export class VexFlowRenderer {
           const currentTempo = effectiveTempo(refMeasures, measureIndex, composition.tempo);
           const isTempoChange = measureIndex === 0 || currentTempo !== prevTempo;
 
-          if (isTempoChange) {
+          if (showTempoMarkings && isTempoChange) {
             const svgElement = this.getSvgElement();
             if (svgElement) {
               // Position tempo marking above the staff, centered in the measure
@@ -1273,7 +1521,8 @@ export class VexFlowRenderer {
     clef: 'treble' | 'bass' | 'alto' | 'tenor',
     keySignature: string,
     measure?: Measure,
-    noteIndex?: number
+    noteIndex?: number,
+    notationSystem: 'standard' | 'gregorian-chant' = 'standard'
   ): any {
     if (!note.pitch) return null;
 
@@ -1291,9 +1540,15 @@ export class VexFlowRenderer {
       // Note: VexFlow may override this based on voice formatting, but we set it as a hint
       const stemDir = this.getStemDirection(note.pitch, clef);
       staveNote.setStemDirection(stemDir);
+      if (notationSystem === 'gregorian-chant') {
+        // Chant uses stemless puncta instead of modern oval heads with stems/flags.
+        staveNote.setStemStyle({ strokeStyle: 'transparent', fillStyle: 'transparent' });
+        staveNote.setFlagStyle({ strokeStyle: 'transparent', fillStyle: 'transparent' });
+        staveNote.setKeyStyle(0, { strokeStyle: 'transparent', fillStyle: 'transparent' });
+      }
 
       // Add augmentation dot if the duration is dotted
-      if (isDotted) {
+      if (isDotted && notationSystem !== 'gregorian-chant') {
         staveNote.addModifier(new Dot(), 0);
       }
 
@@ -1377,6 +1632,18 @@ export class VexFlowRenderer {
     }
   ): SVGSVGElement | null {
     const { pageWidth, labelWidth } = opts;
+    const isGregorianChant = composition.notationSystem === 'gregorian-chant';
+    const chantSpacingScale =
+      composition.chantSpacingDensity === 'tight'
+        ? 0.82
+        : composition.chantSpacingDensity === 'spacious'
+        ? 1.2
+        : 1;
+    const staffLineCount = isGregorianChant ? 4 : 5;
+    const staffLineSpan = (staffLineCount - 1) * LINE_SPACING;
+    const showKeyAndTimeSignatures = !isGregorianChant;
+    const showTempoMarkings = !isGregorianChant;
+    const baseKeySignature = isGregorianChant ? 'C' : composition.keySignature;
 
     // ── Print-layout constants ─────────────────────────────────────────────
     const PRINT_CLEF_W   = 120;   // header stave width
@@ -1388,7 +1655,7 @@ export class VexFlowRenderer {
     const [beatsPerMeasure, beatTypeValue] =
       composition.timeSignature.split('/').map(Number);
     const pickupBeats = composition.anacrusis ? (composition.pickupBeats ?? 1) : 0;
-    const vfKeySig = keySignatureToVexFlow(composition.keySignature);
+    const vfKeySig = keySignatureToVexFlow(baseKeySignature);
 
     // Helper to calculate pickup measure width for print (proportional to PRINT_MEAS_W)
     const getPickupMeasureWidthForPrint = (pickupBeats: number, beatsPerMeasure: number): number => {
@@ -1405,7 +1672,18 @@ export class VexFlowRenderer {
     // Calculate actual measure widths (pickup measure is smaller)
     const measureWidths: number[] = [];
     for (let i = 0; i < maxMeasures; i++) {
-      if (composition.anacrusis && i === 0) {
+      if (isGregorianChant) {
+        const chantUnits = Math.max(
+          ...composition.staves.map((staff) => chantMeasureVisualUnits(staff.measures[i])),
+          0
+        );
+        measureWidths.push(
+          Math.max(
+            Math.round(220 * chantSpacingScale),
+            Math.round((120 + chantUnits * 28) * chantSpacingScale)
+          )
+        );
+      } else if (composition.anacrusis && i === 0) {
         measureWidths.push(getPickupMeasureWidthForPrint(pickupBeats, beatsPerMeasure));
       } else {
         measureWidths.push(PRINT_MEAS_W);
@@ -1483,14 +1761,22 @@ export class VexFlowRenderer {
 
         // ── Header stave (clef + key sig; time sig only on system 0) ──────
         const headerStave = new Stave(staveX, staveY, PRINT_CLEF_W);
-        headerStave.addClef(staff.clef);
-        if (vfKeySig && vfKeySig !== 'C') {
+        (headerStave as any).setNumLines?.(staffLineCount);
+        if (!isGregorianChant) {
+          headerStave.addClef(staff.clef);
+        }
+        if (showKeyAndTimeSignatures && vfKeySig && vfKeySig !== 'C') {
           try { headerStave.addKeySignature(vfKeySig); } catch { /* ignore */ }
         }
-        if (sysIdx === 0) {
+        if (showKeyAndTimeSignatures && sysIdx === 0) {
           headerStave.addTimeSignature(composition.timeSignature);
         }
         headerStave.setContext(this.context).draw();
+        if (isGregorianChant && svgEl) {
+          const staffTop = staveY + STAFF_LINE_OFFSET;
+          const staffBottom = staffTop + staffLineSpan;
+          this.drawGregorianClef(svgEl, staff.clef, staveX + 18, staffTop, staffBottom);
+        }
 
         // ── Staff label ────────────────────────────────────────────────────
         const staffLabel = staff.name?.trim() ||
@@ -1534,7 +1820,13 @@ export class VexFlowRenderer {
           const measX = staveX + PRINT_CLEF_W + cumulativeX;
 
           const measureStave = new Stave(measX, staveY, measWidth);
+          (measureStave as any).setNumLines?.(staffLineCount);
           measureStave.setContext(this.context).draw();
+          if (isGregorianChant && svgEl) {
+            const staffTop = staveY + STAFF_LINE_OFFSET;
+            const staffBottom = staffTop + staffLineSpan;
+            this.drawGregorianDivision(svgEl, measX + measWidth - 6, staffTop, staffBottom, measure.chantDivision);
+          }
 
           const voiceBeats =
             composition.anacrusis && mIdx === 0 ? pickupBeats : beatsPerMeasure;
@@ -1546,7 +1838,7 @@ export class VexFlowRenderer {
             voice.notes.forEach((element, dataIndex) => {
               if ('pitch' in element) {
                 const sn = this.createStaveNote(
-                  element as Note, staff.clef, composition.keySignature);
+                  element as Note, staff.clef, baseKeySignature, undefined, undefined, composition.notationSystem ?? 'standard');
                 if (sn) { tickableDataIndices.push(dataIndex); tickables.push(sn); }
               } else {
                 const rn = this.createRestNote(element as Rest, staff.clef);
@@ -1561,7 +1853,7 @@ export class VexFlowRenderer {
               // Beam objects must exist before format() so VexFlow suppresses
               // individual flags on beamed notes. They are drawn after the voice.
               const beams: Beam[] = [];
-              if (voice) {
+              if (voice && !isGregorianChant) {
                 let beamGroup: any[] = [];
                 let currentBeat = 0;
                 let beamGroupStartBeat = 0;
@@ -1646,7 +1938,14 @@ export class VexFlowRenderer {
                   const extraTickables: any[] = [];
                   v.notes.forEach((element) => {
                     if ('pitch' in element) {
-                      const sn = this.createStaveNote(element as Note, staff.clef, composition.keySignature);
+                      const sn = this.createStaveNote(
+                        element as Note,
+                        staff.clef,
+                        baseKeySignature,
+                        undefined,
+                        undefined,
+                        composition.notationSystem ?? 'standard'
+                      );
                       if (sn) extraTickables.push(sn);
                     } else {
                       const rn = this.createRestNote(element as Rest, staff.clef);
@@ -1672,7 +1971,7 @@ export class VexFlowRenderer {
               beams.forEach((b) => b.setContext(this.context).draw());
 
               // Draw tuplets (triplet durations) after note spacing is finalized.
-              const tuplets = this.buildTuplets(voice, tickables, tickableDataIndices);
+              const tuplets = isGregorianChant ? [] : this.buildTuplets(voice, tickables, tickableDataIndices);
               tuplets.forEach((t) => t.setContext(this.context).draw());
 
               // ── Ties (drawn first — slur arcs must encompass tie arcs) ──────────
@@ -1774,7 +2073,22 @@ export class VexFlowRenderer {
 
               // ── Draw lyrics in print view (below staff) ───────────────────────
               if (voice && svgEl) {
-                const lyricBaselineY = staveY + STAFF_LINE_OFFSET + 4 * LINE_SPACING + 24;
+                if (isGregorianChant) {
+                  for (let t = 0; t < tickableDataIndices.length; t++) {
+                    const dataIdx = tickableDataIndices[t];
+                    const el = voice.notes[dataIdx];
+                    if (!el || !('pitch' in el)) continue;
+                    try {
+                      const x = tickables[t].getAbsoluteX();
+                      const ys: number[] = tickables[t].getYs?.() ?? [];
+                      const y = ys.length > 0 ? ys[0] : 0;
+                      if (x && y) this.drawGregorianSymbol(svgEl, x, y, el as Note);
+                    } catch {
+                      // skip punctum if note coordinates unavailable
+                    }
+                  }
+                }
+                const lyricBaselineY = staveY + STAFF_LINE_OFFSET + staffLineSpan + 24;
                 voice.notes.forEach((element, dataIndex) => {
                   if (!('pitch' in element) || !element.lyric) return;
                   const tickableIdx = tickableDataIndices.indexOf(dataIndex);
@@ -1835,7 +2149,7 @@ export class VexFlowRenderer {
             const currentTempo = effectiveTempo(refMeasures, mIdx, composition.tempo);
             const isTempoChange = mIdx === 0 || currentTempo !== prevTempo;
 
-            if (isTempoChange) {
+            if (showTempoMarkings && isTempoChange) {
               // Position tempo marking centered in the measure, above the staff
               const tempoX = measX + measWidth / 2;
               const tempoY = staveY + STAFF_LINE_OFFSET - 14; // Above measure numbers
@@ -1866,7 +2180,7 @@ export class VexFlowRenderer {
         const topLineY = sysY + STAVE_TOP + STAFF_LINE_OFFSET;
         const botLineY = sysY + STAVE_TOP
                        + (numStaves - 1) * ROW_SPACING
-                       + STAFF_LINE_OFFSET + 4 * LINE_SPACING;
+                       + STAFF_LINE_OFFSET + staffLineSpan;
 
         const bar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         bar.setAttribute('x1', String(bx)); bar.setAttribute('y1', String(topLineY));

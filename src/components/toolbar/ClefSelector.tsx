@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useScoreStore } from '../../app/store/scoreStore';
 import { Clef } from '../../types/music';
 
@@ -7,11 +8,16 @@ const CLEFS: { value: Clef; label: string; symbol: string }[] = [
   { value: 'alto',   label: 'Alto',   symbol: '𝄡' },
   { value: 'tenor',  label: 'Tenor',  symbol: '𝄡' },
 ];
+const GREGORIAN_CLEFS: { value: Clef; label: string; symbol: string }[] = [
+  { value: 'alto',  label: 'Do (C) clef', symbol: '𝄡' },
+  { value: 'bass',  label: 'Fa (F) clef', symbol: '𝄢' },
+];
 
 export const ClefSelector = () => {
   const composition        = useScoreStore((state) => state.composition);
   const selectedStaffIndex = useScoreStore((state) => state.selectedStaffIndex);
   const setComposition     = useScoreStore((state) => state.setComposition);
+  const isGregorianChant   = composition?.notationSystem === 'gregorian-chant';
 
   const handleClefChange = (clef: Clef) => {
     if (!composition || selectedStaffIndex === null) return;
@@ -23,11 +29,25 @@ export const ClefSelector = () => {
   const currentClef = composition && selectedStaffIndex !== null
     ? composition.staves[selectedStaffIndex]?.clef
     : 'treble';
+  const visibleClefs = isGregorianChant ? GREGORIAN_CLEFS : CLEFS;
+
+  useEffect(() => {
+    if (!isGregorianChant || !composition || selectedStaffIndex === null) return;
+    const active = composition.staves[selectedStaffIndex]?.clef;
+    if (active === 'treble' || active === 'tenor') {
+      const newStaves = [...composition.staves];
+      newStaves[selectedStaffIndex] = {
+        ...newStaves[selectedStaffIndex],
+        clef: 'alto',
+      };
+      setComposition({ ...composition, staves: newStaves });
+    }
+  }, [isGregorianChant, composition, selectedStaffIndex, setComposition]);
 
   return (
     <div className="sv-toolbar">
       <span className="sv-toolbar-label">Clef</span>
-      {CLEFS.map((c) => (
+      {visibleClefs.map((c) => (
         <button
           key={c.value}
           onClick={() => handleClefChange(c.value)}

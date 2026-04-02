@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol } from '../../types/music';
+import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol, NotationSystem, GregorianChantDivision, GregorianChantSpacingDensity } from '../../types/music';
 
 interface ScoreState {
   composition: Composition | null;
@@ -58,7 +58,7 @@ interface ScoreState {
    */
   updateMeasureProperties: (
     measureIndex: number,
-    props: { timeSignature?: string | null; keySignature?: string | null; tempo?: number | null; clef?: Clef | null },
+    props: { timeSignature?: string | null; keySignature?: string | null; tempo?: number | null; clef?: Clef | null; chantDivision?: GregorianChantDivision | null },
     staffIndex?: number
   ) => void;
   updateTempo: (tempo: number) => void;
@@ -69,6 +69,8 @@ interface ScoreState {
   updatePrivacy: (privacy: 'private' | 'shared' | 'public') => void;
   updateSharedEmails: (emails: string[]) => void;
   updateSharePermission: (permission: 'view' | 'edit') => void;
+  updateNotationSystem: (notationSystem: NotationSystem) => void;
+  updateChantSpacingDensity: (density: GregorianChantSpacingDensity) => void;
   setAnacrusis: (enabled: boolean, pickupBeats?: number) => void;
   setShowMeasureNumbers: (show: boolean) => void;
   setPlayChords: (play: boolean) => void;
@@ -99,6 +101,8 @@ const defaultComposition: Composition = {
   tempo: 120,
   timeSignature: '4/4',
   keySignature: 'C',
+  notationSystem: 'standard',
+  chantSpacingDensity: 'normal',
   showMeasureNumbers: true,
   privacy: 'private',
   staves: [
@@ -621,6 +625,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         keySignature: measure.keySignature,
         tempo: measure.tempo,
         clef: measure.clef,
+        chantDivision: measure.chantDivision,
       };
       copiedMeasures.push(copiedMeasure);
     }
@@ -656,6 +661,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
       keySignature: copiedMeasure.keySignature,
       tempo: copiedMeasure.tempo,
       clef: copiedMeasure.clef,
+      chantDivision: copiedMeasure.chantDivision,
     }));
 
     // Insert all measures at the target position
@@ -804,6 +810,10 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         if ('clef' in props && (staffIndex === undefined || si === staffIndex)) {
           updated.clef = props.clef ?? undefined;
         }
+        // Chant division is staff-specific
+        if ('chantDivision' in props && (staffIndex === undefined || si === staffIndex)) {
+          updated.chantDivision = props.chantDivision ?? undefined;
+        }
         return updated;
       }),
     }));
@@ -926,6 +936,28 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     saveToHistory(composition);
     set({
       composition: updateCompositionWithDates(composition, { sharePermission: permission }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  updateNotationSystem: (notationSystem) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+    set({
+      composition: updateCompositionWithDates(composition, { notationSystem }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  updateChantSpacingDensity: (density) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+    set({
+      composition: updateCompositionWithDates(composition, { chantSpacingDensity: density }),
       canUndo: historyIndex >= 0,
       canRedo: false,
     });

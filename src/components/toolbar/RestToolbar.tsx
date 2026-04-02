@@ -32,8 +32,13 @@ const getTupletKind = (dur: NoteDuration | null): TupletKind => {
 };
 
 export const RestToolbar = () => {
+  const composition             = useScoreStore((s) => s.composition);
   const selectedRestDuration    = useScoreStore((s) => s.selectedRestDuration);
   const setSelectedRestDuration = useScoreStore((s) => s.setSelectedRestDuration);
+  const isGregorianChant        = composition?.notationSystem === 'gregorian-chant';
+
+  if (isGregorianChant) return null;
+
   const baseDur = toBase(selectedRestDuration ?? 'quarter');
   const tupletKind = getTupletKind(selectedRestDuration);
   const tupletSupported = TUPLETABLE.has(baseDur);

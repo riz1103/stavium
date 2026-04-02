@@ -19,6 +19,7 @@ import { TieSlurToolbar } from '../components/toolbar/TieSlurToolbar';
 import { ArticulationToolbar } from '../components/toolbar/ArticulationToolbar';
 import { DynamicToolbar } from '../components/toolbar/DynamicToolbar';
 import { LyricsToolbar } from '../components/toolbar/LyricsToolbar';
+import { GregorianChantToolbar } from '../components/toolbar/GregorianChantToolbar';
 import { UndoRedoToolbar } from '../components/toolbar/UndoRedoToolbar';
 import { ExportToolbar } from '../components/toolbar/ExportToolbar';
 import { ChordDetectionPanel } from '../components/toolbar/ChordDetectionPanel';
@@ -82,6 +83,7 @@ export const EditorPage = () => {
   const redo = useScoreStore((state) => state.redo);
   const canUndo = useScoreStore((state) => state.canUndo);
   const canRedo = useScoreStore((state) => state.canRedo);
+  const isGregorianChant = composition?.notationSystem === 'gregorian-chant';
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -242,12 +244,12 @@ export const EditorPage = () => {
         <>
           {/* ── Section 1: Notes & Rests ──────────────────────────────────── */}
           <div className="sv-section-notes border-b border-sv-border">
-            <SectionHeader id="notes" icon="♩" label="Notes & Rests" />
+            <SectionHeader id="notes" icon="♩" label={isGregorianChant ? 'Neumes' : 'Notes & Rests'} />
             {!collapsedRows.has('notes') && (
               <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
             <NoteToolbar />
-                <Sep />
-            <RestToolbar />
+                {!isGregorianChant && <Sep />}
+            {!isGregorianChant && <RestToolbar />}
                 <Sep />
             <UndoRedoToolbar />
               </div>
@@ -260,8 +262,8 @@ export const EditorPage = () => {
             {!collapsedRows.has('structure') && (
               <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
             <StaffControls />
-                <Sep />
-            <MeasureControls />
+                {!isGregorianChant && <Sep />}
+            {!isGregorianChant && <MeasureControls />}
                 <Sep />
             <ClefSelector />
                 <Sep />
@@ -292,19 +294,34 @@ export const EditorPage = () => {
               <SectionHeader id="expression" icon="✦" label="Note Expression" pulse />
               {!collapsedRows.has('expression') && (
             <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
-              <AccidentalToolbar />
+              {isGregorianChant ? (
+                <>
+                  <GregorianChantToolbar />
                   <Sep />
-              <TieSlurToolbar />
+                  <TieSlurToolbar />
                   <Sep />
-              <ArticulationToolbar />
+                </>
+              ) : (
+                <>
+                  <AccidentalToolbar />
                   <Sep />
-              <DynamicToolbar />
+                  <TieSlurToolbar />
                   <Sep />
+                  <ArticulationToolbar />
+                  <Sep />
+                  <DynamicToolbar />
+                  <Sep />
+                </>
+              )}
               <LyricsToolbar />
+              {!isGregorianChant && (
+                <>
                   <Sep />
-              <ChordDetectionPanel />
+                  <ChordDetectionPanel />
                   <Sep />
-              <ChordEditor />
+                  <ChordEditor />
+                </>
+              )}
                 </div>
               )}
             </div>
@@ -342,17 +359,26 @@ export const EditorPage = () => {
     notes: isReadOnly ? readOnlyNotice : (
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
         <NoteToolbar />
-        <RestToolbar />
+        {!isGregorianChant && <RestToolbar />}
       </div>
     ),
     expression: isReadOnly ? readOnlyNotice : (
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
         {selectedNote ? (
           <>
-            <AccidentalToolbar />
-            <TieSlurToolbar />
-            <ArticulationToolbar />
-            <DynamicToolbar />
+            {isGregorianChant ? (
+              <>
+                <GregorianChantToolbar />
+                <TieSlurToolbar />
+              </>
+            ) : (
+              <>
+                <AccidentalToolbar />
+                <TieSlurToolbar />
+                <ArticulationToolbar />
+                <DynamicToolbar />
+              </>
+            )}
             <LyricsToolbar />
           </>
         ) : (
@@ -365,7 +391,7 @@ export const EditorPage = () => {
     structure: isReadOnly ? readOnlyNotice : (
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
         <StaffControls />
-        <MeasureControls />
+        {!isGregorianChant && <MeasureControls />}
         <div className="flex flex-wrap gap-2">
           <ClefSelector />
           <InstrumentSelector isReadOnly={isReadOnly} />
@@ -381,7 +407,7 @@ export const EditorPage = () => {
           {!isReadOnly && <UndoRedoToolbar />}
           <ExportToolbar isReadOnly={isReadOnly} />
         </div>
-        {!isReadOnly && <ChordDetectionPanel />}
+        {!isReadOnly && !isGregorianChant && <ChordDetectionPanel />}
         <StaffVolumeControls />
       </div>
     ),

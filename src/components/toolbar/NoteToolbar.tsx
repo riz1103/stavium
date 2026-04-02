@@ -1,6 +1,7 @@
 import { useScoreStore } from '../../app/store/scoreStore';
 import { NoteDuration } from '../../types/music';
 import { NoteIcon } from './NoteIcon';
+import { useEffect } from 'react';
 
 const BASE_DURATIONS: { value: NoteDuration; label: string }[] = [
   { value: 'whole',         label: 'Whole'     },
@@ -35,10 +36,18 @@ const getTupletKind = (dur: NoteDuration): TupletKind => {
 };
 
 export const NoteToolbar = () => {
+  const composition             = useScoreStore((s) => s.composition);
   const selectedDuration        = useScoreStore((s) => s.selectedDuration);
   const setSelectedDuration     = useScoreStore((s) => s.setSelectedDuration);
   const setSelectedRestDuration = useScoreStore((s) => s.setSelectedRestDuration);
   const selectedRestDuration    = useScoreStore((s) => s.selectedRestDuration);
+  const isGregorianChant        = composition?.notationSystem === 'gregorian-chant';
+
+  useEffect(() => {
+    if (!isGregorianChant) return;
+    if (selectedDuration !== 'quarter') setSelectedDuration('quarter');
+    if (selectedRestDuration) setSelectedRestDuration(null);
+  }, [isGregorianChant, selectedDuration, selectedRestDuration, setSelectedDuration, setSelectedRestDuration]);
 
   const dotActive = isDotted(selectedDuration);
   const tupletKind = getTupletKind(selectedDuration);
@@ -77,6 +86,25 @@ export const NoteToolbar = () => {
   const dotSupported = DOTABLE.has(baseDur);
   const tupletSupported = TUPLETABLE.has(baseDur);
 
+  if (isGregorianChant) {
+    return (
+      <div className="sv-toolbar">
+        <span className="sv-toolbar-label">Neume</span>
+        <button
+          onClick={() => {
+            setSelectedRestDuration(null);
+            setSelectedDuration('quarter');
+          }}
+          title="Add neumes by clicking the chant staff"
+          className="sv-btn-active"
+        >
+          <span className="text-sm">Punctum</span>
+        </button>
+        <span className="text-xs text-sv-text-dim px-1">Click staff to place chant notes</span>
+      </div>
+    );
+  }
+
   return (
     <div className="sv-toolbar">
       <span className="sv-toolbar-label">Note</span>
@@ -100,35 +128,41 @@ export const NoteToolbar = () => {
 
       <div className="w-px self-stretch bg-sv-border mx-0.5" />
 
-      {/* Dot toggle */}
-      <button
-        onClick={handleToggleDot}
-        disabled={!dotSupported}
-        title={!dotSupported ? 'This duration cannot be dotted' : dotActive ? 'Remove dot' : 'Add augmentation dot (×1.5)'}
-        className={dotActive && noteMode ? 'sv-btn-active' : dotSupported ? 'sv-btn-ghost' : 'sv-btn-ghost opacity-30 cursor-not-allowed'}
-      >
-        <svg viewBox="0 0 10 10" width="8" height="8" aria-hidden>
-          <circle cx="5" cy="5" r="4" fill="currentColor" />
-        </svg>
-        <span>Dot</span>
-      </button>
+      {!isGregorianChant ? (
+        <>
+          {/* Dot toggle */}
+          <button
+            onClick={handleToggleDot}
+            disabled={!dotSupported}
+            title={!dotSupported ? 'This duration cannot be dotted' : dotActive ? 'Remove dot' : 'Add augmentation dot (×1.5)'}
+            className={dotActive && noteMode ? 'sv-btn-active' : dotSupported ? 'sv-btn-ghost' : 'sv-btn-ghost opacity-30 cursor-not-allowed'}
+          >
+            <svg viewBox="0 0 10 10" width="8" height="8" aria-hidden>
+              <circle cx="5" cy="5" r="4" fill="currentColor" />
+            </svg>
+            <span>Dot</span>
+          </button>
 
-      <div className={`flex items-center gap-1 ${!tupletSupported ? 'opacity-40' : ''}`}>
-        <span className="text-xs text-sv-text-dim">Tuplet</span>
-        <select
-          value={tupletKind}
-          disabled={!tupletSupported}
-          onChange={(e) => handleTupletChange(e.target.value as TupletKind)}
-          className="sv-select w-24 text-xs"
-          title="Tuplet ratio"
-        >
-          {TUPLET_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.short} {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
+          <div className={`flex items-center gap-1 ${!tupletSupported ? 'opacity-40' : ''}`}>
+            <span className="text-xs text-sv-text-dim">Tuplet</span>
+            <select
+              value={tupletKind}
+              disabled={!tupletSupported}
+              onChange={(e) => handleTupletChange(e.target.value as TupletKind)}
+              className="sv-select w-24 text-xs"
+              title="Tuplet ratio"
+            >
+              {TUPLET_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.short} {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
+      ) : (
+        <span className="text-xs text-sv-text-dim px-1">Dot/tuplet disabled in Gregorian mode</span>
+      )}
     </div>
   );
 };

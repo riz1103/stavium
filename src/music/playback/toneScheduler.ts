@@ -1,7 +1,7 @@
 import * as Tone from 'tone';
 import Soundfont from 'soundfont-player';
 import { Chord } from 'tonal';
-import { Composition, Note } from '../../types/music';
+import { Composition, Note, NoteDuration } from '../../types/music';
 import { durationToBeats, beatsToSeconds } from '../../utils/durationUtils';
 import { pitchToMidi, applyKeySignature, applyKeySignatureAndMeasureAccidentals } from '../../utils/noteUtils';
 import { usePlaybackStore, PlayingNoteRef } from '../../app/store/playbackStore';
@@ -439,6 +439,13 @@ export class ToneScheduler {
     
     // Use playback tempo if provided, otherwise use composition tempo
     const effectiveTempo = playbackTempo ?? composition.tempo;
+    const isGregorianChant = composition.notationSystem === 'gregorian-chant';
+    const toChantBaseDuration = (duration: NoteDuration): NoteDuration =>
+      duration
+        .replace('dotted-', '')
+        .replace(/^(triplet|quintuplet|sextuplet|septuplet)-/, '') as NoteDuration;
+    const getElementBeats = (duration: NoteDuration): number =>
+      isGregorianChant ? durationToBeats(toChantBaseDuration(duration)) : durationToBeats(duration);
 
     // Normalize requested playback range so stale/out-of-bounds values
     // never result in a silent "played nothing" run.
@@ -487,7 +494,7 @@ export class ToneScheduler {
     const now = ac.currentTime + 0.1; // small lookahead so first note isn't clipped
     let hasFallbackNotes = false;
 
-    // Anacrusis: the first measure has fewer beats than a full measure
+    // Anacrusis: the first measure has fewer beats than a full measure (standard notation only)
     const pickupBeats = composition.anacrusis ? (composition.pickupBeats ?? 1)
       : Number(composition.timeSignature.split('/')[0]);
 
@@ -555,7 +562,7 @@ export class ToneScheduler {
             if (firstEl.pitch !== lastNote.pitch) break; // different pitch → not a tie
 
             // Accumulate this note's duration into the chain origin
-            const extraSec = beatsToSeconds(durationToBeats(firstEl.duration), effTempo(nextMIdx));
+            const extraSec = beatsToSeconds(getElementBeats(firstEl.duration), effTempo(nextMIdx));
             crossTieExtra.set(originKey, (crossTieExtra.get(originKey) ?? 0) + extraSec);
 
             // Mark as silent (will not be scheduled as a new attack)
@@ -621,11 +628,25 @@ export class ToneScheduler {
 
         const [effBPM] = currentTimeSig.split('/').map(Number);
 
-        // Pickup measure has fewer beats; all others use the effective time signature
-        // Only apply anacrusis if we're starting from measure 0
-        const thisMeasureBeats =
-          (startIdx === 0 && composition.anacrusis && measureIndex === 0) ? pickupBeats : effBPM;
-        const measureDurationSec = beatsToSeconds(thisMeasureBeats, currentTempo);
+        // Standard notation is measure/time-signature based.
+        // Gregorian chant is free rhythm: measure length follows actual note content.
+        const thisMeasureBeats = isGregorianChant
+          ? Number.POSITIVE_INFINITY
+          : ((startIdx === 0 && composition.anacrusis && measureIndex === 0) ? pickupBeats : effBPM);
+        const chantMeasureDurationSec = isGregorianChant
+          ? Math.max(
+              ...measure.voices.map((voice) =>
+                beatsToSeconds(
+                  voice.notes.reduce((sum, el) => sum + getElementBeats(el.duration), 0),
+                  currentTempo
+                )
+              ),
+              0
+            )
+          : 0;
+        const measureDurationSec = isGregorianChant
+          ? chantMeasureDurationSec
+          : beatsToSeconds(thisMeasureBeats, currentTempo);
 
         // Each measure starts at its calculated time
         const measureStartTime = currentMeasureStart;
@@ -639,7 +660,7 @@ export class ToneScheduler {
             // in scheduledNotes so the highlight indicator advances through each note.
             if (tiedNotesToSkip > 0) {
               tiedNotesToSkip--;
-              const beats = durationToBeats(element.duration);
+              const beats = getElementBeats(element.duration);
               if ('pitch' in element) {
                 const skipNoteTime = measureStartTime + beatsToSeconds(measureTime, currentTempo);
                 this.scheduledNotes.push({
@@ -655,7 +676,7 @@ export class ToneScheduler {
             // Skip AUDIO for cross-measure tie continuations, but still highlight them.
             const flatKey = `${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`;
             if (crossTieSkip.has(flatKey)) {
-              const beats = durationToBeats(element.duration);
+              const beats = getElementBeats(element.duration);
               if ('pitch' in element) {
                 const skipNoteTime = measureStartTime + beatsToSeconds(measureTime, currentTempo);
                 this.scheduledNotes.push({
@@ -668,11 +689,11 @@ export class ToneScheduler {
               return;
             }
             
-            const beats = durationToBeats(element.duration);
+            const beats = getElementBeats(element.duration);
             const durationSec = beatsToSeconds(beats, currentTempo);
 
             // Check if this note fits in the current measure
-            if (measureTime + beats > thisMeasureBeats) {
+            if (!isGregorianChant && measureTime + beats > thisMeasureBeats) {
               console.warn(
                 `Note overflows measure ${measureIndex + 1} (${measureTime + beats} beats > ${thisMeasureBeats} beats)`
               );
@@ -715,7 +736,7 @@ export class ToneScheduler {
                   if ('pitch' in tiedEl && 'pitch' in prevTiedEl &&
                       (tiedEl as Note).pitch === note.pitch &&
                       (prevTiedEl as Note).tie) {
-                    const tiedBeats = durationToBeats(tiedEl.duration);
+                    const tiedBeats = getElementBeats(tiedEl.duration);
                     totalDurationSec += beatsToSeconds(tiedBeats, currentTempo);
                     prevTiedIndex = tiedIndex;
                     tiedIndex++;
@@ -784,7 +805,7 @@ export class ToneScheduler {
         });
 
         // ── Play chord symbols if enabled ──────────────────────────────────────
-        if (playChords && measure.chords && measure.chords.length > 0) {
+        if (!isGregorianChant && playChords && measure.chords && measure.chords.length > 0) {
           measure.chords.forEach((chordSymbol) => {
             try {
               // Parse chord symbol using Tonal.js

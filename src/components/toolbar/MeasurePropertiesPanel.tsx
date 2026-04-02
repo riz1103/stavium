@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { useScoreStore } from '../../app/store/scoreStore';
-import { Clef } from '../../types/music';
+import { Clef, GregorianChantDivision } from '../../types/music';
 import { effectiveTimeSig, effectiveKeySig, effectiveTempo, effectiveClef } from '../../music/renderer/vexflowRenderer';
 
 const TIME_SIGNATURES = ['2/2', '2/4', '3/8', '3/4', '4/4', '5/4', '5/8', '6/4', '6/8', '7/4', '7/8', '9/8', '12/8', '12/16'];
@@ -26,6 +26,17 @@ const KEY_SIGNATURES: { value: string; display: string }[] = [
 const CLEFS: { value: Clef; label: string }[] = [
   { value: 'treble', label: 'Treble' }, { value: 'bass',  label: 'Bass'  },
   { value: 'alto',   label: 'Alto'   }, { value: 'tenor', label: 'Tenor' },
+];
+const GREGORIAN_CLEFS: { value: Clef; label: string }[] = [
+  { value: 'alto', label: 'Do (C) clef' },
+  { value: 'bass', label: 'Fa (F) clef' },
+];
+const CHANT_DIVISIONS: { value: GregorianChantDivision; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'minima', label: 'Divisio minima' },
+  { value: 'minor', label: 'Divisio minor' },
+  { value: 'major', label: 'Divisio maior' },
+  { value: 'finalis', label: 'Finalis' },
 ];
 
 const PANEL_WIDTH = 280;
@@ -85,8 +96,12 @@ export const MeasurePropertiesPanel = () => {
   const hasTs  = !!m?.timeSignature;
   const hasKs  = !!m?.keySignature;
   const hasTmp = m?.tempo !== undefined;
+  const isGregorianChant = composition.notationSystem === 'gregorian-chant';
+  const clefOptions = isGregorianChant ? GREGORIAN_CLEFS : CLEFS;
   const hasClef = !!staffMeasures[mIdx]?.clef;
-  const hasAny  = hasTs || hasKs || hasTmp || hasClef;
+  const chantDivision = (staffMeasures[mIdx]?.chantDivision ?? 'none') as GregorianChantDivision;
+  const hasDivision = chantDivision !== 'none';
+  const hasAny  = hasClef || hasDivision || (!isGregorianChant && (hasTs || hasKs || hasTmp));
 
   const measureLabel = mIdx === 0 && composition.anacrusis
     ? 'Pickup'
@@ -146,51 +161,55 @@ export const MeasurePropertiesPanel = () => {
               Overrides apply from this measure onward until the next change.
             </p>
 
-            {/* Time */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-medium text-sv-text-muted">Time Signature</label>
-                {hasTs && <button className="text-xs text-rose-400 hover:underline" onClick={() => apply({ timeSignature: null })}>clear</button>}
-              </div>
-              <div className="flex items-center gap-2">
-                <select value={effTs} onChange={(e) => apply({ timeSignature: e.target.value })}
-                  className="sv-select flex-1 text-xs">
-                  {TIME_SIGNATURES.map((ts) => <option key={ts} value={ts}>{ts}</option>)}
-                </select>
-                {hasTs && <span className="text-amber-400 text-xs font-bold">✎</span>}
-              </div>
-            </div>
+            {!isGregorianChant && (
+              <>
+                {/* Time */}
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-sv-text-muted">Time Signature</label>
+                    {hasTs && <button className="text-xs text-rose-400 hover:underline" onClick={() => apply({ timeSignature: null })}>clear</button>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select value={effTs} onChange={(e) => apply({ timeSignature: e.target.value })}
+                      className="sv-select flex-1 text-xs">
+                      {TIME_SIGNATURES.map((ts) => <option key={ts} value={ts}>{ts}</option>)}
+                    </select>
+                    {hasTs && <span className="text-amber-400 text-xs font-bold">✎</span>}
+                  </div>
+                </div>
 
-            {/* Key */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-medium text-sv-text-muted">Key Signature</label>
-                {hasKs && <button className="text-xs text-rose-400 hover:underline" onClick={() => apply({ keySignature: null })}>clear</button>}
-              </div>
-              <div className="flex items-center gap-2">
-                <select value={effKs} onChange={(e) => apply({ keySignature: e.target.value })}
-                  className="sv-select flex-1 text-xs">
-                  {KEY_SIGNATURES.map((k) => <option key={k.value} value={k.value}>{k.display}</option>)}
-                </select>
-                {hasKs && <span className="text-amber-400 text-xs font-bold">✎</span>}
-              </div>
-            </div>
+                {/* Key */}
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-sv-text-muted">Key Signature</label>
+                    {hasKs && <button className="text-xs text-rose-400 hover:underline" onClick={() => apply({ keySignature: null })}>clear</button>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select value={effKs} onChange={(e) => apply({ keySignature: e.target.value })}
+                      className="sv-select flex-1 text-xs">
+                      {KEY_SIGNATURES.map((k) => <option key={k.value} value={k.value}>{k.display}</option>)}
+                    </select>
+                    {hasKs && <span className="text-amber-400 text-xs font-bold">✎</span>}
+                  </div>
+                </div>
 
-            {/* Tempo */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-medium text-sv-text-muted">Tempo (BPM)</label>
-                {hasTmp && <button className="text-xs text-rose-400 hover:underline" onClick={() => apply({ tempo: null })}>clear</button>}
-              </div>
-              <div className="flex items-center gap-2">
-                <input type="number" min={20} max={400}
-                  value={effTmp}
-                  onChange={(e) => apply({ tempo: Number(e.target.value) })}
-                  className="sv-input w-20 text-xs" />
-                <span className="text-xs text-sv-text-dim">♩= {effTmp}</span>
-                {hasTmp && <span className="text-amber-400 text-xs font-bold">✎</span>}
-              </div>
-            </div>
+                {/* Tempo */}
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-sv-text-muted">Tempo (BPM)</label>
+                    {hasTmp && <button className="text-xs text-rose-400 hover:underline" onClick={() => apply({ tempo: null })}>clear</button>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={20} max={400}
+                      value={effTmp}
+                      onChange={(e) => apply({ tempo: Number(e.target.value) })}
+                      className="sv-input w-20 text-xs" />
+                    <span className="text-xs text-sv-text-dim">♩= {effTmp}</span>
+                    {hasTmp && <span className="text-amber-400 text-xs font-bold">✎</span>}
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Clef */}
             <div className="mb-3">
@@ -201,16 +220,46 @@ export const MeasurePropertiesPanel = () => {
               <div className="flex items-center gap-2">
                 <select value={effClef} onChange={(e) => apply({ clef: e.target.value as Clef })}
                   className="sv-select flex-1 text-xs">
-                  {CLEFS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  {clefOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
                 {hasClef && <span className="text-amber-400 text-xs font-bold">✎</span>}
               </div>
             </div>
 
+            {isGregorianChant && (
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-sv-text-muted">Chant division</label>
+                  {hasDivision && (
+                    <button
+                      className="text-xs text-rose-400 hover:underline"
+                      onClick={() => apply({ chantDivision: null })}
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={chantDivision}
+                    onChange={(e) => apply({ chantDivision: e.target.value as GregorianChantDivision })}
+                    className="sv-select flex-1 text-xs"
+                  >
+                    {CHANT_DIVISIONS.map((d) => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </select>
+                  {hasDivision && <span className="text-amber-400 text-xs font-bold">✎</span>}
+                </div>
+              </div>
+            )}
+
             {hasAny && (
               <button
                 className="w-full text-xs text-rose-400 border border-rose-500/30 rounded-lg py-1.5 hover:bg-rose-500/10 transition-colors"
-                onClick={() => apply({ timeSignature: null, keySignature: null, tempo: null, clef: null })}
+                onClick={() => apply(isGregorianChant
+                  ? { clef: null, chantDivision: null }
+                  : { timeSignature: null, keySignature: null, tempo: null, clef: null, chantDivision: null })}
               >
                 Clear all overrides
               </button>

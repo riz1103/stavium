@@ -67,6 +67,48 @@ const BASS_STEP_TO_MIDI: Record<number, number> = {
   '12': 36, // C2  (2nd ledger below)
 };
 
+// Alto clef: top line = G4 (MIDI 67)
+const ALTO_STEP_TO_MIDI: Record<number, number> = {
+  '-4': 74, // D5
+  '-3': 72, // C5
+  '-2': 71, // B4
+  '-1': 69, // A4
+   '0': 67, // G4  ← top line
+   '1': 65, // F4
+   '2': 64, // E4
+   '3': 62, // D4
+   '4': 60, // C4  ← middle line
+   '5': 59, // B3
+   '6': 57, // A3
+   '7': 55, // G3
+   '8': 53, // F3  ← bottom line
+   '9': 52, // E3
+  '10': 50, // D3
+  '11': 48, // C3
+  '12': 47, // B2
+};
+
+// Tenor clef: top line = E4 (MIDI 64)
+const TENOR_STEP_TO_MIDI: Record<number, number> = {
+  '-4': 71, // B4
+  '-3': 69, // A4
+  '-2': 67, // G4
+  '-1': 65, // F4
+   '0': 64, // E4  ← top line
+   '1': 62, // D4
+   '2': 60, // C4
+   '3': 59, // B3
+   '4': 57, // A3  ← middle line
+   '5': 55, // G3
+   '6': 53, // F3
+   '7': 52, // E3
+   '8': 50, // D3  ← bottom line
+   '9': 48, // C3
+  '10': 47, // B2
+  '11': 45, // A2
+  '12': 43, // G2
+};
+
 // Reverse maps: MIDI → diatonic step (for pitchToSvgY)
 const TREBLE_MIDI_TO_STEP: Record<number, number> = {};
 Object.entries(TREBLE_STEP_TO_MIDI).forEach(([step, midi]) => {
@@ -76,13 +118,27 @@ const BASS_MIDI_TO_STEP: Record<number, number> = {};
 Object.entries(BASS_STEP_TO_MIDI).forEach(([step, midi]) => {
   BASS_MIDI_TO_STEP[midi] = Number(step);
 });
+const ALTO_MIDI_TO_STEP: Record<number, number> = {};
+Object.entries(ALTO_STEP_TO_MIDI).forEach(([step, midi]) => {
+  ALTO_MIDI_TO_STEP[midi] = Number(step);
+});
+const TENOR_MIDI_TO_STEP: Record<number, number> = {};
+Object.entries(TENOR_STEP_TO_MIDI).forEach(([step, midi]) => {
+  TENOR_MIDI_TO_STEP[midi] = Number(step);
+});
 
-function midiToDiatonicStep(midi: number, clef: 'treble' | 'bass'): number {
-  const table = clef === 'treble' ? TREBLE_MIDI_TO_STEP : BASS_MIDI_TO_STEP;
+function midiToDiatonicStep(midi: number, clef: 'treble' | 'bass' | 'alto' | 'tenor'): number {
+  const table = clef === 'treble'
+    ? TREBLE_MIDI_TO_STEP
+    : clef === 'bass'
+    ? BASS_MIDI_TO_STEP
+    : clef === 'alto'
+    ? ALTO_MIDI_TO_STEP
+    : TENOR_MIDI_TO_STEP;
   if (table[midi] !== undefined) return table[midi];
   if (table[midi - 1] !== undefined) return table[midi - 1];
   if (table[midi + 1] !== undefined) return table[midi + 1];
-  const ref = clef === 'treble' ? 77 : 57;
+  const ref = clef === 'treble' ? 77 : clef === 'bass' ? 57 : clef === 'alto' ? 67 : 64;
   return Math.round((ref - midi) / 1.75);
 }
 
@@ -146,6 +202,7 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
     [composition]
   );
   const hasVisibleStaves = visibleStaffIndices.length > 0;
+  const staffLineSpan = (composition?.notationSystem === 'gregorian-chant' ? 3 : 4) * 10;
   const getTopLineYForStaff = (staffIndex: number): number | null => {
     const rowIndex = visibleStaffIndices.indexOf(staffIndex);
     if (rowIndex < 0) return null;
@@ -366,7 +423,7 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
       const topLineY = getTopLineYForStaff(si);
       if (topLineY === null) return;
       const topLine    = topLineY;
-      const bottomLine = topLine + 4 * 10;
+      const bottomLine = topLine + staffLineSpan;
       if (y >= topLine - 25 && y <= bottomLine + 25) staffIndex = si;
     });
     if (staffIndex === -1) return null;
@@ -384,12 +441,21 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
   };
 
   // ── Helper: SVG Y + staff → diatonic pitch string ───────────────────────
-  const svgYToPitch = (svgY: number, staffIndex: number, clef: 'treble' | 'bass'): string => {
+  const svgYToPitch = (svgY: number, staffIndex: number, clef: 'treble' | 'bass' | 'alto' | 'tenor'): string => {
     const topLineY = getTopLineYForStaff(staffIndex);
-    if (topLineY === null) return midiToPitch(clef === 'treble' ? 60 : 48);
+    if (topLineY === null) return midiToPitch(
+      clef === 'treble' ? 60 : clef === 'bass' ? 48 : clef === 'alto' ? 57 : 55
+    );
     const relativeY = svgY - topLineY;
     const step      = Math.round(relativeY / STEP_SIZE);
-    const stepMap: Record<string, number> = clef === 'treble' ? TREBLE_STEP_TO_MIDI : BASS_STEP_TO_MIDI;
+    const stepMap: Record<string, number> =
+      clef === 'treble'
+        ? TREBLE_STEP_TO_MIDI
+        : clef === 'bass'
+        ? BASS_STEP_TO_MIDI
+        : clef === 'alto'
+        ? ALTO_STEP_TO_MIDI
+        : TENOR_STEP_TO_MIDI;
     const steps     = Object.keys(stepMap).map(Number).sort((a, b) => a - b);
     const clamped   = Math.max(steps[0], Math.min(steps[steps.length - 1], step));
     let midi = stepMap[String(step)] ?? stepMap[String(clamped)] ?? (clef === 'treble' ? 77 : 57);
@@ -495,8 +561,7 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
         const loc = resolveStaffMeasure(svg.x, svg.y);
         if (loc) {
           const staff = composition.staves[loc.staffIndex];
-          const clef = (staff.clef === 'treble' || staff.clef === 'alto' || staff.clef === 'tenor')
-            ? 'treble' : 'bass';
+          const clef = (staff.clef ?? 'treble') as 'treble' | 'bass' | 'alto' | 'tenor';
 
           targetStaffIndex   = loc.staffIndex;
           targetMeasureIndex = loc.measureIndex;
@@ -524,7 +589,7 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
             setDragState({ ...updated });
             return;
           }
-          const bottomLine = topLine + 4 * 10;
+          const bottomLine = topLine + staffLineSpan;
           offStaff = svg.y < topLine - 40 || svg.y > bottomLine + 40;
         }
       }
@@ -608,7 +673,7 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
 
     const { staffIndex, measureIndex } = loc;
     const staff = composition.staves[staffIndex];
-    const clef  = (staff.clef === 'treble' || staff.clef === 'alto' || staff.clef === 'tenor') ? 'treble' : 'bass';
+    const clef  = (staff.clef ?? 'treble') as 'treble' | 'bass' | 'alto' | 'tenor';
 
     setSelectedNote(null);
     useScoreStore.getState().setSelectedMeasureIndex(measureIndex);

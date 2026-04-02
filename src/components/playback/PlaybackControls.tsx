@@ -72,6 +72,7 @@ export const PlaybackControls = () => {
   const currentInstrument = composition
     ? getEffectiveInstrument(0, composition.staves[0]?.instrument ?? 'piano')
     : 'piano';
+  const isGregorianChant = composition?.notationSystem === 'gregorian-chant';
   const isPlaying = playbackState === 'playing';
   const isPaused  = playbackState === 'paused';
   
@@ -137,7 +138,7 @@ export const PlaybackControls = () => {
       </div>
 
       {/* Measure Range Selection */}
-      {composition && totalMeasures > 0 && (
+      {composition && totalMeasures > 0 && !isGregorianChant && (
         <div className="flex items-center gap-2 ml-2 px-3 py-1.5 bg-sv-elevated rounded-lg border border-sv-border">
           <span className="text-xs text-sv-text-muted">From:</span>
           <select
@@ -225,18 +226,19 @@ export const PlaybackControls = () => {
         </div>
       )}
 
-      {/* Chord playback toggle */}
-      <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-sv-elevated border border-sv-border">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={playChords}
-            onChange={(e) => setPlayChords(e.target.checked)}
-            className="w-4 h-4 rounded border-sv-border text-sv-cyan focus:ring-sv-cyan/50"
-          />
-          <span className="text-xs text-sv-text">Play Chords</span>
-        </label>
-      </div>
+      {!isGregorianChant && (
+        <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-sv-elevated border border-sv-border">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={playChords}
+              onChange={(e) => setPlayChords(e.target.checked)}
+              className="w-4 h-4 rounded border-sv-border text-sv-cyan focus:ring-sv-cyan/50"
+            />
+            <span className="text-xs text-sv-text">Play Chords</span>
+          </label>
+        </div>
+      )}
     </div>
   );
 };
