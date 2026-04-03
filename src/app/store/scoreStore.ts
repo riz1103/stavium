@@ -45,6 +45,8 @@ interface ScoreState {
   measureSelectionStart: number | null;
   setMeasureSelectionStart: (index: number | null) => void;
   addStaff: (staff: Staff) => void;
+  appendArrangedStaves: (staves: Staff[]) => void;
+  replaceArrangedStaves: (staves: Staff[]) => void;
   removeStaff: (staffIndex: number) => void;
   updateStaffName: (staffIndex: number, name: string) => void;
   setStaffHidden: (staffIndex: number, hidden: boolean) => void;
@@ -732,6 +734,35 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         ...composition,
         staves: [...composition.staves, staff],
       },
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  appendArrangedStaves: (staves) => {
+    const { composition } = get();
+    if (!composition || staves.length === 0) return;
+    saveToHistory(composition);
+    set({
+      composition: updateCompositionWithDates(composition, {
+        staves: [...composition.staves, ...staves],
+      }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  replaceArrangedStaves: (staves) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+    const preserved = composition.staves.filter(
+      (staff) => !staff.aiGenerated && !(staff.name?.startsWith('AI ') ?? false)
+    );
+    set({
+      composition: updateCompositionWithDates(composition, {
+        staves: [...preserved, ...staves],
+      }),
       canUndo: historyIndex >= 0,
       canRedo: false,
     });

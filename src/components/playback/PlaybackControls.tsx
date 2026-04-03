@@ -13,6 +13,8 @@ export const PlaybackControls = () => {
   const setPlaybackRange = usePlaybackStore((state) => state.setPlaybackRange);
   const playChords = usePlaybackStore((state) => state.playChords);
   const setPlayChords = usePlaybackStore((state) => state.setPlayChords);
+  const expressivePlayback = usePlaybackStore((state) => state.expressivePlayback);
+  const setExpressivePlayback = usePlaybackStore((state) => state.setExpressivePlayback);
   const schedulerRef = useRef(sharedScheduler);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -41,7 +43,8 @@ export const PlaybackControls = () => {
         effectiveTempo,
         playbackStartMeasure,
         playbackEndMeasure,
-        playChords
+        playChords,
+        expressivePlayback
       );
       setPlaybackState('playing');
     } catch (err) {
@@ -227,7 +230,7 @@ export const PlaybackControls = () => {
       )}
 
       {!isGregorianChant && (
-        <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-sv-elevated border border-sv-border">
+        <div className="flex items-center gap-3 px-2 py-1 rounded-md bg-sv-elevated border border-sv-border">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -236,6 +239,15 @@ export const PlaybackControls = () => {
               className="w-4 h-4 rounded border-sv-border text-sv-cyan focus:ring-sv-cyan/50"
             />
             <span className="text-xs text-sv-text">Play Chords</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={expressivePlayback}
+              onChange={(e) => setExpressivePlayback(e.target.checked)}
+              className="w-4 h-4 rounded border-sv-border text-sv-cyan focus:ring-sv-cyan/50"
+            />
+            <span className="text-xs text-sv-text">Expressive</span>
           </label>
         </div>
       )}

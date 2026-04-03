@@ -18,6 +18,7 @@ import { AccidentalToolbar } from '../components/toolbar/AccidentalToolbar';
 import { TieSlurToolbar } from '../components/toolbar/TieSlurToolbar';
 import { ArticulationToolbar } from '../components/toolbar/ArticulationToolbar';
 import { DynamicToolbar } from '../components/toolbar/DynamicToolbar';
+import { HairpinToolbar } from '../components/toolbar/HairpinToolbar';
 import { LyricsToolbar } from '../components/toolbar/LyricsToolbar';
 import { GregorianChantToolbar } from '../components/toolbar/GregorianChantToolbar';
 import { UndoRedoToolbar } from '../components/toolbar/UndoRedoToolbar';
@@ -26,6 +27,7 @@ import { ChordDetectionPanel } from '../components/toolbar/ChordDetectionPanel';
 import { ChordEditor } from '../components/toolbar/ChordEditor';
 import { MeasurePropertiesPanel } from '../components/toolbar/MeasurePropertiesPanel';
 import { StaffVolumeControls } from '../components/toolbar/StaffVolumeControls';
+import { AIArrangementPanel } from '../components/toolbar/AIArrangementPanel';
 
 type MobileTab = 'notes' | 'expression' | 'structure' | 'settings';
 
@@ -270,6 +272,8 @@ export const EditorPage = () => {
             <InstrumentSelector isReadOnly={false} />
                 <Sep />
             <MeasurePropertiesPanel />
+                {!isGregorianChant && <Sep />}
+            {!isGregorianChant && <AIArrangementPanel isReadOnly={isReadOnly} />}
                 <Sep />
             <ExportToolbar isReadOnly={false} />
               </div>
@@ -310,6 +314,8 @@ export const EditorPage = () => {
                   <ArticulationToolbar />
                   <Sep />
                   <DynamicToolbar />
+                  <Sep />
+                  <HairpinToolbar />
                   <Sep />
                 </>
               )}
@@ -377,6 +383,7 @@ export const EditorPage = () => {
                 <TieSlurToolbar />
                 <ArticulationToolbar />
                 <DynamicToolbar />
+                <HairpinToolbar />
               </>
             )}
             <LyricsToolbar />
@@ -397,6 +404,7 @@ export const EditorPage = () => {
           <InstrumentSelector isReadOnly={isReadOnly} />
           <MeasurePropertiesPanel />
         </div>
+        {!isGregorianChant && <AIArrangementPanel isReadOnly={isReadOnly} />}
         <StaffVolumeControls />
       </div>
     ),

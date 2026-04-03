@@ -46,6 +46,9 @@ interface PlaybackStateStore {
   /** Whether to play chord symbols during playback */
   playChords: boolean;
   setPlayChords: (play: boolean) => void;
+  /** When true, note dynamics and articulations shape playback expression. */
+  expressivePlayback: boolean;
+  setExpressivePlayback: (enabled: boolean) => void;
 }
 
 const serializeNoteRef = (ref: PlayingNoteRef): string =>
@@ -64,7 +67,9 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
   playbackStartMeasure: null,
   playbackEndMeasure: null,
   playChords: false,
+  expressivePlayback: true,
   setPlayChords: (play) => set({ playChords: play }),
+  setExpressivePlayback: (enabled) => set({ expressivePlayback: enabled }),
   setState: (state) => set({ state }),
   setCurrentMeasure: (measure) => set({ currentMeasure: measure }),
   setCurrentBeat: (beat) => set({ currentBeat: beat }),

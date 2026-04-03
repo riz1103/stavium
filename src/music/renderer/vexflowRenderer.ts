@@ -557,6 +557,96 @@ export class VexFlowRenderer {
     return this.notePositions;
   }
 
+  private drawHairpinWedge(
+    svgEl: SVGElement,
+    startX: number,
+    endX: number,
+    y: number,
+    direction: 'crescendo' | 'decrescendo'
+  ): void {
+    const x1 = Math.min(startX, endX);
+    const x2 = Math.max(startX, endX);
+    if (x2 - x1 < 10) return;
+    const centerY = y;
+    const open = 7;
+    const stroke = '#222';
+
+    const pathA = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const pathB = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pathA.setAttribute('fill', 'none');
+    pathB.setAttribute('fill', 'none');
+    pathA.setAttribute('stroke', stroke);
+    pathB.setAttribute('stroke', stroke);
+    pathA.setAttribute('stroke-width', '1.3');
+    pathB.setAttribute('stroke-width', '1.3');
+
+    if (direction === 'crescendo') {
+      pathA.setAttribute('d', `M ${x1} ${centerY} L ${x2} ${centerY - open}`);
+      pathB.setAttribute('d', `M ${x1} ${centerY} L ${x2} ${centerY + open}`);
+    } else {
+      pathA.setAttribute('d', `M ${x1} ${centerY - open} L ${x2} ${centerY}`);
+      pathB.setAttribute('d', `M ${x1} ${centerY + open} L ${x2} ${centerY}`);
+    }
+
+    svgEl.appendChild(pathA);
+    svgEl.appendChild(pathB);
+  }
+
+  private drawHairpins(composition: Composition): void {
+    const svgEl = this.getSvgElement();
+    if (!svgEl) return;
+    const posMap = new Map<string, RenderedNotePosition>();
+    this.notePositions.forEach((p) => {
+      posMap.set(`${p.staffIndex}:${p.measureIndex}:${p.voiceIndex}:${p.noteDataIndex}`, p);
+    });
+
+    composition.staves.forEach((staff, staffIndex) => {
+      const maxVoices = staff.measures.reduce((mx, measure) => Math.max(mx, measure.voices.length), 0);
+
+      for (let voiceIndex = 0; voiceIndex < maxVoices; voiceIndex++) {
+        let active:
+          | { direction: 'crescendo' | 'decrescendo'; x: number; y: number }
+          | null = null;
+        let lastNotePos: RenderedNotePosition | null = null;
+
+        for (let measureIndex = 0; measureIndex < staff.measures.length; measureIndex++) {
+          const measure = staff.measures[measureIndex];
+          const voice = measure.voices[voiceIndex];
+          if (!voice) continue;
+
+          for (let noteIndex = 0; noteIndex < voice.notes.length; noteIndex++) {
+            const element = voice.notes[noteIndex];
+            if (!('pitch' in element)) continue;
+            const pos = posMap.get(`${staffIndex}:${measureIndex}:${voiceIndex}:${noteIndex}`);
+            if (!pos) continue;
+            lastNotePos = pos;
+            const y = pos.y + 26;
+
+            if (element.hairpinStart) {
+              active = { direction: element.hairpinStart, x: pos.x, y };
+            }
+            if (active && element.hairpinEnd) {
+              const renderY = Math.max(active.y, y);
+              this.drawHairpinWedge(svgEl, active.x, pos.x, renderY, active.direction);
+              active = null;
+            }
+          }
+        }
+
+        const trailingHairpin = active;
+        if (trailingHairpin && lastNotePos) {
+          this.drawHairpinWedge(
+            svgEl,
+            trailingHairpin.x,
+            lastNotePos.x + 24,
+            Math.max(trailingHairpin.y, lastNotePos.y + 26),
+            trailingHairpin.direction
+          );
+        }
+      }
+    });
+  }
+
   render(
     composition: Composition, 
     playingNotes?: Set<string>,
@@ -1374,6 +1464,9 @@ export class VexFlowRenderer {
         });
       }
     });
+
+    // ── Draw hairpins (< and >) after note positions are captured ───────────
+    this.drawHairpins(composition);
 
     // ── Draw selected note highlight (after all notes are rendered) ──────────
     if (selectedNote) {

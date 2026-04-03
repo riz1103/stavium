@@ -76,6 +76,7 @@ interface PendingAudioEvent {
   startTime: number;  // AudioContext absolute time
   playDuration: number;
   gain: number;
+  velocity: number;
   instrument: string;
   shouldLoop: boolean;
   loopStart: number;
@@ -83,6 +84,113 @@ interface PendingAudioEvent {
   /** noteTime relative to Transport (only used for fallback) */
   transportTime: number;
 }
+
+const DYNAMIC_GAIN: Record<string, number> = {
+  ppp: 0.35,
+  pp: 0.45,
+  p: 0.58,
+  mp: 0.72,
+  mf: 0.86,
+  f: 1.0,
+  ff: 1.12,
+  fff: 1.22,
+};
+
+const articulationDurationMultiplier = (articulation?: string): number => {
+  if (!articulation) return 1;
+  if (articulation === 'a.') return 0.58;
+  if (articulation === 'av') return 0.45;
+  if (articulation === '>') return 0.88;
+  if (articulation === '-') return 1.12;
+  if (articulation === '^') return 0.82;
+  if (articulation === 'a>') return 0.55;
+  return 1;
+};
+
+const articulationGainMultiplier = (articulation?: string): number => {
+  if (!articulation) return 1;
+  if (articulation === '>') return 1.18;
+  if (articulation === '^') return 1.24;
+  if (articulation === 'a>') return 1.2;
+  if (articulation === 'a.' || articulation === 'av') return 0.95;
+  return 1;
+};
+
+const dynamicScalar = (dynamic?: string): number => (dynamic ? (DYNAMIC_GAIN[dynamic] ?? 1) : DYNAMIC_GAIN.mf);
+
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+const noteRefKey = (staffIndex: number, voiceIndex: number, measureIndex: number, noteIndex: number): string =>
+  `${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`;
+
+const buildHairpinGainMap = (
+  composition: Composition
+): Map<string, number> => {
+  const map = new Map<string, number>();
+
+  composition.staves.forEach((staff, staffIndex) => {
+    const numVoices = staff.measures.reduce((mx, measure) => Math.max(mx, measure.voices.length), 0);
+
+    for (let voiceIndex = 0; voiceIndex < numVoices; voiceIndex++) {
+      const sequence: Array<{ key: string; note: Note }> = [];
+      staff.measures.forEach((measure, measureIndex) => {
+        const voice = measure.voices[voiceIndex];
+        if (!voice) return;
+        voice.notes.forEach((element, noteIndex) => {
+          if (!('pitch' in element)) return;
+          sequence.push({
+            key: noteRefKey(staffIndex, voiceIndex, measureIndex, noteIndex),
+            note: element as Note,
+          });
+        });
+      });
+
+      let active:
+        | { startSeqIndex: number; startGain: number; targetGain: number }
+        | null = null;
+      let currentDynamicGain = DYNAMIC_GAIN.mf;
+
+      for (let seqIndex = 0; seqIndex < sequence.length; seqIndex++) {
+        const entry = sequence[seqIndex];
+        const note = entry.note;
+        if (note.dynamic) currentDynamicGain = dynamicScalar(note.dynamic);
+
+        if (note.hairpinStart) {
+          const startGain = currentDynamicGain;
+          const targetGain =
+            note.hairpinStart === 'crescendo'
+              ? Math.min(1.35, startGain + 0.32)
+              : Math.max(0.35, startGain - 0.32);
+          active = { startSeqIndex: seqIndex, startGain, targetGain };
+        }
+
+        if (active && note.hairpinEnd) {
+          const span = Math.max(1, seqIndex - active.startSeqIndex);
+          for (let i = active.startSeqIndex; i <= seqIndex; i++) {
+            const t = (i - active.startSeqIndex) / span;
+            const gain = lerp(active.startGain, active.targetGain, t);
+            map.set(sequence[i].key, gain);
+          }
+          currentDynamicGain = active.targetGain;
+          active = null;
+        }
+      }
+
+      const trailingHairpin = active;
+      if (trailingHairpin && sequence.length > 0) {
+        const lastIdx = sequence.length - 1;
+        const span = Math.max(1, lastIdx - trailingHairpin.startSeqIndex);
+        for (let i = trailingHairpin.startSeqIndex; i <= lastIdx; i++) {
+          const t = (i - trailingHairpin.startSeqIndex) / span;
+          const gain = lerp(trailingHairpin.startGain, trailingHairpin.targetGain, t);
+          map.set(sequence[i].key, gain);
+        }
+      }
+    }
+  });
+
+  return map;
+};
 
 export class ToneScheduler {
   /** Cache of loaded soundfont players, keyed by instrument name */
@@ -417,7 +525,8 @@ export class ToneScheduler {
     playbackTempo?: number,
     startMeasure?: number | null,
     endMeasure?: number | null,
-    playChords?: boolean
+    playChords?: boolean,
+    expressivePlayback: boolean = true
   ): Promise<void> {
     // Unlock AudioContext — must be called from a user gesture
     await Tone.start();
@@ -601,6 +710,8 @@ export class ToneScheduler {
         }
       }
     });
+
+    const hairpinGainMap = expressivePlayback ? buildHairpinGainMap(composition) : new Map<string, number>();
 
     composition.staves.forEach((staff, staffIndex) => {
       // Use playback instrument if set, otherwise use composition instrument
@@ -791,10 +902,19 @@ export class ToneScheduler {
               };
               this.scheduledNotes.push({ ref: noteRef, startTime, endTime: startTime + durationSec });
               
-              // For slurs: play with slight overlap (legato) - extend duration slightly
-              const playDuration = isSlurred
-                ? totalDurationSec * 1.05 // 5% extension for legato
-                : totalDurationSec;
+              // Expression: make dynamics and articulations audible in playback.
+              const hairpinGain = expressivePlayback ? hairpinGainMap.get(flatKey) : undefined;
+              const dynamicGain = expressivePlayback
+                ? (hairpinGain ?? dynamicScalar(note.dynamic))
+                : 1;
+              const dynamicMultiplier = expressivePlayback ? dynamicGain / DYNAMIC_GAIN.mf : 1;
+              const articulationDur = expressivePlayback ? articulationDurationMultiplier(note.articulation) : 1;
+              const articulationGain = expressivePlayback ? articulationGainMultiplier(note.articulation) : 1;
+              const slurDur = isSlurred ? 1.05 : 1;
+              const durationMultiplier = articulationDur * slurDur;
+              const playDuration = Math.max(0.05, totalDurationSec * durationMultiplier);
+              const noteGain = Math.max(0, Math.min(1.5, gain * dynamicMultiplier * articulationGain));
+              const velocity = Math.max(0.08, Math.min(1, noteGain));
               
               // Queue audio event for JIT scheduling (unless muted)
               if (!isMuted) {
@@ -808,7 +928,8 @@ export class ToneScheduler {
                   freq,
                   startTime,
                   playDuration,
-                  gain,
+                  gain: noteGain,
+                  velocity,
                   instrument: effectiveInstrument,
                   shouldLoop,
                   loopStart: loopStartVal,
@@ -858,6 +979,7 @@ export class ToneScheduler {
                       startTime: chordStartTime,
                       playDuration: chordDuration,
                       gain: gain * 0.7, // Slightly quieter for chords
+                      velocity: Math.max(0.08, Math.min(1, gain * 0.7)),
                       instrument: effectiveInstrument,
                       shouldLoop,
                       loopStart: loopStartVal,
@@ -893,7 +1015,7 @@ export class ToneScheduler {
     // If a constrained range ended up scheduling no notes, retry full range once.
     if (this.scheduledNotes.length === 0 && (normalizedStart !== null || normalizedEnd !== null)) {
       console.warn('[Playback] Selected range produced no playable notes. Retrying full range.');
-      await this.playComposition(composition, playbackTempo, null, null);
+      await this.playComposition(composition, playbackTempo, null, null, playChords, expressivePlayback);
       return;
     }
 
@@ -950,7 +1072,7 @@ export class ToneScheduler {
         const fallback = this.staffFallbackSynths.get(ev.staffIndex);
         if (fallback) {
           Tone.getTransport().schedule((audioTime) => {
-            fallback.triggerAttackRelease(ev.freq, ev.playDuration, audioTime);
+            fallback.triggerAttackRelease(ev.freq, ev.playDuration, audioTime, ev.velocity);
           }, ev.transportTime);
         }
       }
