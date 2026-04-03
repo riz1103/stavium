@@ -85,6 +85,24 @@ interface PendingAudioEvent {
   transportTime: number;
 }
 
+interface PendingClickEvent {
+  startTime: number;
+  frequency: number;
+  duration: number;
+  velocity: number;
+}
+
+interface PlaybackOptions {
+  playbackTempo?: number;
+  startMeasure?: number | null;
+  endMeasure?: number | null;
+  playChords?: boolean;
+  expressivePlayback?: boolean;
+  metronomeEnabled?: boolean;
+  countInEnabled?: boolean;
+  countInBars?: number;
+}
+
 const DYNAMIC_GAIN: Record<string, number> = {
   ppp: 0.35,
   pp: 0.45,
@@ -218,8 +236,15 @@ export class ToneScheduler {
   private pendingAudio: PendingAudioEvent[] = [];
   /** Index into pendingAudio – everything before this has already been dispatched. */
   private pendingAudioCursor: number = 0;
+  /** Queue of metronome/click events, also dispatched in lookahead windows. */
+  private pendingClicks: PendingClickEvent[] = [];
+  private pendingClickCursor: number = 0;
   /** How far ahead (seconds) of AudioContext.currentTime we materialize nodes. */
   private static readonly LOOKAHEAD_SEC = 3.0;
+  /** Lightweight synth used for count-in + metronome clicks. */
+  private metronomeSynth: Tone.Synth | null = null;
+  /** Optional completion callback used by UI for looping. */
+  private onPlaybackComplete: (() => void) | null = null;
 
   // ── AudioContext ──────────────────────────────────────────────────────────
   /** Share Tone.js's underlying AudioContext so timing is in sync */
@@ -422,6 +447,19 @@ export class ToneScheduler {
     return synth;
   }
 
+  private getMetronomeSynth(): Tone.Synth {
+    if (this.metronomeSynth) return this.metronomeSynth;
+    this.metronomeSynth = new Tone.Synth({
+      oscillator: { type: 'square' },
+      envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 },
+    }).toDestination();
+    return this.metronomeSynth;
+  }
+
+  setPlaybackCompleteCallback(callback: (() => void) | null): void {
+    this.onPlaybackComplete = callback;
+  }
+
   // ── Instrument Preloading ────────────────────────────────────────────────────
   /**
    * Preload instruments used in a composition (and optionally common instruments).
@@ -521,12 +559,8 @@ export class ToneScheduler {
 
   // ── Playback ──────────────────────────────────────────────────────────────
   async playComposition(
-    composition: Composition, 
-    playbackTempo?: number,
-    startMeasure?: number | null,
-    endMeasure?: number | null,
-    playChords?: boolean,
-    expressivePlayback: boolean = true
+    composition: Composition,
+    options: PlaybackOptions = {}
   ): Promise<void> {
     // Unlock AudioContext — must be called from a user gesture
     await Tone.start();
@@ -540,12 +574,25 @@ export class ToneScheduler {
     this.scheduledNotes = [];
     this.pendingAudio = [];
     this.pendingAudioCursor = 0;
+    this.pendingClicks = [];
+    this.pendingClickCursor = 0;
     this.crossfadeNodes = [];
     this.playbackStartTime = ac.currentTime;
 
     // Get playback store to check for playback instruments
     const playbackStore = usePlaybackStore.getState();
     
+    const {
+      playbackTempo,
+      startMeasure,
+      endMeasure,
+      playChords,
+      expressivePlayback = true,
+      metronomeEnabled = false,
+      countInEnabled = false,
+      countInBars = 1,
+    } = options;
+
     // Use playback tempo if provided, otherwise use composition tempo
     const effectiveTempo = playbackTempo ?? composition.tempo;
     const isGregorianChant = composition.notationSystem === 'gregorian-chant';
@@ -621,12 +668,7 @@ export class ToneScheduler {
     Tone.getTransport().stop();
     Tone.getTransport().bpm.value = effectiveTempo;
 
-    const now = ac.currentTime + 0.1; // small lookahead so first note isn't clipped
     let hasFallbackNotes = false;
-
-    // Anacrusis: the first measure has fewer beats than a full measure (standard notation only)
-    const pickupBeats = composition.anacrusis ? (composition.pickupBeats ?? 1)
-      : Number(composition.timeSignature.split('/')[0]);
 
     // Reference measures for global overrides (time sig, key, tempo)
     const refMeasures = composition.staves[0]?.measures ?? [];
@@ -643,6 +685,56 @@ export class ToneScheduler {
     function effTempo(upTo: number): number {
       for (let i = upTo; i >= 0; i--) if (refMeasures[i]?.tempo !== undefined) return refMeasures[i].tempo!;
       return effectiveTempo; // Use effective tempo (playback or composition)
+    }
+
+    // Anacrusis: the first measure has fewer beats than a full measure (standard notation only)
+    const pickupBeats = composition.anacrusis ? (composition.pickupBeats ?? 1)
+      : Number(composition.timeSignature.split('/')[0]);
+
+    const startIdxGlobal = normalizedStart ?? 0;
+    const endIdxGlobal = normalizedEnd ?? Math.max(0, maxMeasures - 1);
+    const isCountInActive = !isGregorianChant && countInEnabled;
+    const metronomeActive = !isGregorianChant && metronomeEnabled;
+    const firstTempo = effTempo(startIdxGlobal);
+    const firstTimeSig = effTimeSig(startIdxGlobal);
+    const [firstBeatsPerMeasure] = firstTimeSig.split('/').map(Number);
+    const bars = Math.max(1, Math.min(2, Math.floor(countInBars)));
+    const countInBeats = isCountInActive ? Math.max(1, firstBeatsPerMeasure || 4) * bars : 0;
+    const countInDurationSec = countInBeats > 0 ? beatsToSeconds(countInBeats, firstTempo) : 0;
+    const now = ac.currentTime + 0.1 + countInDurationSec; // small lookahead + optional count-in lead
+
+    if (isCountInActive) {
+      const countInStart = now - countInDurationSec;
+      for (let beat = 0; beat < countInBeats; beat++) {
+        this.pendingClicks.push({
+          startTime: countInStart + beatsToSeconds(beat, firstTempo),
+          frequency: beat === 0 ? 1320 : 980,
+          duration: 0.045,
+          velocity: beat === 0 ? 0.85 : 0.65,
+        });
+      }
+    }
+
+    if (metronomeActive) {
+      let metronomeMeasureStartSec = 0;
+      for (let measureIndex = startIdxGlobal; measureIndex <= endIdxGlobal; measureIndex++) {
+        const timeSig = effTimeSig(measureIndex);
+        const tempoAtMeasure = effTempo(measureIndex);
+        const [beatsPerMeasure] = timeSig.split('/').map(Number);
+        const thisMeasureBeats =
+          startIdxGlobal === 0 && composition.anacrusis && measureIndex === 0
+            ? pickupBeats
+            : beatsPerMeasure;
+        for (let beat = 0; beat < thisMeasureBeats; beat++) {
+          this.pendingClicks.push({
+            startTime: now + metronomeMeasureStartSec + beatsToSeconds(beat, tempoAtMeasure),
+            frequency: beat === 0 ? 1240 : 920,
+            duration: 0.035,
+            velocity: beat === 0 ? 0.72 : 0.52,
+          });
+        }
+        metronomeMeasureStartSec += beatsToSeconds(thisMeasureBeats, tempoAtMeasure);
+      }
     }
 
     // ── Pre-compute cross-measure tie data ────────────────────────────────────
@@ -730,8 +822,8 @@ export class ToneScheduler {
         fallback = this.staffFallbackSynths.get(staffIndex)!;
       }
 
-      // Check if this staff is muted or has volume control
-      const isMuted = playbackStore.isStaffMuted(staffIndex);
+      // Check if this staff is effectively muted (explicit mute + solo logic)
+      const isMuted = playbackStore.isStaffEffectivelyMuted(staffIndex);
       const volumePercent = playbackStore.getStaffVolume(staffIndex);
       const gain = isMuted ? 0 : volumePercent / 100; // 0-1 for soundfont
       // For Tone.js: volume in dB (100% = 0dB, 50% = -6dB, 0% = -Infinity)
@@ -1006,6 +1098,8 @@ export class ToneScheduler {
     // Sort pending audio by start time for efficient JIT draining
     this.pendingAudio.sort((a, b) => a.startTime - b.startTime);
     this.pendingAudioCursor = 0;
+    this.pendingClicks.sort((a, b) => a.startTime - b.startTime);
+    this.pendingClickCursor = 0;
 
     // Start Tone Transport only if fallback synths are used
     if (hasFallbackNotes) {
@@ -1015,7 +1109,16 @@ export class ToneScheduler {
     // If a constrained range ended up scheduling no notes, retry full range once.
     if (this.scheduledNotes.length === 0 && (normalizedStart !== null || normalizedEnd !== null)) {
       console.warn('[Playback] Selected range produced no playable notes. Retrying full range.');
-      await this.playComposition(composition, playbackTempo, null, null, playChords, expressivePlayback);
+      await this.playComposition(composition, {
+        playbackTempo,
+        startMeasure: null,
+        endMeasure: null,
+        playChords,
+        expressivePlayback,
+        metronomeEnabled,
+        countInEnabled,
+        countInBars,
+      });
       return;
     }
 
@@ -1077,6 +1180,18 @@ export class ToneScheduler {
         }
       }
     }
+
+    while (this.pendingClickCursor < this.pendingClicks.length) {
+      const click = this.pendingClicks[this.pendingClickCursor];
+      if (click.startTime > horizon) break;
+      this.pendingClickCursor++;
+      this.getMetronomeSynth().triggerAttackRelease(
+        click.frequency,
+        click.duration,
+        click.startTime,
+        click.velocity
+      );
+    }
   }
 
   // ── Highlight updates ──────────────────────────────────────────────────────
@@ -1098,7 +1213,11 @@ export class ToneScheduler {
       // Auto-stop when all notes have finished playing (add 0.2s buffer for last note release)
       if (this.scheduledNotes.length > 0 && currentTime > this.playbackEndTime + 0.2) {
         this.stop();
-        usePlaybackStore.getState().setState('stopped');
+        if (this.onPlaybackComplete) {
+          this.onPlaybackComplete();
+        } else {
+          usePlaybackStore.getState().setState('stopped');
+        }
         return;
       }
 
@@ -1157,6 +1276,8 @@ export class ToneScheduler {
     // Clear JIT pending queue so no more audio nodes will be created
     this.pendingAudio = [];
     this.pendingAudioCursor = 0;
+    this.pendingClicks = [];
+    this.pendingClickCursor = 0;
     // If the AudioContext was suspended (paused), resume it first so stop commands go through
     const ac = this.getAC();
     if (ac.state === 'suspended') {
@@ -1181,6 +1302,10 @@ export class ToneScheduler {
     this.sfPlayers.clear();
     this.fallbackSynths.forEach((s) => { try { s.dispose(); } catch {} });
     this.fallbackSynths.clear();
+    if (this.metronomeSynth) {
+      try { this.metronomeSynth.dispose(); } catch {}
+      this.metronomeSynth = null;
+    }
   }
 
   /**

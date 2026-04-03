@@ -326,6 +326,61 @@ input[type="checkbox"] {
 }
 .toolbar-scroll::-webkit-scrollbar { display: none; }
 
+/* ── Toolbar density controls ─────────────────────────────────────────────── */
+.chord-editor-toolbar { max-width: 280px; }
+.chord-detect-toolbar { max-width: 240px; }
+.chord-detect-toolbar-empty { max-width: 220px; }
+.chord-editor-symbol-input { width: 64px; }
+.chord-editor-beat-input { width: 48px; }
+.lyrics-lyric-input { width: 6rem; }
+@media (min-width: 640px) {
+  .lyrics-lyric-input { width: 8rem; }
+}
+
+.toolbar-density-comfortable .chord-editor-toolbar,
+.toolbar-density-comfortable .chord-detect-toolbar,
+.toolbar-density-comfortable .chord-detect-toolbar-empty {
+  max-width: none;
+}
+.toolbar-density-comfortable .chord-editor-symbol-input { width: 80px; }
+.toolbar-density-comfortable .chord-editor-beat-input { width: 64px; }
+.toolbar-density-comfortable .lyrics-lyric-input { width: 8.75rem; }
+@media (min-width: 640px) {
+  .toolbar-density-comfortable .lyrics-lyric-input { width: 10.5rem; }
+}
+
+/* Global comfortable mode: make controls visibly roomier across the editor */
+.toolbar-density-comfortable .sv-toolbar {
+  gap: 6px;
+  padding: 8px 10px;
+}
+.toolbar-density-comfortable .sv-toolbar-label {
+  font-size: 0.6875rem;
+  padding: 2px 6px;
+}
+.toolbar-density-comfortable .sv-btn-ghost,
+.toolbar-density-comfortable .sv-btn-active,
+.toolbar-density-comfortable .sv-btn {
+  padding: 5px 12px;
+  font-size: 0.875rem;
+}
+.toolbar-density-comfortable .sv-input,
+.toolbar-density-comfortable .sv-select {
+  padding: 6px 10px;
+  font-size: 0.875rem;
+}
+.toolbar-density-comfortable input[type="range"] {
+  height: 5px;
+}
+.toolbar-density-comfortable input[type="range"]::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+}
+.toolbar-density-comfortable input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+}
+
 /* ── Mobile panel entrance animation ────────────────────────────────────── */
 .tool-panel-enter {
   animation: slideUp 0.2s ease-out;

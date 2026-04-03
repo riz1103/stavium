@@ -18,7 +18,7 @@ export const ChordDetectionPanel = () => {
 
   if (notes.length === 0) {
     return (
-      <div className="sv-toolbar">
+      <div className="sv-toolbar chord-detect-toolbar chord-detect-toolbar-empty">
         <span className="sv-toolbar-label">Detected Chord</span>
         <span className="text-xs text-sv-text-dim italic">No notes</span>
       </div>
@@ -41,14 +41,14 @@ export const ChordDetectionPanel = () => {
   };
 
   return (
-    <div className="sv-toolbar">
+    <div className="sv-toolbar chord-detect-toolbar">
       <span className="sv-toolbar-label">Detected Chord</span>
       {chord ? (
         <>
-          <span className="px-2 py-0.5 rounded-md bg-sv-cyan/10 border border-sv-cyan/30 text-sv-cyan text-sm font-mono font-semibold">
+          <span className="px-1.5 py-0.5 rounded-md bg-sv-cyan/10 border border-sv-cyan/30 text-sv-cyan text-xs font-mono font-semibold">
             {chord.name}
           </span>
-          <span className="text-xs text-sv-text-dim">
+          <span className="hidden xl:inline text-xs text-sv-text-dim">
             {chord.root} · {chord.quality}
           </span>
           <button
@@ -56,7 +56,7 @@ export const ChordDetectionPanel = () => {
             className="sv-btn-ghost text-xs"
             title="Add as chord symbol"
           >
-            + Add
+            Add
           </button>
         </>
       ) : (

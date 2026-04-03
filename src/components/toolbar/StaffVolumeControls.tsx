@@ -6,17 +6,33 @@ export const StaffVolumeControls = () => {
   const setStaffHidden = useScoreStore((state) => state.setStaffHidden);
   const staffVolumes   = usePlaybackStore((state) => state.staffVolumes);
   const staffMuted     = usePlaybackStore((state) => state.staffMuted);
+  const staffSoloed    = usePlaybackStore((state) => state.staffSoloed);
   const setStaffVolume = usePlaybackStore((state) => state.setStaffVolume);
   const setStaffMuted  = usePlaybackStore((state) => state.setStaffMuted);
+  const setStaffSoloed = usePlaybackStore((state) => state.setStaffSoloed);
+  const clearStaffSoloed = usePlaybackStore((state) => state.clearStaffSoloed);
+  const hasAnySoloedStaff = usePlaybackStore((state) => state.hasAnySoloedStaff);
 
   if (!composition) return null;
+  const anySoloed = hasAnySoloedStaff();
 
   return (
     <div className="sv-toolbar">
       <span className="sv-toolbar-label">Volume</span>
+      {anySoloed && (
+        <button
+          onClick={clearStaffSoloed}
+          className="px-2 py-1 rounded-md text-xs border border-sv-cyan/40 text-sv-cyan bg-sv-cyan/10 hover:bg-sv-cyan/20 transition-colors"
+          title="Clear all soloed staves"
+        >
+          Clear Solo
+        </button>
+      )}
       {composition.staves.map((staff, index) => {
         const volume      = staffVolumes[index] ?? 100;
         const muted       = staffMuted[index] ?? false;
+        const soloed      = staffSoloed[index] ?? false;
+        const dimmedBySolo = anySoloed && !soloed;
         const hidden      = staff.hidden ?? false;
         const displayName = staff.name || `S${index + 1}`;
 
@@ -75,12 +91,27 @@ export const StaffVolumeControls = () => {
               )}
             </button>
 
+            {/* Solo */}
+            <button
+              onClick={() => setStaffSoloed(index, !soloed)}
+              title={soloed ? 'Unsolo' : 'Solo'}
+              className={`w-6 h-6 flex items-center justify-center rounded text-[10px] font-semibold transition-colors border ${
+                soloed
+                  ? 'bg-sv-cyan/25 text-sv-cyan border-sv-cyan/50'
+                  : dimmedBySolo
+                  ? 'text-sv-text-dim border-sv-border/50'
+                  : 'text-sv-text-muted border-sv-border hover:text-sv-text hover:border-sv-border-lt'
+              }`}
+            >
+              S
+            </button>
+
             {/* Slider */}
             <input
               type="range"
               min="0" max="100"
-              value={muted ? 0 : volume}
-              disabled={muted}
+              value={muted || dimmedBySolo ? 0 : volume}
+              disabled={muted || dimmedBySolo}
               onChange={(e) => {
                 const v = Number(e.target.value);
                 setStaffVolume(index, v);
@@ -88,12 +119,12 @@ export const StaffVolumeControls = () => {
               }}
               className="w-16 disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
-                background: muted ? undefined :
+                background: muted || dimmedBySolo ? undefined :
                   `linear-gradient(to right, var(--sv-cyan) ${volume}%, var(--sv-border) ${volume}%)`
               }}
             />
             <span className="text-xs text-sv-text-dim min-w-[28px] text-right">
-              {muted ? '0%' : `${volume}%`}
+              {muted || dimmedBySolo ? '0%' : `${volume}%`}
             </span>
           </div>
         );

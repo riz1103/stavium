@@ -27,10 +27,17 @@ interface PlaybackStateStore {
   /** Per-staff volume (0-100) and mute state */
   staffVolumes: Record<number, number>; // staffIndex → volume (0-100)
   staffMuted: Record<number, boolean>;   // staffIndex → muted
+  /** Per-staff solo state; when any are soloed, only those staffs are audible. */
+  staffSoloed: Record<number, boolean>; // staffIndex → soloed
   setStaffVolume: (staffIndex: number, volume: number) => void;
   setStaffMuted: (staffIndex: number, muted: boolean) => void;
+  setStaffSoloed: (staffIndex: number, soloed: boolean) => void;
+  clearStaffSoloed: () => void;
   getStaffVolume: (staffIndex: number) => number; // returns 0-100, default 100
   isStaffMuted: (staffIndex: number) => boolean;
+  isStaffSoloed: (staffIndex: number) => boolean;
+  hasAnySoloedStaff: () => boolean;
+  isStaffEffectivelyMuted: (staffIndex: number) => boolean;
   /** Playback tempo (can be changed even for view-only users, for playback/study purposes) */
   playbackTempo: number | null; // null means use composition tempo
   setPlaybackTempo: (tempo: number | null) => void;
@@ -49,6 +56,13 @@ interface PlaybackStateStore {
   /** When true, note dynamics and articulations shape playback expression. */
   expressivePlayback: boolean;
   setExpressivePlayback: (enabled: boolean) => void;
+  /** Practice playback helpers */
+  metronomeEnabled: boolean;
+  setMetronomeEnabled: (enabled: boolean) => void;
+  countInEnabled: boolean;
+  setCountInEnabled: (enabled: boolean) => void;
+  countInBars: 1 | 2;
+  setCountInBars: (bars: 1 | 2) => void;
 }
 
 const serializeNoteRef = (ref: PlayingNoteRef): string =>
@@ -62,12 +76,16 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
   playingNotes: new Set(),
   staffVolumes: {},
   staffMuted: {},
+  staffSoloed: {},
   playbackTempo: null,
   playbackInstruments: {},
   playbackStartMeasure: null,
   playbackEndMeasure: null,
   playChords: false,
   expressivePlayback: true,
+  metronomeEnabled: false,
+  countInEnabled: false,
+  countInBars: 1,
   setPlayChords: (play) => set({ playChords: play }),
   setExpressivePlayback: (enabled) => set({ expressivePlayback: enabled }),
   setState: (state) => set({ state }),
@@ -94,12 +112,33 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
       staffMuted: { ...state.staffMuted, [staffIndex]: muted },
     }));
   },
+  setStaffSoloed: (staffIndex, soloed) => {
+    set((state) => ({
+      staffSoloed: { ...state.staffSoloed, [staffIndex]: soloed },
+    }));
+  },
+  clearStaffSoloed: () => set({ staffSoloed: {} }),
   getStaffVolume: (staffIndex) => {
     const vol = get().staffVolumes[staffIndex];
     return vol !== undefined ? vol : 100; // default 100%
   },
   isStaffMuted: (staffIndex) => {
     return get().staffMuted[staffIndex] ?? false; // default not muted
+  },
+  isStaffSoloed: (staffIndex) => {
+    return get().staffSoloed[staffIndex] ?? false; // default not soloed
+  },
+  hasAnySoloedStaff: () => {
+    const soloed = get().staffSoloed;
+    return Object.values(soloed).some(Boolean);
+  },
+  isStaffEffectivelyMuted: (staffIndex) => {
+    const state = get();
+    const explicitlyMuted = state.staffMuted[staffIndex] ?? false;
+    if (explicitlyMuted) return true;
+    const anySolo = Object.values(state.staffSoloed).some(Boolean);
+    if (!anySolo) return false;
+    return !(state.staffSoloed[staffIndex] ?? false);
   },
   setPlaybackTempo: (tempo) => set({ playbackTempo: tempo }),
   getEffectiveTempo: (compositionTempo) => {
@@ -125,4 +164,7 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
     playbackStartMeasure: startMeasure, 
     playbackEndMeasure: endMeasure 
   }),
+  setMetronomeEnabled: (enabled) => set({ metronomeEnabled: enabled }),
+  setCountInEnabled: (enabled) => set({ countInEnabled: enabled }),
+  setCountInBars: (bars) => set({ countInBars: bars }),
 }));

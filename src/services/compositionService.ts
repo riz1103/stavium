@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getDocsFromCache,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -11,12 +12,14 @@ import {
   where,
   Timestamp,
 } from 'firebase/firestore';
+import { FirebaseError } from 'firebase/app';
 import { db } from './firebase';
 import { Composition } from '../types/music';
 
 const COMPOSITIONS_COLLECTION = 'compositions';
 const COMPOSITION_REVISIONS_COLLECTION = 'compositionRevisions';
 const MAX_COMPOSITION_REVISIONS = 20;
+const DEFAULT_QUERY_RETRIES = 3;
 
 export type RevisionTrigger = 'manual-save' | 'export-midi' | 'export-pdf';
 
@@ -137,6 +140,56 @@ const toIsoString = (value: unknown): string => {
 const sortByNewest = (a: StoredCompositionRevision, b: StoredCompositionRevision) =>
   new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isTransientFirestoreError = (error: unknown): boolean => {
+  if (!(error instanceof FirebaseError)) return false;
+  return (
+    error.code === 'unavailable' ||
+    error.code === 'deadline-exceeded' ||
+    error.code === 'aborted'
+  );
+};
+
+async function getDocsWithRetry(
+  queryRef: any,
+  request: () => Promise<Awaited<ReturnType<typeof getDocs>>>,
+  label: string,
+  retries: number = DEFAULT_QUERY_RETRIES
+): Promise<Awaited<ReturnType<typeof getDocs>>> {
+  let attempt = 0;
+  let lastError: unknown;
+  let sawTransientError = false;
+
+  while (attempt < retries) {
+    try {
+      return await request();
+    } catch (error) {
+      lastError = error;
+      if (isTransientFirestoreError(error)) sawTransientError = true;
+      const shouldRetry = isTransientFirestoreError(error) && attempt < retries - 1;
+      if (!shouldRetry) break;
+      const backoffMs = 250 * Math.pow(2, attempt);
+      console.warn(`[firestore] "${label}" transient error, retrying in ${backoffMs}ms`, error);
+      await sleep(backoffMs);
+      attempt += 1;
+    }
+  }
+
+  // Last-resort fallback: if network transport is flaky, serve cached results.
+  if (sawTransientError) {
+    try {
+      const cached = await getDocsFromCache(queryRef);
+      console.warn(`[firestore] "${label}" served from local cache after transient failures.`);
+      return cached as Awaited<ReturnType<typeof getDocs>>;
+    } catch {
+      // No local cache available; surface original error below.
+    }
+  }
+
+  throw lastError;
+}
+
 const mapRevisionDoc = (docSnap: any): StoredCompositionRevision => {
   const data = docSnap.data() as any;
   return {
@@ -197,7 +250,12 @@ export const getCompositionRevisionTimeline = async (
   if (!compositionId) return [];
   try {
     const colRef = collection(db, COMPOSITION_REVISIONS_COLLECTION);
-    const snapshots = await getDocs(query(colRef, where('compositionId', '==', compositionId)));
+    const q = query(colRef, where('compositionId', '==', compositionId));
+    const snapshots = await getDocsWithRetry(
+      q,
+      () => getDocs(q),
+      'composition-revisions'
+    );
     const revisions = snapshots.docs.map(mapRevisionDoc).sort(sortByNewest);
     return revisions.slice(0, MAX_COMPOSITION_REVISIONS);
   } catch (error) {
@@ -230,7 +288,12 @@ export const saveCompositionRevisionSnapshot = async (params: {
     await addDoc(collection(db, COMPOSITION_REVISIONS_COLLECTION), docPayload);
 
     const colRef = collection(db, COMPOSITION_REVISIONS_COLLECTION);
-    const allSnapshots = await getDocs(query(colRef, where('compositionId', '==', params.compositionId)));
+    const q = query(colRef, where('compositionId', '==', params.compositionId));
+    const allSnapshots = await getDocsWithRetry(
+      q,
+      () => getDocs(q),
+      'composition-revisions-refresh'
+    );
     const allRevisions = allSnapshots.docs.map(mapRevisionDoc).sort(sortByNewest);
 
     const keep = allRevisions.slice(0, MAX_COMPOSITION_REVISIONS);
@@ -253,7 +316,24 @@ export const getComposition = async (
 ): Promise<Composition | null> => {
   try {
     const docRef = doc(db, COMPOSITIONS_COLLECTION, compositionId);
-    const docSnap = await getDoc(docRef);
+    const docSnap = await (async () => {
+      let attempt = 0;
+      let lastError: unknown;
+      while (attempt < DEFAULT_QUERY_RETRIES) {
+        try {
+          return await getDoc(docRef);
+        } catch (error) {
+          lastError = error;
+          const shouldRetry = isTransientFirestoreError(error) && attempt < DEFAULT_QUERY_RETRIES - 1;
+          if (!shouldRetry) break;
+          const backoffMs = 250 * Math.pow(2, attempt);
+          console.warn(`[firestore] "get-composition" transient error, retrying in ${backoffMs}ms`, error);
+          await sleep(backoffMs);
+          attempt += 1;
+        }
+      }
+      throw lastError;
+    })();
 
     if (docSnap.exists()) {
       const data = docSnap.data();
@@ -286,18 +366,27 @@ export const getUserCompositions = async (
   const namedQueries: { label: string; promise: ReturnType<typeof getDocs> }[] = [
     {
       label: 'own',
-      promise: getDocs(query(colRef, where('userId', '==', userId))),
+      promise: (() => {
+        const q = query(colRef, where('userId', '==', userId));
+        return getDocsWithRetry(q, () => getDocs(q), 'dashboard-own');
+      })(),
     },
     {
       label: 'public',
-      promise: getDocs(query(colRef, where('privacy', '==', 'public'))),
+      promise: (() => {
+        const q = query(colRef, where('privacy', '==', 'public'));
+        return getDocsWithRetry(q, () => getDocs(q), 'dashboard-public');
+      })(),
     },
   ];
 
   if (userEmail) {
     namedQueries.push({
       label: 'shared-with-email',
-      promise: getDocs(query(colRef, where('sharedEmails', 'array-contains', userEmail))),
+      promise: (() => {
+        const q = query(colRef, where('sharedEmails', 'array-contains', userEmail));
+        return getDocsWithRetry(q, () => getDocs(q), 'dashboard-shared-with-email');
+      })(),
     });
   }
 
@@ -305,12 +394,14 @@ export const getUserCompositions = async (
   const results = await Promise.allSettled(namedQueries.map((q) => q.promise));
 
   const byId = new Map<string, Composition>();
+  let successfulQueries = 0;
 
   results.forEach((result, i) => {
     if (result.status === 'rejected') {
       console.warn(`[compositions] "${namedQueries[i].label}" query failed:`, result.reason);
       return;
     }
+    successfulQueries += 1;
     result.value.forEach((docSnap) => {
       const data = docSnap.data() as any;
       const comp: Composition = {
@@ -322,6 +413,10 @@ export const getUserCompositions = async (
       byId.set(comp.id!, comp);
     });
   });
+
+  if (successfulQueries === 0) {
+    throw new Error('All composition queries failed.');
+  }
 
   return Array.from(byId.values());
 };

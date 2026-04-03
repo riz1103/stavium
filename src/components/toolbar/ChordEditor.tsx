@@ -52,18 +52,17 @@ export const ChordEditor = () => {
   };
 
   return (
-    <div className="sv-toolbar">
+    <div className="sv-toolbar chord-editor-toolbar">
       <span className="sv-toolbar-label">Chords</span>
       
       {/* Add new chord */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <input
           type="text"
           value={newChordSymbol}
           onChange={(e) => setNewChordSymbol(e.target.value)}
-          placeholder="e.g., Cm7, F/A"
-          className="px-2 py-1 bg-sv-elevated border border-sv-border rounded text-sm text-sv-text placeholder-sv-text-dim focus:outline-none focus:border-sv-cyan/60"
-          style={{ width: '80px' }}
+          placeholder="Cm7"
+          className="chord-editor-symbol-input px-2 py-1 bg-sv-elevated border border-sv-border rounded text-xs text-sv-text placeholder-sv-text-dim focus:outline-none focus:border-sv-cyan/60"
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               handleAddChord();
@@ -78,11 +77,11 @@ export const ChordEditor = () => {
           max={beatsPerMeasure - 0.25}
           step={0.25}
           placeholder="Beat"
-          className="px-2 py-1 bg-sv-elevated border border-sv-border rounded text-sm text-sv-text w-16 focus:outline-none focus:border-sv-cyan/60"
+          className="chord-editor-beat-input px-2 py-1 bg-sv-elevated border border-sv-border rounded text-xs text-sv-text focus:outline-none focus:border-sv-cyan/60"
         />
         <button
           onClick={handleAddChord}
-          className="sv-btn-active"
+          className="sv-btn-active chord-editor-add-btn text-xs px-2.5 py-1"
           disabled={!newChordSymbol.trim()}
         >
           Add
@@ -91,15 +90,14 @@ export const ChordEditor = () => {
 
       {/* Existing chords */}
       {chords.length > 0 && (
-        <div className="flex flex-col gap-1 mt-2">
+        <div className="flex flex-col gap-1 mt-1.5">
           {chords.map((chord, index) => (
-            <div key={index} className="flex items-center gap-2">
+            <div key={index} className="flex items-center gap-1.5">
               <input
                 type="text"
                 value={chord.symbol}
                 onChange={(e) => handleUpdateChordSymbol(index, e.target.value)}
-                className="px-2 py-1 bg-sv-elevated border border-sv-border rounded text-sm text-sv-text focus:outline-none focus:border-sv-cyan/60"
-                style={{ width: '80px' }}
+                className="chord-editor-symbol-input px-2 py-1 bg-sv-elevated border border-sv-border rounded text-xs text-sv-text focus:outline-none focus:border-sv-cyan/60"
               />
               <input
                 type="number"
@@ -108,7 +106,7 @@ export const ChordEditor = () => {
                 min={0}
                 max={beatsPerMeasure - 0.25}
                 step={0.25}
-                className="px-2 py-1 bg-sv-elevated border border-sv-border rounded text-sm text-sv-text w-16 focus:outline-none focus:border-sv-cyan/60"
+                className="chord-editor-beat-input px-2 py-1 bg-sv-elevated border border-sv-border rounded text-xs text-sv-text focus:outline-none focus:border-sv-cyan/60"
               />
               <button
                 onClick={() => handleRemoveChord(index)}

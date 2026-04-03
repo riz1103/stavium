@@ -25,6 +25,7 @@ export const Dashboard = () => {
   const navMenuRef = useRef<HTMLDivElement>(null);
   const [avatarImageError, setAvatarImageError] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const setComposition = useScoreStore((state) => state.setComposition);
 
@@ -99,12 +100,38 @@ export const Dashboard = () => {
 
   const loadCompositions = async () => {
     if (!user) return;
+    const cacheKey = `stavium_dashboard_cache_${user.uid}`;
+    const parseCached = (raw: string): Composition[] => {
+      const parsed = JSON.parse(raw) as Composition[];
+      return parsed.map((comp) => ({
+        ...comp,
+        createdAt: comp.createdAt ? new Date(comp.createdAt as any) : undefined,
+        updatedAt: comp.updatedAt ? new Date(comp.updatedAt as any) : undefined,
+      }));
+    };
     try {
       setLoading(true);
+      setLoadWarning(null);
       const comps = await getUserCompositions(user.uid, user.email);
       setCompositions(comps);
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(comps));
+      } catch {}
     } catch (error) {
       console.error('Error loading compositions:', error);
+      let loadedFromCache = false;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          setCompositions(parseCached(cached));
+          loadedFromCache = true;
+        }
+      } catch {}
+      setLoadWarning(
+        loadedFromCache
+          ? 'Network is unstable. Showing cached compositions; reconnecting…'
+          : 'Could not reach Firestore right now. Please try Refresh.'
+      );
     } finally {
       setLoading(false);
     }
@@ -478,6 +505,19 @@ export const Dashboard = () => {
           </div>
 
           {/* Search Filter - Always show if there are any compositions or if there's an active search */}
+          {loadWarning && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+              <span>{loadWarning}</span>
+              <button
+                onClick={() => loadCompositions()}
+                className="sv-btn-ghost text-xs"
+                title="Retry loading compositions"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           {(compositions.length > 0 || searchQuery.trim()) ? (
             <div className="mb-6">
               <div className="relative">

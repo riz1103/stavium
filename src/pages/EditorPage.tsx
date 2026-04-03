@@ -57,6 +57,14 @@ export const EditorPage = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>('notes');
   const [toolbarOpen, setToolbarOpen] = useState(true);
+  const [compactToolbar, setCompactToolbar] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('stavium_toolbar_density');
+      return stored ? stored === 'compact' : true;
+    } catch {
+      return true;
+    }
+  });
   const cloudRevisionWarningShownRef = useRef(false);
   // When first save creates a new doc, we navigate to /editor/:id.
   // Skip the immediate reload so we stay in current editing state.
@@ -79,6 +87,12 @@ export const EditorPage = () => {
       return next;
     });
   };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('stavium_toolbar_density', compactToolbar ? 'compact' : 'comfortable');
+    } catch {}
+  }, [compactToolbar]);
 
   // Derived permission flags (recomputed whenever composition or user changes)
   const isOwner = !composition?.userId || composition.userId === user?.uid;
@@ -321,11 +335,11 @@ export const EditorPage = () => {
           <div className="sv-section-notes border-b border-sv-border">
             <SectionHeader id="notes" icon="♩" label={isGregorianChant ? 'Neumes' : 'Notes & Rests'} />
             {!collapsedRows.has('notes') && (
-              <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+              <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
             <NoteToolbar />
-                {!isGregorianChant && <Sep />}
+                {!isGregorianChant && <div className="hidden 2xl:block"><Sep /></div>}
             {!isGregorianChant && <RestToolbar />}
-                <Sep />
+                <div className="hidden 2xl:block"><Sep /></div>
             <UndoRedoToolbar />
               </div>
             )}
@@ -335,21 +349,21 @@ export const EditorPage = () => {
           <div className="sv-section-structure border-b border-sv-border">
             <SectionHeader id="structure" icon="⊞" label="Structure" />
             {!collapsedRows.has('structure') && (
-              <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+              <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
             <StaffControls />
-                {!isGregorianChant && <Sep />}
+                {!isGregorianChant && <div className="hidden 2xl:block"><Sep /></div>}
             {!isGregorianChant && <MeasureControls />}
-                <Sep />
+                <div className="hidden 2xl:block"><Sep /></div>
             <ClefSelector />
-                <Sep />
+                <div className="hidden 2xl:block"><Sep /></div>
             <InstrumentSelector isReadOnly={false} />
-                <Sep />
+                <div className="hidden 2xl:block"><Sep /></div>
             <MeasurePropertiesPanel />
-                {!isGregorianChant && <Sep />}
+                {!isGregorianChant && <div className="hidden 2xl:block"><Sep /></div>}
             {!isGregorianChant && <AIArrangementPanel isReadOnly={isReadOnly} />}
-                <Sep />
+                <div className="hidden 2xl:block"><Sep /></div>
             <ExportToolbar isReadOnly={false} onSnapshotEvent={persistRevisionSnapshot} />
-                <Sep />
+                <div className="hidden 2xl:block"><Sep /></div>
             <VersionHistoryPanel isReadOnly={false} />
               </div>
             )}
@@ -359,10 +373,23 @@ export const EditorPage = () => {
           <div className={`sv-section-score ${selectedNote && !collapsedRows.has('expression') ? 'border-b border-sv-border' : ''}`}>
             <SectionHeader id="score" icon="♫" label="Score Settings" />
             {!collapsedRows.has('score') && (
-              <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+              <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
             <CompositionControls isReadOnly={false} />
-                <Sep />
+                <div className="hidden 2xl:block"><Sep /></div>
             <StaffVolumeControls />
+                <div className="hidden 2xl:block"><Sep /></div>
+                <div className="sv-toolbar">
+                  <span className="sv-toolbar-label">Density</span>
+                  <label className="flex items-center gap-1.5 text-xs text-sv-text-muted cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={compactToolbar}
+                      onChange={(e) => setCompactToolbar(e.target.checked)}
+                      className="w-3.5 h-3.5"
+                    />
+                    <span>{compactToolbar ? 'Compact Toolbar' : 'Comfortable Toolbar'}</span>
+                  </label>
+                </div>
               </div>
             )}
           </div>
@@ -372,34 +399,34 @@ export const EditorPage = () => {
             <div className="sv-section-expression">
               <SectionHeader id="expression" icon="✦" label="Note Expression" pulse />
               {!collapsedRows.has('expression') && (
-            <div className="flex items-start gap-2 px-3 py-2 overflow-x-auto toolbar-scroll">
+            <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
               {isGregorianChant ? (
                 <>
                   <GregorianChantToolbar />
-                  <Sep />
+                  <div className="hidden 2xl:block"><Sep /></div>
                   <TieSlurToolbar />
-                  <Sep />
+                  <div className="hidden 2xl:block"><Sep /></div>
                 </>
               ) : (
                 <>
                   <AccidentalToolbar />
-                  <Sep />
+                  <div className="hidden 2xl:block"><Sep /></div>
                   <TieSlurToolbar />
-                  <Sep />
+                  <div className="hidden 2xl:block"><Sep /></div>
                   <ArticulationToolbar />
-                  <Sep />
+                  <div className="hidden 2xl:block"><Sep /></div>
                   <DynamicToolbar />
-                  <Sep />
+                  <div className="hidden 2xl:block"><Sep /></div>
                   <HairpinToolbar />
-                  <Sep />
+                  <div className="hidden 2xl:block"><Sep /></div>
                 </>
               )}
               <LyricsToolbar />
               {!isGregorianChant && (
                 <>
-                  <Sep />
+                  <div className="hidden 2xl:block"><Sep /></div>
                   <ChordDetectionPanel />
-                  <Sep />
+                  <div className="hidden 2xl:block"><Sep /></div>
                   <ChordEditor />
                 </>
               )}
@@ -486,6 +513,18 @@ export const EditorPage = () => {
     settings: (
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
         <CompositionControls isReadOnly={isReadOnly} />
+        <div className="sv-toolbar">
+          <span className="sv-toolbar-label">Density</span>
+          <label className="flex items-center gap-1.5 text-xs text-sv-text-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={compactToolbar}
+              onChange={(e) => setCompactToolbar(e.target.checked)}
+              className="w-3.5 h-3.5"
+            />
+            <span>{compactToolbar ? 'Compact Toolbar' : 'Comfortable Toolbar'}</span>
+          </label>
+        </div>
         <div className="flex gap-2 flex-wrap">
           {!isReadOnly && <UndoRedoToolbar />}
           <ExportToolbar isReadOnly={isReadOnly} onSnapshotEvent={persistRevisionSnapshot} />
@@ -498,7 +537,7 @@ export const EditorPage = () => {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-sv-bg overflow-hidden">
+    <div className={`h-screen flex flex-col bg-sv-bg overflow-hidden ${compactToolbar ? '' : 'toolbar-density-comfortable'}`}>
 
       {/* ── Top Header ─────────────────────────────────────────────────────── */}
       <header className="flex-shrink-0 bg-sv-card border-b border-sv-border px-3 py-2 flex items-center gap-2">

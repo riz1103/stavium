@@ -99,8 +99,7 @@ export const LyricsToolbar = () => {
             moveToNextNote();
           }
         }}
-        className="sv-input"
-        style={{ minWidth: 140 }}
+        className="sv-input lyrics-lyric-input"
         placeholder="Syllable"
         title="Lyric text for this note"
       />
