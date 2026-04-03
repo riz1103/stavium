@@ -52,6 +52,51 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isOwner(resource.data);
     }
 
+    function compositionDoc(compositionId) {
+      return get(/databases/$(database)/documents/compositions/$(compositionId));
+    }
+
+    function compositionExists(compositionId) {
+      return exists(/databases/$(database)/documents/compositions/$(compositionId));
+    }
+
+    function canReadComposition(compositionId) {
+      return compositionExists(compositionId) &&
+             (isOwner(compositionDoc(compositionId).data) ||
+              isPublic(compositionDoc(compositionId).data) ||
+              isSharedWithMe(compositionDoc(compositionId).data));
+    }
+
+    function canEditComposition(compositionId) {
+      return compositionExists(compositionId) &&
+             (isOwner(compositionDoc(compositionId).data) ||
+              (isSharedWithMe(compositionDoc(compositionId).data) &&
+               compositionDoc(compositionId).data.sharePermission == 'edit') ||
+              (isPublic(compositionDoc(compositionId).data) &&
+               compositionDoc(compositionId).data.sharePermission == 'edit'));
+    }
+
+    // Version history snapshots stored separately for retention control.
+    match /compositionRevisions/{revisionId} {
+      // Viewers can read timeline for compositions they can access.
+      allow read: if isAuthenticated() &&
+                    resource.data.compositionId is string &&
+                    canReadComposition(resource.data.compositionId);
+
+      // Only editors can add revisions tied to an editable composition.
+      allow create: if isAuthenticated() &&
+                      request.resource.data.compositionId is string &&
+                      canEditComposition(request.resource.data.compositionId);
+
+      // Revisions are immutable; no client updates.
+      allow update: if false;
+
+      // Pruning old revisions is done by editors.
+      allow delete: if isAuthenticated() &&
+                      resource.data.compositionId is string &&
+                      canEditComposition(resource.data.compositionId);
+    }
+
     // Scanned / OCR import jobs — owner only
     match /scanned/{jobId} {
       // Read: owner only (backend sets owner = request.auth.uid)

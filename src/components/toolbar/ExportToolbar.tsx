@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useScoreStore } from '../../app/store/scoreStore';
 import { exportToMIDI, exportToPDF } from '../../utils/exportUtils';
+import type { RevisionTrigger } from '../../services/compositionService';
 
 interface ExportToolbarProps {
   isReadOnly?: boolean;
+  onSnapshotEvent?: (trigger: RevisionTrigger) => Promise<void> | void;
 }
 
-export const ExportToolbar = ({ isReadOnly = false }: ExportToolbarProps) => {
+export const ExportToolbar = ({ isReadOnly = false, onSnapshotEvent }: ExportToolbarProps) => {
   const composition = useScoreStore((state) => state.composition);
   const [exporting, setExporting] = useState(false);
 
@@ -23,6 +25,7 @@ export const ExportToolbar = ({ isReadOnly = false }: ExportToolbarProps) => {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      await onSnapshotEvent?.('export-midi');
     } catch (error) {
       console.error('Error exporting MIDI:', error);
       alert('Failed to export MIDI file');
@@ -33,7 +36,10 @@ export const ExportToolbar = ({ isReadOnly = false }: ExportToolbarProps) => {
 
   const handleExportPDF = () => {
     if (!composition) return;
-    try { exportToPDF(composition); }
+    try {
+      exportToPDF(composition);
+      void onSnapshotEvent?.('export-pdf');
+    }
     catch (error) { console.error('Error exporting PDF:', error); alert('Failed to export PDF'); }
   };
 

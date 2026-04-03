@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useUserStore } from '../app/store/userStore';
-import { useScoreStore } from '../app/store/scoreStore';
+import { RevisionTrigger, useScoreStore } from '../app/store/scoreStore';
 import { usePlaybackStore } from '../app/store/playbackStore';
-import { getComposition, saveComposition } from '../services/compositionService';
+import { getComposition, getCompositionRevisionTimeline, saveComposition, saveCompositionRevisionSnapshot } from '../services/compositionService';
 import { ScoreEditor } from '../components/editor/ScoreEditor';
 import { ScoreInfoPanel } from '../components/toolbar/ScoreInfoPanel';
 import { PlaybackControls } from '../components/playback/PlaybackControls';
@@ -23,6 +23,7 @@ import { LyricsToolbar } from '../components/toolbar/LyricsToolbar';
 import { GregorianChantToolbar } from '../components/toolbar/GregorianChantToolbar';
 import { UndoRedoToolbar } from '../components/toolbar/UndoRedoToolbar';
 import { ExportToolbar } from '../components/toolbar/ExportToolbar';
+import { VersionHistoryPanel } from '../components/toolbar/VersionHistoryPanel';
 import { ChordDetectionPanel } from '../components/toolbar/ChordDetectionPanel';
 import { ChordEditor } from '../components/toolbar/ChordEditor';
 import { MeasurePropertiesPanel } from '../components/toolbar/MeasurePropertiesPanel';
@@ -46,6 +47,9 @@ export const EditorPage = () => {
   const composition = useScoreStore((state) => state.composition);
   const setComposition = useScoreStore((state) => state.setComposition);
   const resetComposition = useScoreStore((state) => state.resetComposition);
+  const addRevisionSnapshot = useScoreStore((state) => state.addRevisionSnapshot);
+  const clearRevisionHistory = useScoreStore((state) => state.clearRevisionHistory);
+  const setRevisionHistory = useScoreStore((state) => state.setRevisionHistory);
   const selectedNote = useScoreStore((state) => state.selectedNote);
   const [title, setTitle] = useState('Untitled Composition');
   const [loading, setLoading] = useState(true);
@@ -53,6 +57,7 @@ export const EditorPage = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>('notes');
   const [toolbarOpen, setToolbarOpen] = useState(true);
+  const cloudRevisionWarningShownRef = useRef(false);
   // When first save creates a new doc, we navigate to /editor/:id.
   // Skip the immediate reload so we stay in current editing state.
   const skipNextIdLoadRef = useRef(false);
@@ -114,6 +119,7 @@ export const EditorPage = () => {
     } else {
       // If navigated here from Dashboard import, the composition is already
       // in the store — don't reset it.
+      clearRevisionHistory();
       const state = location.state as { imported?: boolean } | null;
       if (state?.imported && composition) {
         setTitle(composition.title || 'Imported Composition');
@@ -128,7 +134,7 @@ export const EditorPage = () => {
         setLoading(false);
       }
     }
-  }, [id, user, navigate, resetComposition]);
+  }, [id, user, navigate, resetComposition, clearRevisionHistory]);
 
   const resetPlaybackTempo = usePlaybackStore((s) => s.setPlaybackTempo);
   const setPlaybackInstrument = usePlaybackStore((s) => s.setPlaybackInstrument);
@@ -136,9 +142,20 @@ export const EditorPage = () => {
   const loadComposition = async (compositionId: string) => {
     try {
       setLoading(true);
+      clearRevisionHistory();
       const comp = await getComposition(compositionId);
       if (comp) {
         setComposition(comp);
+        const revisionTimeline = await getCompositionRevisionTimeline(comp.id || compositionId);
+        setRevisionHistory(
+          revisionTimeline.map((revision) => ({
+            id: revision.id,
+            createdAt: revision.createdAt,
+            trigger: revision.trigger,
+            label: revision.label,
+            composition: revision.composition,
+          }))
+        );
         setTitle(comp.title);
         setIsReadOnly(true); // Always start read-only when opening a saved composition
         resetPlaybackTempo(null); // Reset playback tempo when loading new composition
@@ -149,6 +166,51 @@ export const EditorPage = () => {
       console.error('Error loading composition:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const persistRevisionSnapshot = async (trigger: RevisionTrigger, sourceComposition?: typeof composition) => {
+    const target = sourceComposition ?? composition;
+    if (!target) return;
+
+    // Unsaved documents don't have a stable id yet, so keep a temporary local timeline.
+    if (!target.id || !user) {
+      addRevisionSnapshot(trigger);
+      return;
+    }
+
+    const defaultLabelMap: Record<RevisionTrigger, string> = {
+      'manual-save': 'Manual Save',
+      'export-midi': 'Export MIDI',
+      'export-pdf': 'Export PDF',
+    };
+
+    try {
+      const ownerId = target.userId || user.uid;
+      const updatedTimeline = await saveCompositionRevisionSnapshot({
+        compositionId: target.id,
+        ownerId,
+        createdBy: user.uid,
+        trigger,
+        label: defaultLabelMap[trigger],
+        composition: target,
+      });
+
+      setRevisionHistory(
+        updatedTimeline.map((revision) => ({
+          id: revision.id,
+          createdAt: revision.createdAt,
+          trigger: revision.trigger,
+          label: revision.label,
+          composition: revision.composition,
+        }))
+      );
+    } catch (error) {
+      console.error('Error persisting revision snapshot:', error);
+      if (!cloudRevisionWarningShownRef.current) {
+        cloudRevisionWarningShownRef.current = true;
+        alert('Version history could not be synced to cloud. Check Firestore rules for compositionRevisions.');
+      }
     }
   };
 
@@ -164,15 +226,24 @@ export const EditorPage = () => {
         ownerId,
         user.uid   // modifiedBy — the actual person hitting Save
       );
+      const effectiveId = savedId || id || composition.id;
+      const syncedComposition = {
+        ...composition,
+        id: effectiveId,
+        title,
+        userId: ownerId,
+        modifiedBy: user.uid,
+      };
+      setComposition(syncedComposition);
 
       // First save from /editor (new composition): move to /editor/:id so
       // subsequent saves update this same composition instead of creating new ones.
       if (!id && savedId) {
         skipNextIdLoadRef.current = true;
-        setComposition({ ...composition, id: savedId, title, userId: ownerId });
         navigate(`/editor/${savedId}`, { replace: true });
       }
 
+      await persistRevisionSnapshot('manual-save', syncedComposition);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (error) {
@@ -240,7 +311,9 @@ export const EditorPage = () => {
           <Sep />
           <StaffVolumeControls />
           <Sep />
-          <ExportToolbar isReadOnly={true} />
+          <ExportToolbar isReadOnly={true} onSnapshotEvent={persistRevisionSnapshot} />
+          <Sep />
+          <VersionHistoryPanel isReadOnly={true} />
         </div>
       ) : (
         <>
@@ -275,7 +348,9 @@ export const EditorPage = () => {
                 {!isGregorianChant && <Sep />}
             {!isGregorianChant && <AIArrangementPanel isReadOnly={isReadOnly} />}
                 <Sep />
-            <ExportToolbar isReadOnly={false} />
+            <ExportToolbar isReadOnly={false} onSnapshotEvent={persistRevisionSnapshot} />
+                <Sep />
+            <VersionHistoryPanel isReadOnly={false} />
               </div>
             )}
           </div>
@@ -413,7 +488,8 @@ export const EditorPage = () => {
         <CompositionControls isReadOnly={isReadOnly} />
         <div className="flex gap-2 flex-wrap">
           {!isReadOnly && <UndoRedoToolbar />}
-          <ExportToolbar isReadOnly={isReadOnly} />
+          <ExportToolbar isReadOnly={isReadOnly} onSnapshotEvent={persistRevisionSnapshot} />
+          <VersionHistoryPanel isReadOnly={isReadOnly} />
         </div>
         {!isReadOnly && !isGregorianChant && <ChordDetectionPanel />}
         <StaffVolumeControls />

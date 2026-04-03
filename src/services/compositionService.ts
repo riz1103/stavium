@@ -1,4 +1,5 @@
 import {
+  addDoc,
   collection,
   doc,
   getDoc,
@@ -14,6 +15,21 @@ import { db } from './firebase';
 import { Composition } from '../types/music';
 
 const COMPOSITIONS_COLLECTION = 'compositions';
+const COMPOSITION_REVISIONS_COLLECTION = 'compositionRevisions';
+const MAX_COMPOSITION_REVISIONS = 20;
+
+export type RevisionTrigger = 'manual-save' | 'export-midi' | 'export-pdf';
+
+export interface StoredCompositionRevision {
+  id: string;
+  compositionId: string;
+  ownerId: string;
+  createdBy: string;
+  createdAt: string;
+  trigger: RevisionTrigger;
+  label: string;
+  composition: Composition;
+}
 
 const toFirestoreTimestamp = (value: unknown): Timestamp => {
   if (!value) return Timestamp.now();
@@ -96,6 +112,45 @@ const removeUndefinedValues = (obj: any): any => {
   return obj;
 };
 
+const normalizeRevisionTrigger = (value: unknown): RevisionTrigger => {
+  if (value === 'export-midi' || value === 'export-pdf' || value === 'manual-save') {
+    return value;
+  }
+  return 'manual-save';
+};
+
+const toIsoString = (value: unknown): string => {
+  if (!value) return new Date().toISOString();
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? new Date().toISOString() : value.toISOString();
+  if (value instanceof Timestamp) return value.toDate().toISOString();
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  }
+  if (typeof value === 'object' && value !== null && typeof (value as any).toDate === 'function') {
+    const date = (value as any).toDate();
+    return Number.isNaN(date?.getTime?.()) ? new Date().toISOString() : date.toISOString();
+  }
+  return new Date().toISOString();
+};
+
+const sortByNewest = (a: StoredCompositionRevision, b: StoredCompositionRevision) =>
+  new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+
+const mapRevisionDoc = (docSnap: any): StoredCompositionRevision => {
+  const data = docSnap.data() as any;
+  return {
+    id: docSnap.id,
+    compositionId: String(data.compositionId ?? ''),
+    ownerId: String(data.ownerId ?? ''),
+    createdBy: String(data.createdBy ?? data.ownerId ?? ''),
+    createdAt: toIsoString(data.createdAt),
+    trigger: normalizeRevisionTrigger(data.trigger),
+    label: String(data.label ?? 'Snapshot'),
+    composition: data.composition as Composition,
+  };
+};
+
 export const saveComposition = async (
   composition: Composition,
   userId: string,
@@ -132,6 +187,63 @@ export const saveComposition = async (
     }
   } catch (error) {
     console.error('Error saving composition:', error);
+    throw error;
+  }
+};
+
+export const getCompositionRevisionTimeline = async (
+  compositionId: string
+): Promise<StoredCompositionRevision[]> => {
+  if (!compositionId) return [];
+  try {
+    const colRef = collection(db, COMPOSITION_REVISIONS_COLLECTION);
+    const snapshots = await getDocs(query(colRef, where('compositionId', '==', compositionId)));
+    const revisions = snapshots.docs.map(mapRevisionDoc).sort(sortByNewest);
+    return revisions.slice(0, MAX_COMPOSITION_REVISIONS);
+  } catch (error) {
+    console.error('Error loading composition revisions:', error);
+    return [];
+  }
+};
+
+export const saveCompositionRevisionSnapshot = async (params: {
+  compositionId: string;
+  ownerId: string;
+  createdBy: string;
+  trigger: RevisionTrigger;
+  label: string;
+  composition: Composition;
+}): Promise<StoredCompositionRevision[]> => {
+  try {
+    if (!params.compositionId) return [];
+
+    const docPayload = removeUndefinedValues({
+      compositionId: params.compositionId,
+      ownerId: params.ownerId,
+      createdBy: params.createdBy,
+      trigger: params.trigger,
+      label: params.label,
+      createdAt: Timestamp.now(),
+      composition: params.composition,
+    });
+
+    await addDoc(collection(db, COMPOSITION_REVISIONS_COLLECTION), docPayload);
+
+    const colRef = collection(db, COMPOSITION_REVISIONS_COLLECTION);
+    const allSnapshots = await getDocs(query(colRef, where('compositionId', '==', params.compositionId)));
+    const allRevisions = allSnapshots.docs.map(mapRevisionDoc).sort(sortByNewest);
+
+    const keep = allRevisions.slice(0, MAX_COMPOSITION_REVISIONS);
+    const purge = allRevisions.slice(MAX_COMPOSITION_REVISIONS);
+    if (purge.length > 0) {
+      await Promise.all(purge.map((revision) =>
+        deleteDoc(doc(db, COMPOSITION_REVISIONS_COLLECTION, revision.id))
+      ));
+    }
+
+    return keep;
+  } catch (error) {
+    console.error('Error saving composition revision snapshot:', error);
     throw error;
   }
 };

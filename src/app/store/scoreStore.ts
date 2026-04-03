@@ -1,10 +1,25 @@
 import { create } from 'zustand';
 import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol, NotationSystem, GregorianChantDivision, GregorianChantSpacingDensity, GregorianChantInterpretation } from '../../types/music';
 
+export type RevisionTrigger = 'manual-save' | 'export-midi' | 'export-pdf';
+
+export interface CompositionRevision {
+  id: string;
+  createdAt: string;
+  trigger: RevisionTrigger;
+  label: string;
+  composition: Composition;
+}
+
 interface ScoreState {
   composition: Composition | null;
+  revisionHistory: CompositionRevision[];
+  setRevisionHistory: (revisions: CompositionRevision[]) => void;
   setComposition: (composition: Composition) => void;
   resetComposition: () => void;
+  addRevisionSnapshot: (trigger: RevisionTrigger, label?: string) => void;
+  restoreRevision: (revisionId: string) => void;
+  clearRevisionHistory: () => void;
   addNote: (staffIndex: number, measureIndex: number, voiceIndex: number, element: MusicElement, insertIndex?: number) => void;
   moveNote: (
     fromStaff: number, fromMeasure: number, fromVoice: number, fromIndex: number,
@@ -129,8 +144,40 @@ const defaultComposition: Composition = {
 
 // History management for undo/redo
 const MAX_HISTORY = 50;
+const MAX_REVISIONS = 20;
 let history: Composition[] = [];
 let historyIndex = -1;
+
+const deepCloneComposition = (composition: Composition): Composition =>
+  JSON.parse(JSON.stringify(composition)) as Composition;
+
+const getRevisionLabel = (trigger: RevisionTrigger): string => {
+  switch (trigger) {
+    case 'manual-save':
+      return 'Manual Save';
+    case 'export-midi':
+      return 'Export MIDI';
+    case 'export-pdf':
+      return 'Export PDF';
+    default:
+      return 'Snapshot';
+  }
+};
+
+const createRevisionSnapshot = (
+  composition: Composition,
+  trigger: RevisionTrigger,
+  label?: string
+): CompositionRevision => {
+  const now = new Date();
+  return {
+    id: `${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: now.toISOString(),
+    trigger,
+    label: label?.trim() || getRevisionLabel(trigger),
+    composition: deepCloneComposition(composition),
+  };
+};
 
 // Helper to save current state to history before mutation
 const saveToHistory = (current: Composition | null) => {
@@ -173,6 +220,8 @@ const updateCompositionWithDates = (composition: Composition | null, updates: Pa
 
 export const useScoreStore = create<ScoreState>((set, get) => ({
   composition: defaultComposition,
+  revisionHistory: [],
+  setRevisionHistory: (revisions) => set({ revisionHistory: revisions.slice(0, MAX_REVISIONS) }),
   selectedStaffIndex: 0,
   selectedMeasureIndex: 0,
   selectedVoiceIndex: 0,
@@ -206,6 +255,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     const newComposition = updateCompositionWithDates(defaultComposition, {});
     set({
       composition: newComposition,
+      revisionHistory: [],
       selectedStaffIndex: 0,
       selectedMeasureIndex: 0,
       selectedVoiceIndex: 0,
@@ -214,6 +264,48 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
       canRedo: false,
       selectedNote: null,
     });
+  },
+
+  addRevisionSnapshot: (trigger, label) => {
+    const composition = get().composition;
+    if (!composition) return;
+
+    set((state) => ({
+      revisionHistory: [
+        createRevisionSnapshot(composition, trigger, label),
+        ...state.revisionHistory,
+      ].slice(0, MAX_REVISIONS),
+    }));
+  },
+
+  restoreRevision: (revisionId) => {
+    const { composition, revisionHistory } = get();
+    const revision = revisionHistory.find((item) => item.id === revisionId);
+    if (!revision) return;
+
+    if (composition) {
+      saveToHistory(composition);
+    }
+
+    const restored = deepCloneComposition(revision.composition);
+    const restoredWithIdentity = {
+      ...restored,
+      // Keep document ownership/identity tied to the currently open score.
+      id: composition?.id ?? restored.id,
+      userId: composition?.userId ?? restored.userId,
+      modifiedBy: composition?.modifiedBy ?? restored.modifiedBy,
+    };
+
+    set({
+      composition: updateCompositionWithDates(restoredWithIdentity, {}),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+      selectedNote: null,
+    });
+  },
+
+  clearRevisionHistory: () => {
+    set({ revisionHistory: [] });
   },
 
   undo: () => {
