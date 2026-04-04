@@ -184,6 +184,7 @@ export const Dashboard = () => {
       await loadCompositions();
     } catch (error) {
       console.error('Error deleting composition:', error);
+      alert(error instanceof Error ? error.message : 'Failed to delete composition. Please try again.');
     } finally {
       setDeletingId(null);
     }

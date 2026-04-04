@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useUserStore } from '../app/store/userStore';
 import { RevisionTrigger, useScoreStore } from '../app/store/scoreStore';
@@ -30,6 +30,11 @@ import { MeasurePropertiesPanel } from '../components/toolbar/MeasurePropertiesP
 import { StaffVolumeControls } from '../components/toolbar/StaffVolumeControls';
 import { AIArrangementPanel } from '../components/toolbar/AIArrangementPanel';
 import { ScoreReviewPanel } from '../components/review/ScoreReviewPanel';
+import {
+  FirstScoreOnboardingState,
+  getFirstScoreOnboardingState,
+  saveFirstScoreOnboardingState,
+} from '../services/onboardingService';
 
 type MobileTab = 'notes' | 'expression' | 'structure' | 'settings';
 
@@ -39,6 +44,18 @@ const TAB_CONFIG: { id: MobileTab; label: string; icon: string }[] = [
   { id: 'structure',  label: 'Structure',  icon: '𝄞' },
   { id: 'settings',   label: 'Score',      icon: '⚙' },
 ];
+
+type FirstScoreProgress = {
+  placedNote: boolean;
+  playedBack: boolean;
+  savedScore: boolean;
+};
+
+const defaultFirstScoreProgress: FirstScoreProgress = {
+  placedNote: false,
+  playedBack: false,
+  savedScore: false,
+};
 
 export const EditorPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -86,7 +103,7 @@ export const EditorPage = () => {
     setCollapsedRows(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
-      try { localStorage.setItem('stavium_toolbar_sections', JSON.stringify([...next])); } catch {}
+      try { localStorage.setItem('stavium_toolbar_sections', JSON.stringify([...next])); } catch { /* ignore localStorage failures */ }
       return next;
     });
   };
@@ -94,7 +111,7 @@ export const EditorPage = () => {
   useEffect(() => {
     try {
       localStorage.setItem('stavium_toolbar_density', compactToolbar ? 'compact' : 'comfortable');
-    } catch {}
+    } catch { /* ignore localStorage failures */ }
   }, [compactToolbar]);
 
   // Derived permission flags (recomputed whenever composition or user changes)
@@ -156,6 +173,122 @@ export const EditorPage = () => {
 
   const resetPlaybackTempo = usePlaybackStore((s) => s.setPlaybackTempo);
   const setPlaybackInstrument = usePlaybackStore((s) => s.setPlaybackInstrument);
+  const playbackState = usePlaybackStore((s) => s.state);
+  const [onboardingHydrated, setOnboardingHydrated] = useState(false);
+  const [firstScoreDone, setFirstScoreDone] = useState(false);
+  const [checklistDismissed, setChecklistDismissed] = useState(false);
+  const [toolbarTipsHidden, setToolbarTipsHidden] = useState(false);
+  const [showFirstScoreCelebration, setShowFirstScoreCelebration] = useState(false);
+  const [firstScoreProgress, setFirstScoreProgress] = useState<FirstScoreProgress>(defaultFirstScoreProgress);
+
+  const hasAnyScoreElements = useMemo(() => {
+    if (!composition) return false;
+    return composition.staves.some((staff) =>
+      staff.measures.some((measure) =>
+        measure.voices.some((voice) => voice.notes.length > 0)
+      )
+    );
+  }, [composition]);
+
+  useEffect(() => {
+    let active = true;
+    const hydrateOnboarding = async () => {
+      if (!user?.uid) {
+        setOnboardingHydrated(true);
+        return;
+      }
+
+      const remote = await getFirstScoreOnboardingState(user.uid);
+      if (!active) return;
+
+      if (remote) {
+        setFirstScoreProgress({
+          placedNote: remote.placedNote,
+          playedBack: remote.playedBack,
+          savedScore: remote.savedScore,
+        });
+        setFirstScoreDone(remote.firstScoreDone);
+        setChecklistDismissed(remote.checklistDismissed);
+        setToolbarTipsHidden(remote.toolbarTipsHidden);
+      }
+
+      setOnboardingHydrated(true);
+    };
+
+    hydrateOnboarding();
+    return () => {
+      active = false;
+    };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!onboardingHydrated || !user?.uid) return;
+    const payload: FirstScoreOnboardingState = {
+      placedNote: firstScoreProgress.placedNote,
+      playedBack: firstScoreProgress.playedBack,
+      savedScore: firstScoreProgress.savedScore,
+      firstScoreDone,
+      checklistDismissed,
+      toolbarTipsHidden,
+    };
+    const timer = window.setTimeout(() => {
+      saveFirstScoreOnboardingState(user.uid, payload).catch((error) => {
+        console.warn('Failed to sync onboarding state:', error);
+      });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [
+    onboardingHydrated,
+    user?.uid,
+    firstScoreProgress.placedNote,
+    firstScoreProgress.playedBack,
+    firstScoreProgress.savedScore,
+    firstScoreDone,
+    checklistDismissed,
+    toolbarTipsHidden,
+  ]);
+
+  useEffect(() => {
+    if (firstScoreDone) return;
+    if (!hasAnyScoreElements || firstScoreProgress.placedNote) return;
+    setFirstScoreProgress((prev) => ({ ...prev, placedNote: true }));
+  }, [hasAnyScoreElements, firstScoreProgress.placedNote, firstScoreDone]);
+
+  useEffect(() => {
+    if (firstScoreDone) return;
+    if (playbackState !== 'playing' || firstScoreProgress.playedBack) return;
+    setFirstScoreProgress((prev) => ({ ...prev, playedBack: true }));
+  }, [playbackState, firstScoreProgress.playedBack, firstScoreDone]);
+
+  useEffect(() => {
+    if (firstScoreDone) return;
+    if (!composition?.id || firstScoreProgress.savedScore) return;
+    setFirstScoreProgress((prev) => ({ ...prev, savedScore: true }));
+  }, [composition?.id, firstScoreProgress.savedScore, firstScoreDone]);
+
+  useEffect(() => {
+    if (firstScoreDone) return;
+    const allDone = firstScoreProgress.placedNote && firstScoreProgress.playedBack && firstScoreProgress.savedScore;
+    if (!allDone) return;
+    setFirstScoreDone(true);
+    setShowFirstScoreCelebration(true);
+    setChecklistDismissed(false);
+  }, [firstScoreDone, firstScoreProgress]);
+
+  useEffect(() => {
+    if (!showFirstScoreCelebration) return;
+    const timer = window.setTimeout(() => setShowFirstScoreCelebration(false), 7000);
+    return () => window.clearTimeout(timer);
+  }, [showFirstScoreCelebration]);
+
+  const showFirstScoreChecklist = onboardingHydrated && !firstScoreDone && !checklistDismissed && !isReadOnly;
+  const showToolbarTips = onboardingHydrated && !firstScoreDone && !toolbarTipsHidden;
+  const completedChecklistItems = [
+    firstScoreProgress.placedNote,
+    firstScoreProgress.playedBack,
+    firstScoreProgress.savedScore,
+  ].filter(Boolean).length;
+  const totalChecklistItems = 3;
   
   const loadComposition = async (compositionId: string) => {
     try {
@@ -332,10 +465,77 @@ export const EditorPage = () => {
   );
 
   const Sep = () => <div className="w-px self-stretch bg-sv-border mx-0.5 flex-shrink-0" />;
+  const ToolbarTip = ({ text }: { text: string }) => (
+    <div className="w-full mb-1 px-2 py-1.5 rounded-md border border-sv-cyan/25 bg-sv-cyan/10 text-[11px] text-sv-cyan leading-relaxed">
+      {text}
+    </div>
+  );
+
+  const notesTipText = !hasAnyScoreElements
+    ? 'Step 1: choose a duration in Notes, then click the staff to place your first note.'
+    : selectedNote
+    ? 'Great. Drag this note up/down to change pitch, or drag off staff to delete.'
+    : 'Nice progress. Click any note to unlock Expression tools.';
+  const structureTipText = (composition?.staves.length ?? 0) <= 1
+    ? 'Building SATB or an ensemble? Add another staff here.'
+    : 'Use Measure Properties for per-measure tempo, key, and time changes.';
+  const scoreSettingsTipText = composition?.id
+    ? 'Saved. Next: open Score Info in the header to set sharing.'
+    : 'Step 3: set title/tempo, then click Save in the header.';
+  const expressionTipText = isGregorianChant
+    ? 'With a note selected, shape phrasing using chant symbols and ornaments.'
+    : 'With a note selected, add accidentals, dynamics, lyrics, and chords.';
 
   /* ── Desktop toolbar rows ─────────────────────────────────────────────── */
   const desktopToolbar = (
     <div className="hidden md:flex flex-col bg-sv-card border-b border-sv-border">
+      {showFirstScoreChecklist && (
+        <div className="px-3 pt-3 pb-2 border-b border-sv-border">
+          <div className="rounded-lg border border-sv-cyan/30 bg-sv-cyan/10 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-sv-cyan">First score checklist</p>
+                <p className="text-[11px] text-sv-text-muted mt-0.5">
+                  {completedChecklistItems}/{totalChecklistItems} complete - finish these three actions to complete onboarding.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setToolbarTipsHidden((prev) => {
+                      return !prev;
+                    });
+                  }}
+                  className="text-[11px] px-2 py-1 rounded border border-sv-border text-sv-text-muted hover:text-sv-text hover:border-sv-border-lt transition-colors"
+                  title={toolbarTipsHidden ? 'Show contextual toolbar tips' : 'Hide contextual toolbar tips'}
+                >
+                  {toolbarTipsHidden ? 'Show Tip Bubbles' : 'Hide Tip Bubbles'}
+                </button>
+                <button
+                  onClick={() => {
+                    setChecklistDismissed(true);
+                  }}
+                  className="text-[11px] px-2 py-1 rounded border border-sv-border text-sv-text-muted hover:text-sv-text hover:border-sv-border-lt transition-colors"
+                  title="Dismiss checklist for now"
+                >
+                  Not Now
+                </button>
+              </div>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+              <div className={`rounded border px-2 py-1.5 ${firstScoreProgress.placedNote ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-sv-border bg-sv-card text-sv-text-muted'}`}>
+                {firstScoreProgress.placedNote ? '✓' : '1.'} Place first note
+              </div>
+              <div className={`rounded border px-2 py-1.5 ${firstScoreProgress.playedBack ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-sv-border bg-sv-card text-sv-text-muted'}`}>
+                {firstScoreProgress.playedBack ? '✓' : '2.'} Play once
+              </div>
+              <div className={`rounded border px-2 py-1.5 ${firstScoreProgress.savedScore ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-sv-border bg-sv-card text-sv-text-muted'}`}>
+                {firstScoreProgress.savedScore ? '✓' : '3.'} Save score
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {isReadOnly ? (
         /* Read-only mode: compact info bar with Tempo (for playback) + Volume + Export */
         <div className="flex items-center gap-3 px-3 py-2 overflow-x-auto toolbar-scroll">
@@ -364,6 +564,7 @@ export const EditorPage = () => {
             <SectionHeader id="notes" icon="♩" label={isGregorianChant ? 'Neumes' : 'Notes & Rests'} />
             {!collapsedRows.has('notes') && (
               <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
+            {showToolbarTips && <ToolbarTip text={notesTipText} />}
             <NoteToolbar />
                 {!isGregorianChant && <div className="hidden 2xl:block"><Sep /></div>}
             {!isGregorianChant && <RestToolbar />}
@@ -378,6 +579,7 @@ export const EditorPage = () => {
             <SectionHeader id="structure" icon="⊞" label="Structure" />
             {!collapsedRows.has('structure') && (
               <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
+            {showToolbarTips && <ToolbarTip text={structureTipText} />}
             <StaffControls />
                 {!isGregorianChant && <div className="hidden 2xl:block"><Sep /></div>}
             {!isGregorianChant && <MeasureControls />}
@@ -402,6 +604,7 @@ export const EditorPage = () => {
             <SectionHeader id="score" icon="♫" label="Score Settings" />
             {!collapsedRows.has('score') && (
               <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
+            {showToolbarTips && <ToolbarTip text={scoreSettingsTipText} />}
             <CompositionControls isReadOnly={false} />
                 <div className="hidden 2xl:block"><Sep /></div>
             <StaffVolumeControls />
@@ -428,6 +631,7 @@ export const EditorPage = () => {
               <SectionHeader id="expression" icon="✦" label="Note Expression" pulse />
               {!collapsedRows.has('expression') && (
             <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
+              {showToolbarTips && <ToolbarTip text={expressionTipText} />}
               {isGregorianChant ? (
                 <>
                   <GregorianChantToolbar />
@@ -494,6 +698,7 @@ export const EditorPage = () => {
   const mobileTabContent: Record<MobileTab, JSX.Element> = {
     notes: isReadOnly ? readOnlyNotice : (
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+        {showToolbarTips && <ToolbarTip text={notesTipText} />}
         <NoteToolbar />
         {!isGregorianChant && <RestToolbar />}
       </div>
@@ -502,6 +707,7 @@ export const EditorPage = () => {
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
         {selectedNote ? (
           <>
+            {showToolbarTips && <ToolbarTip text={expressionTipText} />}
             {isGregorianChant ? (
               <>
                 <GregorianChantToolbar />
@@ -527,6 +733,7 @@ export const EditorPage = () => {
     ),
     structure: isReadOnly ? readOnlyNotice : (
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+        {showToolbarTips && <ToolbarTip text={structureTipText} />}
         <StaffControls />
         {!isGregorianChant && <MeasureControls />}
         <div className="flex flex-wrap gap-2">
@@ -540,6 +747,7 @@ export const EditorPage = () => {
     ),
     settings: (
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+        {showToolbarTips && <ToolbarTip text={scoreSettingsTipText} />}
         <CompositionControls isReadOnly={isReadOnly} />
         <div className="sv-toolbar">
           <span className="sv-toolbar-label">Density</span>
@@ -635,6 +843,12 @@ export const EditorPage = () => {
           <span>💬</span>
           <span className="hidden sm:inline">Review</span>
         </button>
+        {showFirstScoreCelebration && (
+          <div className="sv-onboarding-success flex-shrink-0 hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 text-xs font-medium">
+            <span>✅</span>
+            <span>First score complete</span>
+          </div>
+        )}
 
         {/* Read-only badge (shown when not editing) */}
         {isReadOnly && (

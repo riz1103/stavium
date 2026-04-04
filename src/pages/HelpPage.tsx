@@ -16,6 +16,12 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'First Score Checklist + Toolbar Tips',
+    date: 'Apr 2026',
+    details:
+      'New users now see a guided checklist in the editor (place first note, play once, save), contextual tip bubbles in toolbars, account-synced onboarding progress, and a brief completion confirmation once all onboarding steps are done.',
+  },
+  {
     title: 'Ownership Transfer Requests',
     date: 'Apr 2026',
     details:
@@ -48,6 +54,18 @@ const WHATS_NEW_ITEMS = [
 ];
 
 const FAQ_ITEMS = [
+  {
+    q: 'What is the "First score checklist" in the editor?',
+    a: 'When you open a new score in edit mode, Stavium can show a quick onboarding checklist in the toolbar area: place your first note, play once, and save your score. After all three are complete, a short success confirmation appears with a subtle fade/slide animation.',
+  },
+  {
+    q: 'Is onboarding progress tied to my account or this device?',
+    a: 'Onboarding progress is now tied to your signed-in account. Your checklist and tip visibility preferences sync across devices where you use the same account.',
+  },
+  {
+    q: 'What are the contextual toolbar tips?',
+    a: 'Small tip callouts can appear inside Notes, Structure, Score Settings, and Note Expression toolbars. They adapt to your context (for example, before/after placing a note). You can hide or show tips from the checklist controls.',
+  },
   {
     q: 'How do I add notes to my score?',
     a: 'Click a duration in the Notes toolbar (whole, half, quarter, etc.), then click on the staff where you want the note. Use Dot to create dotted values, and Triplet to switch the selected duration to a triplet value. You can also use the Rest toolbar to add rests.',
@@ -313,13 +331,13 @@ export const HelpPage = () => {
                     <span className="font-medium text-sv-text">Create or open</span> — From the Dashboard, click "New Composition" or open an existing one.
                   </li>
                   <li>
-                    <span className="font-medium text-sv-text">Add notes</span> — Select a note duration in the toolbar, then click on the staff to place notes.
+                    <span className="font-medium text-sv-text">Follow the first score checklist</span> — In edit mode, use the guided checklist to place your first note, play once, and save.
                   </li>
                   <li>
-                    <span className="font-medium text-sv-text">Play back</span> — Use the Play button at the bottom to hear your composition.
+                    <span className="font-medium text-sv-text">Use toolbar tips</span> — Contextual tips appear in Notes, Structure, Score Settings, and Expression to guide the next best action.
                   </li>
                   <li>
-                    <span className="font-medium text-sv-text">Save & export</span> — Save your work, then export to PDF or MIDI when ready.
+                    <span className="font-medium text-sv-text">Save & export</span> — Save your work from the header, then export to PDF or MIDI when ready.
                   </li>
                 </ol>
               </div>

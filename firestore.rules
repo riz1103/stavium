@@ -162,7 +162,23 @@ service cloud.firestore {
                       request.resource.data.measureIndex == resource.data.measureIndex &&
                       request.resource.data.createdBy == resource.data.createdBy;
 
-      allow delete: if false;
+      // Owner can delete by compositionId (new docs) OR by thread ownership fallback
+      // for legacy comments that may not store compositionId.
+      allow delete: if isAuthenticated() &&
+                      (
+                        (
+                          resource.data.compositionId is string &&
+                          compositionExists(resource.data.compositionId) &&
+                          isOwner(compositionDoc(resource.data.compositionId).data)
+                        ) ||
+                        (
+                          resource.data.threadId is string &&
+                          threadExists(resource.data.threadId) &&
+                          threadDoc(resource.data.threadId).data.compositionId is string &&
+                          compositionExists(threadDoc(resource.data.threadId).data.compositionId) &&
+                          isOwner(compositionDoc(threadDoc(resource.data.threadId).data.compositionId).data)
+                        )
+                      );
     }
 
     // Individual comments belonging to a thread.
@@ -181,7 +197,12 @@ service cloud.firestore {
                       threadDoc(request.resource.data.threadId).data.compositionId == request.resource.data.compositionId &&
                       canReadComposition(request.resource.data.compositionId);
 
-      allow update, delete: if false;
+      allow update: if false;
+
+      allow delete: if isAuthenticated() &&
+                      resource.data.compositionId is string &&
+                      compositionExists(resource.data.compositionId) &&
+                      isOwner(compositionDoc(resource.data.compositionId).data);
     }
 
     // Ownership transfer requests for handing off composition ownership.
@@ -221,7 +242,10 @@ service cloud.firestore {
                       request.resource.data.fromUid == resource.data.fromUid &&
                       request.resource.data.toEmail == resource.data.toEmail;
 
-      allow delete: if false;
+      allow delete: if isAuthenticated() &&
+                      resource.data.compositionId is string &&
+                      compositionExists(resource.data.compositionId) &&
+                      isOwner(compositionDoc(resource.data.compositionId).data);
     }
 
     // Scanned / OCR import jobs — owner only
@@ -234,6 +258,12 @@ service cloud.firestore {
 
       // No create/update from the client — the backend writes these docs
       allow create, update: if false;
+    }
+
+    // Per-account onboarding/preferences for editor guidance.
+    match /userOnboarding/{uid} {
+      allow read, create, update: if isAuthenticated() && request.auth.uid == uid;
+      allow delete: if false;
     }
 
     // Deny everything else

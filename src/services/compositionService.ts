@@ -609,20 +609,65 @@ export const deleteComposition = async (
       where('compositionId', '==', compositionId)
     );
 
-    const [revisionSnap, threadSnap, compositionCommentSnap, ownershipTransferSnap] = await Promise.all([
-      getDocsWithRetry(revisionQuery, () => getDocs(revisionQuery), 'delete-composition-revisions'),
-      getDocsWithRetry(threadQuery, () => getDocs(threadQuery), 'delete-composition-threads'),
-      getDocsWithRetry(
-        compositionCommentQuery,
-        () => getDocs(compositionCommentQuery),
-        'delete-composition-comments'
-      ),
-      getDocsWithRetry(
-        ownershipTransferQuery,
-        () => getDocs(ownershipTransferQuery),
-        'delete-composition-ownership-transfers'
-      ),
-    ]);
+    const [revisionSnap, threadSnap, compositionCommentSnap, ownershipTransferSnap] =
+      await Promise.all([
+        getDocsWithRetry(
+          revisionQuery,
+          () => getDocs(revisionQuery),
+          'delete-composition-revisions'
+        ).catch((error) => {
+          if (isPermissionError(error)) {
+            console.warn(
+              'Skipping revision cleanup due to permission-denied. Proceeding with parent delete.',
+              error
+            );
+            return { docs: [] as Array<{ id: string }> };
+          }
+          throw error;
+        }),
+        getDocsWithRetry(
+          threadQuery,
+          () => getDocs(threadQuery),
+          'delete-composition-threads'
+        ).catch((error) => {
+          if (isPermissionError(error)) {
+            console.warn(
+              'Skipping comment-thread cleanup due to permission-denied. Proceeding with parent delete.',
+              error
+            );
+            return { docs: [] as Array<{ id: string }> };
+          }
+          throw error;
+        }),
+        getDocsWithRetry(
+          compositionCommentQuery,
+          () => getDocs(compositionCommentQuery),
+          'delete-composition-comments'
+        ).catch((error) => {
+          if (isPermissionError(error)) {
+            console.warn(
+              'Skipping thread-comment cleanup due to permission-denied. Proceeding with parent delete.',
+              error
+            );
+            return { docs: [] as Array<{ id: string }> };
+          }
+          throw error;
+        }),
+        getDocsWithRetry(
+          ownershipTransferQuery,
+          () => getDocs(ownershipTransferQuery),
+          'delete-composition-ownership-transfers'
+        ).catch((error) => {
+          if (isPermissionError(error)) {
+            console.warn(
+              'Skipping ownership-transfer cleanup due to permission-denied. Proceeding with parent delete.',
+              error
+            );
+            return { docs: [] as Array<{ id: string }> };
+          }
+          throw error;
+        }),
+      ]);
 
     const revisionRefs = revisionSnap.docs.map((snap) =>
       doc(db, COMPOSITION_REVISIONS_COLLECTION, snap.id)
@@ -654,7 +699,16 @@ export const deleteComposition = async (
           q,
           () => getDocs(q),
           'delete-composition-comments-by-thread'
-        );
+        ).catch((error) => {
+          if (isPermissionError(error)) {
+            console.warn(
+              'Skipping per-thread comment lookup due to permission-denied. Proceeding with parent delete.',
+              error
+            );
+            return { docs: [] as Array<{ id: string }> };
+          }
+          throw error;
+        });
         commentsForThread.docs.forEach((snap) => {
           commentRefById.set(
             snap.id,
@@ -666,15 +720,56 @@ export const deleteComposition = async (
     const commentRefs = Array.from(commentRefById.values());
 
     // 2) Delete children first (comments -> threads/revisions), then parent doc.
-    await deleteDocRefsInBatches(commentRefs);
-    await deleteDocRefsInBatches(revisionRefs);
-    await deleteDocRefsInBatches(threadRefs);
-    await deleteDocRefsInBatches(ownershipTransferRefs);
+    await deleteDocRefsInBatches(commentRefs).catch((error) => {
+      if (isPermissionError(error)) {
+        console.warn(
+          'Skipping thread-comment delete due to permission-denied. Proceeding with parent delete.',
+          error
+        );
+        return;
+      }
+      throw error;
+    });
+    await deleteDocRefsInBatches(revisionRefs).catch((error) => {
+      if (isPermissionError(error)) {
+        console.warn(
+          'Skipping revision delete due to permission-denied. Proceeding with parent delete.',
+          error
+        );
+        return;
+      }
+      throw error;
+    });
+    await deleteDocRefsInBatches(threadRefs).catch((error) => {
+      if (isPermissionError(error)) {
+        console.warn(
+          'Skipping thread delete due to permission-denied. Proceeding with parent delete.',
+          error
+        );
+        return;
+      }
+      throw error;
+    });
+    await deleteDocRefsInBatches(ownershipTransferRefs).catch((error) => {
+      if (isPermissionError(error)) {
+        console.warn(
+          'Skipping ownership-transfer delete due to permission-denied. Proceeding with parent delete.',
+          error
+        );
+        return;
+      }
+      throw error;
+    });
 
     // 3) Delete composition itself last.
     await deleteDoc(doc(db, COMPOSITIONS_COLLECTION, compositionId));
   } catch (error) {
     console.error('Error deleting composition:', error);
+    if (error instanceof FirebaseError && error.code === 'permission-denied') {
+      throw new Error(
+        'Delete blocked by Firestore rules. Publish latest firestore.rules, then retry.'
+      );
+    }
     throw error;
   }
 };

@@ -30,6 +30,21 @@ To scan or import from PDF or scanned images:
 - Toolbar sections (collapsible): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected)
 - Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars)
 
+## First score onboarding
+- In edit mode for new users, the editor can show a "First score checklist" near the top of the toolbar area.
+- Checklist steps are:
+  1) Place first note
+  2) Play it once
+  3) Save score
+- A user can dismiss the checklist and can hide/show contextual tips.
+- After all three checklist items are complete, the UI shows a brief "First score complete" confirmation.
+- Onboarding progress and tip visibility are account-bound (synced to the signed-in user), not only device-local.
+
+## Contextual toolbar tips
+- Tips may appear inside toolbar sections (Notes & Rests, Structure, Score Settings, Note Expression).
+- Tips adapt to current context (for example: no notes placed yet, note selected, or score not saved yet).
+- If a user asks how to disable/re-enable tips, mention the checklist controls (Hide Tips / Show Tips).
+
 ## Practice Playback mode
 - Range playback: set From/To in the bottom bar
 - Loop selected measures: click "Loop Selection" (uses current selected measure range) and/or enable "Loop"
