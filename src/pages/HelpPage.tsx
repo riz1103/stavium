@@ -16,6 +16,18 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'Ownership Transfer Requests',
+    date: 'Apr 2026',
+    details:
+      'Score Info now shows composition owner details and supports ownership handoff via request/accept flow with expiration to avoid stale pending requests.',
+  },
+  {
+    title: 'Asynchronous Review Comments',
+    date: 'Apr 2026',
+    details:
+      'Added Review comments in the editor for measure/staff-targeted feedback, threaded replies, and resolve/unresolve status tracking.',
+  },
+  {
     title: 'Practice Playback Mode',
     date: 'Apr 2026',
     details:
@@ -61,12 +73,24 @@ const FAQ_ITEMS = [
     a: 'Open Score Info (ℹ️ button in the editor header), then use the Sharing section. You can keep it Private, share with specific people by email (view or edit access), or make it Public for everyone.',
   },
   {
+    q: 'Can I transfer composition ownership to another account?',
+    a: 'Yes. In Score Info > Ownership, the current owner can send a transfer request to a destination email. The destination account must open the score and accept the request. Requests expire automatically after 7 days to prevent neglected handoffs.',
+  },
+  {
+    q: 'How do Review comments work on shared scores?',
+    a: 'Open a saved score in the editor, click Review in the header, then start a thread for a specific staff and measure. The thread list shows the original thread title plus the latest reply preview. Reviewers can reply asynchronously and mark threads as Resolved or Unresolved as feedback is addressed.',
+  },
+  {
     q: 'What file formats can I import?',
     a: 'Stavium supports MIDI (.mid, .midi), MusicXML (.xml, .musicxml, .mxl), and PDF/image scans. For MIDI and MusicXML, use the Import button on the Dashboard. For PDFs and scanned images, go to the OCR Imports page.',
   },
   {
     q: 'How do I export my composition?',
     a: 'Use the Export toolbar in the editor. You can export to PDF (for printing) or MIDI (for use in DAWs and other music software).',
+  },
+  {
+    q: 'If I delete a composition, are reviews and timeline history also deleted?',
+    a: 'Yes. Deleting a composition now cascades and removes its related review threads/comments and revision timeline snapshots from cloud storage.',
   },
   {
     q: 'What keyboard shortcuts are available?',
@@ -242,6 +266,10 @@ export const HelpPage = () => {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-sv-cyan mt-0.5">•</span>
+                    Asynchronous review comments tied to staff + measure with resolve/unresolve threads
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-sv-cyan mt-0.5">•</span>
                     Import from MIDI, MusicXML, PDF, and scanned images
                   </li>
                 </ul>
@@ -337,6 +365,12 @@ export const HelpPage = () => {
                     <h3 className="font-semibold text-sv-cyan mb-2">Version Timeline</h3>
                     <p className="text-sv-text-muted text-sm">
                       Track snapshot history from saves/exports. The timeline panel supports quick filtering by trigger type and restoring older revisions when needed.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Review Comments</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Open Review from the editor header to add asynchronous comment threads tied to a staff and measure. Threads support replies and can be marked resolved or unresolved during collaboration.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">

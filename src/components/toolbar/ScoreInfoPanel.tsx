@@ -1,6 +1,15 @@
 import React, { useRef, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { useScoreStore } from '../../app/store/scoreStore';
+import {
+  acceptOwnershipTransfer,
+  cancelOwnershipTransfer,
+  declineOwnershipTransfer,
+  getPendingOwnershipTransferForComposition,
+  requestOwnershipTransfer,
+  type CompositionOwnershipTransfer,
+} from '../../services/compositionService';
+import { User } from '../../types/user';
 
 interface ScoreInfoPanelProps {
   open: boolean;
@@ -9,6 +18,8 @@ interface ScoreInfoPanelProps {
   anchorRef: React.RefObject<HTMLElement>;
   /** Whether the current user is the owner. Only owners may change credits/sharing. */
   isOwner?: boolean;
+  /** Signed-in user for ownership transfer workflows. */
+  user?: User | null;
 }
 
 const PRIVACY_ICONS: Record<string, string> = {
@@ -17,11 +28,14 @@ const PRIVACY_ICONS: Record<string, string> = {
   public:  '🌐',
 };
 
-export const ScoreInfoPanel = ({ open, onClose, anchorRef, isOwner = true }: ScoreInfoPanelProps) => {
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+export const ScoreInfoPanel = ({ open, onClose, anchorRef, isOwner = true, user = null }: ScoreInfoPanelProps) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   const composition          = useScoreStore((s) => s.composition);
+  const setComposition       = useScoreStore((s) => s.setComposition);
   const updateAuthor         = useScoreStore((s) => s.updateAuthor);
   const updateArrangedBy     = useScoreStore((s) => s.updateArrangedBy);
   const updatePrivacy        = useScoreStore((s) => s.updatePrivacy);
@@ -31,10 +45,38 @@ export const ScoreInfoPanel = ({ open, onClose, anchorRef, isOwner = true }: Sco
   const [emailsInput, setEmailsInput] = React.useState(
     composition?.sharedEmails?.join(', ') || ''
   );
+  const [transferEmail, setTransferEmail] = useState('');
+  const [pendingTransfer, setPendingTransfer] = useState<CompositionOwnershipTransfer | null>(null);
+  const [loadingTransfer, setLoadingTransfer] = useState(false);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
 
   useEffect(() => {
     setEmailsInput(composition?.sharedEmails?.join(', ') || '');
   }, [composition?.sharedEmails]);
+
+  useEffect(() => {
+    const compositionId = composition?.id;
+    if (!open || !compositionId) return;
+    let cancelled = false;
+    const run = async () => {
+      setLoadingTransfer(true);
+      setTransferError(null);
+      try {
+        const transfer = await getPendingOwnershipTransferForComposition(compositionId, user?.email);
+        if (!cancelled) setPendingTransfer(transfer);
+      } catch (error) {
+        console.error('Failed to load ownership transfer status:', error);
+        if (!cancelled) setTransferError('Could not load ownership transfer status.');
+      } finally {
+        if (!cancelled) setLoadingTransfer(false);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, composition?.id, user?.email]);
 
   // Calculate position from anchor whenever opening
   useEffect(() => {
@@ -96,6 +138,145 @@ export const ScoreInfoPanel = ({ open, onClose, anchorRef, isOwner = true }: Sco
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const formatTransferExpiry = (iso?: string) => {
+    if (!iso) return '—';
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return '—';
+    return parsed.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const ownerLabel =
+    composition.ownerName?.trim() ||
+    (composition.userId === user?.uid ? user?.displayName || '' : '') ||
+    composition.ownerEmail ||
+    (composition.userId ? `UID: ${composition.userId.slice(0, 8)}...` : 'Unknown owner');
+  const ownerEmailLabel =
+    composition.ownerEmail ||
+    (composition.userId === user?.uid ? user?.email || '—' : '—');
+  const isTransferRecipient =
+    !!pendingTransfer &&
+    !!user?.email &&
+    normalizeEmail(pendingTransfer.toEmail) === normalizeEmail(user.email);
+  const isTransferSender = !!pendingTransfer && !!user && pendingTransfer.fromUid === user.uid;
+
+  const refreshPendingTransfer = async () => {
+    if (!composition?.id) return;
+    setLoadingTransfer(true);
+    try {
+      const transfer = await getPendingOwnershipTransferForComposition(composition.id, user?.email);
+      setPendingTransfer(transfer);
+    } finally {
+      setLoadingTransfer(false);
+    }
+  };
+
+  const handleRequestTransfer = async () => {
+    if (!composition?.id || !user || !isOwner) return;
+    const toEmail = transferEmail.trim();
+    if (!toEmail) return;
+    try {
+      setTransferBusy(true);
+      setTransferError(null);
+      const transfer = await requestOwnershipTransfer({
+        compositionId: composition.id,
+        fromUid: user.uid,
+        fromEmail: user.email,
+        fromName: user.displayName,
+        toEmail,
+      });
+      setPendingTransfer(transfer);
+      setTransferEmail('');
+      setComposition({
+        ...composition,
+        pendingOwnershipTransferId: transfer.id,
+        pendingOwnershipTransferExpiresAt: new Date(transfer.expiresAt),
+      });
+    } catch (error) {
+      console.error('Failed to request ownership transfer:', error);
+      setTransferError(error instanceof Error ? error.message : 'Could not send transfer request.');
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
+  const handleCancelTransfer = async () => {
+    if (!composition?.id || !pendingTransfer) return;
+    try {
+      setTransferBusy(true);
+      setTransferError(null);
+      await cancelOwnershipTransfer(pendingTransfer.id, composition.id);
+      setPendingTransfer(null);
+      setComposition({
+        ...composition,
+        pendingOwnershipTransferId: undefined,
+        pendingOwnershipTransferExpiresAt: undefined,
+      });
+    } catch (error) {
+      console.error('Failed to cancel ownership transfer:', error);
+      setTransferError('Could not cancel transfer request.');
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
+  const handleDeclineTransfer = async () => {
+    if (!composition?.id || !pendingTransfer || !user) return;
+    try {
+      setTransferBusy(true);
+      setTransferError(null);
+      await declineOwnershipTransfer({
+        transferId: pendingTransfer.id,
+        compositionId: composition.id,
+        recipientUid: user.uid,
+      });
+      setPendingTransfer(null);
+      setComposition({
+        ...composition,
+        pendingOwnershipTransferId: undefined,
+        pendingOwnershipTransferExpiresAt: undefined,
+      });
+    } catch (error) {
+      console.error('Failed to decline ownership transfer:', error);
+      setTransferError('Could not decline transfer request.');
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
+  const handleAcceptTransfer = async () => {
+    if (!composition?.id || !pendingTransfer || !user?.email || !user) return;
+    try {
+      setTransferBusy(true);
+      setTransferError(null);
+      await acceptOwnershipTransfer({
+        transferId: pendingTransfer.id,
+        compositionId: composition.id,
+        recipientUid: user.uid,
+        recipientEmail: user.email,
+        recipientName: user.displayName,
+      });
+      setPendingTransfer(null);
+      setComposition({
+        ...composition,
+        userId: user.uid,
+        ownerEmail: user.email ?? undefined,
+        ownerName: user.displayName ?? undefined,
+        pendingOwnershipTransferId: undefined,
+        pendingOwnershipTransferExpiresAt: undefined,
+      });
+    } catch (error) {
+      console.error('Failed to accept ownership transfer:', error);
+      setTransferError(error instanceof Error ? error.message : 'Could not accept transfer request.');
+    } finally {
+      setTransferBusy(false);
+    }
   };
 
   return ReactDOM.createPortal(
@@ -277,6 +458,104 @@ export const ScoreInfoPanel = ({ open, onClose, anchorRef, isOwner = true }: Sco
               />
               {isOwner && (
                 <p className="text-xs text-sv-text-dim leading-relaxed">Separate multiple emails with commas</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="h-px bg-sv-border" />
+
+        {/* Ownership */}
+        <div className="flex flex-col gap-3">
+          <h3 className="text-[11px] font-semibold text-sv-text uppercase tracking-[0.14em]">OWNERSHIP</h3>
+          <div className="flex flex-col gap-2">
+            <div className="flex justify-between items-center py-1.5 px-2 rounded-md bg-sv-elevated">
+              <span className="text-xs text-sv-text">Owner</span>
+              <span className="text-xs text-sv-text font-medium text-right">{ownerLabel}</span>
+            </div>
+            <div className="flex justify-between items-center py-1.5 px-2 rounded-md bg-sv-elevated">
+              <span className="text-xs text-sv-text">Owner email</span>
+              <span className="text-xs text-sv-text font-medium text-right">{ownerEmailLabel}</span>
+            </div>
+          </div>
+
+          {composition.id && (
+            <div className="flex flex-col gap-2">
+              {loadingTransfer ? (
+                <p className="text-xs text-sv-text-dim">Loading transfer status...</p>
+              ) : pendingTransfer ? (
+                <div className="p-2 rounded-lg border border-sv-border bg-sv-elevated space-y-2">
+                  <p className="text-xs text-sv-text">
+                    Pending transfer to <span className="font-medium">{pendingTransfer.toEmail}</span>
+                  </p>
+                  <p className="text-[11px] text-sv-text-dim">
+                    Expires: {formatTransferExpiry(pendingTransfer.expiresAt)}
+                  </p>
+                  <div className="flex gap-2">
+                    {isTransferRecipient && (
+                      <>
+                        <button
+                          onClick={handleAcceptTransfer}
+                          disabled={transferBusy}
+                          className="sv-btn-primary text-xs flex-1 justify-center disabled:opacity-50"
+                        >
+                          Accept
+                        </button>
+                        <button
+                          onClick={handleDeclineTransfer}
+                          disabled={transferBusy}
+                          className="sv-btn-ghost text-xs flex-1 justify-center disabled:opacity-50"
+                        >
+                          Decline
+                        </button>
+                      </>
+                    )}
+                    {isTransferSender && (
+                      <button
+                        onClick={handleCancelTransfer}
+                        disabled={transferBusy}
+                        className="sv-btn-ghost text-xs flex-1 justify-center disabled:opacity-50"
+                      >
+                        Cancel request
+                      </button>
+                    )}
+                    {!isTransferRecipient && !isTransferSender && (
+                      <button
+                        onClick={refreshPendingTransfer}
+                        disabled={transferBusy}
+                        className="sv-btn-ghost text-xs flex-1 justify-center disabled:opacity-50"
+                      >
+                        Refresh
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : isOwner ? (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-sv-text">Transfer ownership to</label>
+                  <input
+                    type="email"
+                    value={transferEmail}
+                    onChange={(e) => setTransferEmail(e.target.value)}
+                    placeholder="recipient@example.com"
+                    className="sv-input w-full text-sm"
+                  />
+                  <p className="text-[11px] text-sv-text-dim">
+                    Recipient must accept within 7 days to prevent stale requests.
+                  </p>
+                  <button
+                    onClick={handleRequestTransfer}
+                    disabled={!transferEmail.trim() || transferBusy}
+                    className="sv-btn-primary text-xs justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Send transfer request
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-sv-text-dim">Only the owner can request ownership transfer.</p>
+              )}
+              {transferError && (
+                <p className="text-xs text-rose-300">{transferError}</p>
               )}
             </div>
           )}

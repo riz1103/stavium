@@ -394,7 +394,12 @@ export const ImportsPage = () => {
       const composition = await musicXmlToComposition(xmlContent, getFilename(job));
       const savedId = await saveComposition(
         { ...composition, userId: user.uid, createdAt: new Date() },
-        user.uid
+        user.uid,
+        user.uid,
+        {
+          ownerEmail: user.email,
+          ownerName: user.displayName,
+        }
       );
       setComposition({ ...composition, id: savedId, userId: user.uid });
       navigate(`/editor/${savedId}`, { state: { imported: true } });

@@ -21,6 +21,21 @@ service cloud.firestore {
              request.auth.token.email in data.sharedEmails;
     }
 
+    function hasPendingTransferForCaller(transferId) {
+      return transferId is string &&
+             exists(/databases/$(database)/documents/compositionOwnershipTransfers/$(transferId)) &&
+             get(/databases/$(database)/documents/compositionOwnershipTransfers/$(transferId)).data.status == 'pending' &&
+             request.auth.token.email != null &&
+             get(/databases/$(database)/documents/compositionOwnershipTransfers/$(transferId)).data.toEmail == request.auth.token.email;
+    }
+
+    function isOwnershipTransferAcceptance(dataBefore, dataAfter) {
+      return dataBefore.pendingOwnershipTransferId is string &&
+             hasPendingTransferForCaller(dataBefore.pendingOwnershipTransferId) &&
+             dataAfter.userId == request.auth.uid &&
+             dataAfter.pendingOwnershipTransferId == null;
+    }
+
     match /compositions/{compositionId} {
 
       // Read: owner, or public, or explicitly shared with the caller's email
@@ -40,13 +55,18 @@ service cloud.firestore {
       //   2. A user explicitly shared (privacy='shared') with 'edit' permission.
       //   3. Any authenticated user when the composition is public with 'edit' permission.
       allow update: if isAuthenticated() &&
-                       request.resource.data.userId == resource.data.userId &&
                        request.resource.data.createdAt == resource.data.createdAt &&
-                       (isOwner(resource.data) ||
-                        (isSharedWithMe(resource.data) &&
-                         resource.data.sharePermission == 'edit') ||
-                        (isPublic(resource.data) &&
-                         resource.data.sharePermission == 'edit'));
+                       (
+                         (
+                           request.resource.data.userId == resource.data.userId &&
+                           (isOwner(resource.data) ||
+                            (isSharedWithMe(resource.data) &&
+                             resource.data.sharePermission == 'edit') ||
+                            (isPublic(resource.data) &&
+                             resource.data.sharePermission == 'edit'))
+                         ) ||
+                         isOwnershipTransferAcceptance(resource.data, request.resource.data)
+                       );
 
       // Delete: owner only
       allow delete: if isAuthenticated() && isOwner(resource.data);
@@ -76,6 +96,28 @@ service cloud.firestore {
                compositionDoc(compositionId).data.sharePermission == 'edit'));
     }
 
+    function threadDoc(threadId) {
+      return get(/databases/$(database)/documents/compositionCommentThreads/$(threadId));
+    }
+
+    function threadExists(threadId) {
+      return exists(/databases/$(database)/documents/compositionCommentThreads/$(threadId));
+    }
+
+    function canReadThread(threadId) {
+      return threadExists(threadId) &&
+             threadDoc(threadId).data.compositionId is string &&
+             canReadComposition(threadDoc(threadId).data.compositionId);
+    }
+
+    function transferDoc(transferId) {
+      return get(/databases/$(database)/documents/compositionOwnershipTransfers/$(transferId));
+    }
+
+    function transferExists(transferId) {
+      return exists(/databases/$(database)/documents/compositionOwnershipTransfers/$(transferId));
+    }
+
     // Version history snapshots stored separately for retention control.
     match /compositionRevisions/{revisionId} {
       // Viewers can read timeline for compositions they can access.
@@ -95,6 +137,91 @@ service cloud.firestore {
       allow delete: if isAuthenticated() &&
                       resource.data.compositionId is string &&
                       canEditComposition(resource.data.compositionId);
+    }
+
+    // Asynchronous review threads tied to a specific staff + measure.
+    match /compositionCommentThreads/{threadId} {
+      allow read: if isAuthenticated() &&
+                    resource.data.compositionId is string &&
+                    canReadComposition(resource.data.compositionId);
+
+      allow create: if isAuthenticated() &&
+                      request.resource.data.compositionId is string &&
+                      request.resource.data.staffIndex is number &&
+                      request.resource.data.measureIndex is number &&
+                      request.resource.data.status == 'open' &&
+                      canReadComposition(request.resource.data.compositionId);
+
+      // Allow status transitions (open <-> resolved) and last-comment metadata updates.
+      // Immutable: composition/target location/creator identity.
+      allow update: if isAuthenticated() &&
+                      resource.data.compositionId is string &&
+                      canReadComposition(resource.data.compositionId) &&
+                      request.resource.data.compositionId == resource.data.compositionId &&
+                      request.resource.data.staffIndex == resource.data.staffIndex &&
+                      request.resource.data.measureIndex == resource.data.measureIndex &&
+                      request.resource.data.createdBy == resource.data.createdBy;
+
+      allow delete: if false;
+    }
+
+    // Individual comments belonging to a thread.
+    match /compositionThreadComments/{commentId} {
+      allow read: if isAuthenticated() &&
+                    resource.data.threadId is string &&
+                    canReadThread(resource.data.threadId);
+
+      allow create: if isAuthenticated() &&
+                      request.resource.data.threadId is string &&
+                      request.resource.data.compositionId is string &&
+                      request.resource.data.content is string &&
+                      request.resource.data.staffIndex is number &&
+                      request.resource.data.measureIndex is number &&
+                      threadExists(request.resource.data.threadId) &&
+                      threadDoc(request.resource.data.threadId).data.compositionId == request.resource.data.compositionId &&
+                      canReadComposition(request.resource.data.compositionId);
+
+      allow update, delete: if false;
+    }
+
+    // Ownership transfer requests for handing off composition ownership.
+    match /compositionOwnershipTransfers/{transferId} {
+      allow read: if isAuthenticated() &&
+                    (
+                      resource.data.fromUid == request.auth.uid ||
+                      (request.auth.token.email != null &&
+                       resource.data.toEmail == request.auth.token.email)
+                    );
+
+      allow create: if isAuthenticated() &&
+                      request.resource.data.compositionId is string &&
+                      request.resource.data.fromUid == request.auth.uid &&
+                      request.resource.data.toEmail is string &&
+                      request.resource.data.status == 'pending' &&
+                      compositionExists(request.resource.data.compositionId) &&
+                      isOwner(compositionDoc(request.resource.data.compositionId).data);
+
+      // Sender can cancel. Recipient can accept/decline.
+      allow update: if isAuthenticated() &&
+                      resource.data.status == 'pending' &&
+                      (
+                        (
+                          resource.data.fromUid == request.auth.uid &&
+                          request.resource.data.status == 'cancelled'
+                        ) ||
+                        (
+                          request.auth.token.email != null &&
+                          resource.data.toEmail == request.auth.token.email &&
+                          (request.resource.data.status == 'accepted' ||
+                           request.resource.data.status == 'declined' ||
+                           request.resource.data.status == 'expired')
+                        )
+                      ) &&
+                      request.resource.data.compositionId == resource.data.compositionId &&
+                      request.resource.data.fromUid == resource.data.fromUid &&
+                      request.resource.data.toEmail == resource.data.toEmail;
+
+      allow delete: if false;
     }
 
     // Scanned / OCR import jobs — owner only

@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useUserStore } from '../app/store/userStore';
 import { RevisionTrigger, useScoreStore } from '../app/store/scoreStore';
 import { usePlaybackStore } from '../app/store/playbackStore';
-import { getComposition, getCompositionRevisionTimeline, saveComposition, saveCompositionRevisionSnapshot } from '../services/compositionService';
+import { ensureCompositionOwnerMetadata, getComposition, getCompositionRevisionTimeline, saveComposition, saveCompositionRevisionSnapshot } from '../services/compositionService';
 import { ScoreEditor } from '../components/editor/ScoreEditor';
 import { ScoreInfoPanel } from '../components/toolbar/ScoreInfoPanel';
 import { PlaybackControls } from '../components/playback/PlaybackControls';
@@ -29,6 +29,7 @@ import { ChordEditor } from '../components/toolbar/ChordEditor';
 import { MeasurePropertiesPanel } from '../components/toolbar/MeasurePropertiesPanel';
 import { StaffVolumeControls } from '../components/toolbar/StaffVolumeControls';
 import { AIArrangementPanel } from '../components/toolbar/AIArrangementPanel';
+import { ScoreReviewPanel } from '../components/review/ScoreReviewPanel';
 
 type MobileTab = 'notes' | 'expression' | 'structure' | 'settings';
 
@@ -51,6 +52,8 @@ export const EditorPage = () => {
   const clearRevisionHistory = useScoreStore((state) => state.clearRevisionHistory);
   const setRevisionHistory = useScoreStore((state) => state.setRevisionHistory);
   const selectedNote = useScoreStore((state) => state.selectedNote);
+  const selectedStaffIndex = useScoreStore((state) => state.selectedStaffIndex);
+  const selectedMeasureIndex = useScoreStore((state) => state.selectedMeasureIndex);
   const [title, setTitle] = useState('Untitled Composition');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -99,6 +102,7 @@ export const EditorPage = () => {
   // Non-owners with view-only permission can never switch to edit mode
   const canEdit = isOwner || composition?.sharePermission === 'edit';
   const [scoreInfoOpen, setScoreInfoOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const scoreInfoBtnRef = useRef<HTMLButtonElement>(null);
   const undo = useScoreStore((state) => state.undo);
   const redo = useScoreStore((state) => state.redo);
@@ -175,6 +179,26 @@ export const EditorPage = () => {
         resetPlaybackTempo(null); // Reset playback tempo when loading new composition
         // Reset playback instruments when loading new composition
         comp.staves.forEach((_, index) => setPlaybackInstrument(index, null));
+
+        // Backfill legacy documents that predate owner metadata fields.
+        if (
+          user &&
+          comp.userId === user.uid &&
+          (!comp.ownerEmail || !comp.ownerName)
+        ) {
+          ensureCompositionOwnerMetadata({
+            compositionId: comp.id || compositionId,
+            ownerUid: user.uid,
+            ownerEmail: user.email,
+            ownerName: user.displayName,
+          }).catch(() => {});
+
+          setComposition({
+            ...comp,
+            ownerEmail: comp.ownerEmail || user.email || undefined,
+            ownerName: comp.ownerName || user.displayName || undefined,
+          });
+        }
       }
     } catch (error) {
       console.error('Error loading composition:', error);
@@ -238,7 +262,11 @@ export const EditorPage = () => {
       const savedId = await saveComposition(
         { ...composition, id: id || undefined, title, userId: ownerId },
         ownerId,
-        user.uid   // modifiedBy — the actual person hitting Save
+        user.uid,   // modifiedBy — the actual person hitting Save
+        {
+          ownerEmail: user.email,
+          ownerName: user.displayName,
+        }
       );
       const effectiveId = savedId || id || composition.id;
       const syncedComposition = {
@@ -590,7 +618,23 @@ export const EditorPage = () => {
           onClose={() => setScoreInfoOpen(false)}
           anchorRef={scoreInfoBtnRef as React.RefObject<HTMLElement>}
           isOwner={isOwner}
+          user={user}
         />
+
+        <button
+          onClick={() => setReviewOpen(true)}
+          disabled={!composition?.id}
+          className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium
+                     transition-all duration-150 ${
+            composition?.id
+              ? 'bg-sv-elevated border-sv-border text-sv-text-muted hover:text-sv-text hover:border-sv-border-lt'
+              : 'bg-sv-elevated border-sv-border text-sv-text-dim opacity-50 cursor-not-allowed'
+          }`}
+          title={composition?.id ? 'Open review comments' : 'Save composition to enable review comments'}
+        >
+          <span>💬</span>
+          <span className="hidden sm:inline">Review</span>
+        </button>
 
         {/* Read-only badge (shown when not editing) */}
         {isReadOnly && (
@@ -798,6 +842,16 @@ export const EditorPage = () => {
           })}
         </div>
       </div>
+
+      <ScoreReviewPanel
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        compositionId={composition?.id}
+        selectedStaffIndex={selectedStaffIndex}
+        selectedMeasureIndex={selectedMeasureIndex}
+        staves={composition?.staves ?? []}
+        user={user}
+      />
     </div>
   );
 };

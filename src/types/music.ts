@@ -164,6 +164,13 @@ export interface Composition {
   /** Automatically updated when composition is modified */
   updatedAt?: Date;
   userId?: string;
+  /** Owner profile info captured for ownership display and transfer UX. */
+  ownerEmail?: string;
+  ownerName?: string;
+  /** Active ownership transfer request id, if any. */
+  pendingOwnershipTransferId?: string;
+  /** Optional pending transfer expiration timestamp. */
+  pendingOwnershipTransferExpiresAt?: Date;
   /** UID of the last user who saved the composition (may differ from userId for public/shared edits) */
   modifiedBy?: string;
   /** Engraving mode used for score rendering and controls. */

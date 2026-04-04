@@ -61,8 +61,25 @@ To scan or import from PDF or scanned images:
 ## Sharing
 Click "Score Info" in the editor header → use the Sharing section to set Private, Shared (by email), or Public
 
+## Ownership transfer
+- Score Info shows who currently owns the composition.
+- Owner can send an ownership transfer request to another email.
+- Destination account must accept the request from Score Info.
+- Pending requests auto-expire after 7 days to reduce neglected transfers.
+
+## Asynchronous review comments
+- In a saved composition, click "Review" in the editor header.
+- Start a thread by choosing Staff + Measure and writing a comment.
+- Thread list cards show the thread title first, plus the latest reply preview.
+- Open a thread to reply asynchronously.
+- Use "Resolve thread" / "Unresolve thread" to manage review status.
+
 ## Export
 Use the Export toolbar (in Structure section) — export to PDF or MIDI. Exports also create timeline snapshots.
+
+## Deleting compositions
+- Deleting a composition from the Dashboard removes the score and related collaboration/history data.
+- This includes review threads/comments and revision timeline snapshots tied to that composition.
 
 ## Keyboard shortcuts
 Ctrl+Z undo, Ctrl+Y redo, Ctrl+S save
