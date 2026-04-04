@@ -874,10 +874,21 @@ export class ToneScheduler {
 
         // Each measure starts at its calculated time
         const measureStartTime = currentMeasureStart;
-        let measureTime = 0; // Time within this measure (in beats)
+
+        const hasAnyLaneSoloInMeasure = measure.voices.some((_, laneIdx) =>
+          playbackStore.isVoiceSoloed(staffIndex, laneIdx)
+        );
 
         measure.voices.forEach((voice, voiceIndex) => {
+          // Voice lanes are parallel timelines: each lane starts at beat 0.
+          let measureTime = 0; // Time within this voice lane (in beats)
           let tiedNotesToSkip = 0; // Count of tied notes to skip (within-measure chains)
+          const laneSoloed = playbackStore.isVoiceSoloed(staffIndex, voiceIndex);
+          const laneExplicitMuted = playbackStore.isVoiceMuted(staffIndex, voiceIndex);
+          const laneMuted =
+            isMuted ||
+            laneExplicitMuted ||
+            (hasAnyLaneSoloInMeasure && !laneSoloed);
           
           voice.notes.forEach((element, noteIndex) => {
             // Skip AUDIO for within-measure tie continuations, but still register them
@@ -1005,11 +1016,12 @@ export class ToneScheduler {
               const slurDur = isSlurred ? 1.05 : 1;
               const durationMultiplier = articulationDur * slurDur;
               const playDuration = Math.max(0.05, totalDurationSec * durationMultiplier);
-              const noteGain = Math.max(0, Math.min(1.5, gain * dynamicMultiplier * articulationGain));
+              const laneGain = laneMuted ? 0 : gain;
+              const noteGain = Math.max(0, Math.min(1.5, laneGain * dynamicMultiplier * articulationGain));
               const velocity = Math.max(0.08, Math.min(1, noteGain));
               
               // Queue audio event for JIT scheduling (unless muted)
-              if (!isMuted) {
+              if (!laneMuted) {
                 const shouldLoop = !LOOP_DISABLED.has(effectiveInstrument);
                 const loopStartVal = LOOP_START[effectiveInstrument] ?? 0.08;
                 const freq = 440 * Math.pow(2, (midi - 69) / 12);

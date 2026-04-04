@@ -70,6 +70,11 @@ export interface Note {
 
 export interface Rest {
   duration: NoteDuration;
+  /**
+   * Timing-only rest placeholder used by import pipelines (e.g. scanned polyphony).
+   * Hidden rests keep beat alignment without cluttering notation output.
+   */
+  hidden?: boolean;
 }
 
 export type MusicElement = Note | Rest;

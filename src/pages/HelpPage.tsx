@@ -16,6 +16,18 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'Multi-Voice Editing Lanes (V1-V4)',
+    date: 'Apr 2026',
+    details:
+      'The Notes toolbar now includes explicit voice lanes V1-V4 with per-lane visibility toggles plus voice-level Mute/Solo for playback focus. Each lane remembers its own note/rest rhythm selection, and MIDI/MusicXML imports map into editable lane data so polyphonic passages can be refined directly.',
+  },
+  {
+    title: 'Cleaner Scan Import Voices',
+    date: 'Apr 2026',
+    details:
+      'PDF/image scan imports now hide secondary-lane timing filler rests that were used only for alignment, reducing visual clutter while keeping multi-voice timing intact.',
+  },
+  {
     title: 'Real-time Co-editing (v1)',
     date: 'Apr 2026',
     details:
@@ -60,6 +72,22 @@ const WHATS_NEW_ITEMS = [
 ];
 
 const FAQ_ITEMS = [
+  {
+    q: 'How do I edit multiple voices on one staff?',
+    a: 'In Notes, use the Voices control to pick V1, V2, V3, or V4. Add notes/rests in the selected lane, toggle each lane visibility with the eye button, and use lane-level M (mute) or S (solo) for playback focus.',
+  },
+  {
+    q: 'Does each voice lane keep its own rhythm selection?',
+    a: 'Yes. Each voice lane stores its own active rhythm context (note duration and rest mode), so switching between V1-V4 restores that lane\'s current rhythm settings.',
+  },
+  {
+    q: 'How are imported MIDI and MusicXML voices mapped now?',
+    a: 'Imports now map voice content directly into editable V1-V4 lanes per staff. This means imported polyphonic passages are no longer trapped in a render-only state and can be edited lane-by-lane.',
+  },
+  {
+    q: 'Why do scanned imports show fewer extra rests now?',
+    a: 'In OCR Imports, use Scan voice split mode. Conservative (recommended) keeps scans cleaner and avoids noisy splitting, while Aggressive multi-voice split preserves more detected parallel voices. Secondary timing filler rests are hidden for cleaner notation, while explicit rests recognized from the source remain visible.',
+  },
   {
     q: 'How does real-time co-editing work in the editor?',
     a: 'On shared/public scores, Stavium now shows who is currently in the score, along with live cursor/selection highlights on the page. Edits sync per measure so simultaneous work in different measures merges safely, and same-measure conflicts fall back to latest measure patch.',
@@ -319,7 +347,7 @@ export const HelpPage = () => {
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h4 className="font-semibold text-amber-400 mb-2">Partially Supported / Workflow Dependent</h4>
                     <p className="text-sv-text-muted text-sm">
-                      Polyphonic/chord-like imported content is preserved and rendered via multiple voices, but advanced manual voice editing workflows are still evolving.
+                      Advanced engraving controls still evolve over time, but imported and hand-authored polyphony now uses explicit V1-V4 editing lanes with visibility controls.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
@@ -363,6 +391,12 @@ export const HelpPage = () => {
               <div>
                 <h2 className="text-2xl font-bold text-sv-text mb-4">Editor Features</h2>
                 <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Multi-Voice Lanes</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Edit polyphony with explicit V1-V4 lanes. Each lane can be shown/hidden independently, has lane-level mute/solo for playback, and keeps its own rhythm selection, making counterpoint and layered textures easier to manage.
+                    </p>
+                  </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Real-time Co-editing (v1)</h3>
                     <p className="text-sv-text-muted text-sm">

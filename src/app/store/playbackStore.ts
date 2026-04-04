@@ -29,6 +29,9 @@ interface PlaybackStateStore {
   staffMuted: Record<number, boolean>;   // staffIndex → muted
   /** Per-staff solo state; when any are soloed, only those staffs are audible. */
   staffSoloed: Record<number, boolean>; // staffIndex → soloed
+  /** Per-voice mute/solo state scoped by staff and voice lane. */
+  voiceMuted: Record<string, boolean>; // `${staffIndex}:${voiceIndex}` → muted
+  voiceSoloed: Record<string, boolean>; // `${staffIndex}:${voiceIndex}` → soloed
   setStaffVolume: (staffIndex: number, volume: number) => void;
   setStaffMuted: (staffIndex: number, muted: boolean) => void;
   setStaffSoloed: (staffIndex: number, soloed: boolean) => void;
@@ -38,6 +41,13 @@ interface PlaybackStateStore {
   isStaffSoloed: (staffIndex: number) => boolean;
   hasAnySoloedStaff: () => boolean;
   isStaffEffectivelyMuted: (staffIndex: number) => boolean;
+  setVoiceMuted: (staffIndex: number, voiceIndex: number, muted: boolean) => void;
+  setVoiceSoloed: (staffIndex: number, voiceIndex: number, soloed: boolean) => void;
+  clearVoiceSoloed: (staffIndex?: number) => void;
+  isVoiceMuted: (staffIndex: number, voiceIndex: number) => boolean;
+  isVoiceSoloed: (staffIndex: number, voiceIndex: number) => boolean;
+  hasAnySoloedVoice: (staffIndex: number) => boolean;
+  isVoiceEffectivelyMuted: (staffIndex: number, voiceIndex: number) => boolean;
   /** Playback tempo (can be changed even for view-only users, for playback/study purposes) */
   playbackTempo: number | null; // null means use composition tempo
   setPlaybackTempo: (tempo: number | null) => void;
@@ -68,6 +78,8 @@ interface PlaybackStateStore {
 const serializeNoteRef = (ref: PlayingNoteRef): string =>
   `${ref.staffIndex}:${ref.measureIndex}:${ref.voiceIndex}:${ref.noteIndex}`;
 
+const voiceKey = (staffIndex: number, voiceIndex: number): string => `${staffIndex}:${voiceIndex}`;
+
 export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
   state: 'stopped',
   currentMeasure: 0,
@@ -77,6 +89,8 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
   staffVolumes: {},
   staffMuted: {},
   staffSoloed: {},
+  voiceMuted: {},
+  voiceSoloed: {},
   playbackTempo: null,
   playbackInstruments: {},
   playbackStartMeasure: null,
@@ -139,6 +153,74 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
     const anySolo = Object.values(state.staffSoloed).some(Boolean);
     if (!anySolo) return false;
     return !(state.staffSoloed[staffIndex] ?? false);
+  },
+  setVoiceMuted: (staffIndex, voiceIndex, muted) => {
+    const key = voiceKey(staffIndex, voiceIndex);
+    set((state) => {
+      const nextMuted = { ...state.voiceMuted, [key]: muted };
+      const nextSoloed = { ...state.voiceSoloed };
+      // If a soloed lane is muted, clear solo on that lane immediately.
+      if (muted && nextSoloed[key]) {
+        nextSoloed[key] = false;
+      }
+      return {
+        voiceMuted: nextMuted,
+        voiceSoloed: nextSoloed,
+      };
+    });
+  },
+  setVoiceSoloed: (staffIndex, voiceIndex, soloed) => {
+    const key = voiceKey(staffIndex, voiceIndex);
+    set((state) => {
+      const nextSolo = { ...state.voiceSoloed };
+      if (soloed) {
+        // Single-solo behavior per staff: soloing one lane clears other solos.
+        Object.keys(nextSolo).forEach((k) => {
+          if (k.startsWith(`${staffIndex}:`)) nextSolo[k] = false;
+        });
+        nextSolo[key] = true;
+      } else {
+        nextSolo[key] = false;
+      }
+      // Soloing a lane should immediately unmute that same lane.
+      const nextMute = { ...state.voiceMuted };
+      if (soloed) nextMute[key] = false;
+      return { voiceSoloed: nextSolo, voiceMuted: nextMute };
+    });
+  },
+  clearVoiceSoloed: (staffIndex) => {
+    if (staffIndex === undefined) {
+      set({ voiceSoloed: {} });
+      return;
+    }
+    set((state) => {
+      const next = { ...state.voiceSoloed };
+      Object.keys(next).forEach((key) => {
+        if (key.startsWith(`${staffIndex}:`)) delete next[key];
+      });
+      return { voiceSoloed: next };
+    });
+  },
+  isVoiceMuted: (staffIndex, voiceIndex) => {
+    return get().voiceMuted[voiceKey(staffIndex, voiceIndex)] ?? false;
+  },
+  isVoiceSoloed: (staffIndex, voiceIndex) => {
+    return get().voiceSoloed[voiceKey(staffIndex, voiceIndex)] ?? false;
+  },
+  hasAnySoloedVoice: (staffIndex) => {
+    const entries = get().voiceSoloed;
+    return Object.entries(entries).some(([key, enabled]) => enabled && key.startsWith(`${staffIndex}:`));
+  },
+  isVoiceEffectivelyMuted: (staffIndex, voiceIndex) => {
+    const state = get();
+    const key = voiceKey(staffIndex, voiceIndex);
+    const explicitlyMuted = state.voiceMuted[key] ?? false;
+    if (explicitlyMuted) return true;
+    const anySoloOnStaff = Object.entries(state.voiceSoloed).some(
+      ([k, enabled]) => enabled && k.startsWith(`${staffIndex}:`)
+    );
+    if (!anySoloOnStaff) return false;
+    return !(state.voiceSoloed[key] ?? false);
   },
   setPlaybackTempo: (tempo) => set({ playbackTempo: tempo }),
   getEffectiveTempo: (compositionTempo) => {

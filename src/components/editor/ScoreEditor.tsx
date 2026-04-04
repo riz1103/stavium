@@ -197,6 +197,7 @@ export const ScoreEditor = ({
 
   const composition        = useScoreStore((s) => s.composition);
   const selectedVoiceIndex = useScoreStore((s) => s.selectedVoiceIndex);
+  const voiceVisibility = useScoreStore((s) => s.voiceVisibility);
   const selectedDuration   = useScoreStore((s) => s.selectedDuration);
   const selectedRestDuration = useScoreStore((s) => s.selectedRestDuration);
   const selectedNote       = useScoreStore((s) => s.selectedNote);
@@ -245,6 +246,22 @@ export const ScoreEditor = ({
   // Preview scheduler for note previews (uses actual instrument sounds)
   const previewSchedulerRef = useRef<ToneScheduler | null>(null);
 
+  const renderComposition = useMemo(() => {
+    if (!composition) return null;
+    return {
+      ...composition,
+      staves: composition.staves.map((staff) => ({
+        ...staff,
+        measures: staff.measures.map((measure) => ({
+          ...measure,
+          voices: measure.voices.map((voice, laneIndex) =>
+            voiceVisibility[laneIndex] === false ? { notes: [] } : voice
+          ),
+        })),
+      })),
+    };
+  }, [composition, voiceVisibility]);
+
   // Initialize preview scheduler
   useEffect(() => {
     previewSchedulerRef.current = new ToneScheduler();
@@ -277,29 +294,29 @@ export const ScoreEditor = ({
 
   // ── Render ───────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!containerRef.current || !composition) return;
+    if (!containerRef.current || !renderComposition) return;
     if (!rendererRef.current) {
       rendererRef.current = new VexFlowRenderer(containerRef.current, {
         width: 1200,
         height: 600,
       });
     }
-    rendererRef.current.render(composition, playingNotes, selectedMeasureIndex, measureSelectionStart, selectedNote, selectedStaffIndex);
-  }, [composition, playingNotes, selectedMeasureIndex, measureSelectionStart, selectedNote, selectedStaffIndex]);
+    rendererRef.current.render(renderComposition, playingNotes, selectedMeasureIndex, measureSelectionStart, selectedNote, selectedStaffIndex);
+  }, [renderComposition, playingNotes, selectedMeasureIndex, measureSelectionStart, selectedNote, selectedStaffIndex]);
 
   useEffect(() => {
     const handleResize = () => {
-      if (rendererRef.current && containerRef.current && composition) {
+      if (rendererRef.current && containerRef.current && renderComposition) {
         rendererRef.current.resize(
           containerRef.current.clientWidth,
           containerRef.current.clientHeight
         );
-        rendererRef.current.render(composition);
+        rendererRef.current.render(renderComposition);
       }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [composition]);
+  }, [renderComposition]);
 
   // ── Helper: extract coordinates from mouse or touch event ───────────────
   const getEventCoordinates = (e: React.MouseEvent | React.TouchEvent): { clientX: number; clientY: number } | null => {
@@ -471,6 +488,7 @@ export const ScoreEditor = ({
     // Insert at end
     return voice.notes.length;
   };
+
 
   // ── Helper: resolve staff + measure from SVG coords ─────────────────────
   const resolveStaffMeasure = (

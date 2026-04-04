@@ -907,6 +907,10 @@ export class VexFlowRenderer {
         const tickables: any[] = [];
         const tickableDataIndices: number[] = []; // maps tickable index → voice.notes index
         const voice = measure.voices[0];
+        const hasPolyphonicVoices =
+          (measure.voices ?? []).filter((v) => v.notes.some((el) => 'pitch' in el)).length > 1;
+        const primaryStemDir = hasPolyphonicVoices ? Stem.UP : undefined;
+        const primaryXShift = hasPolyphonicVoices ? this.getVoiceXShift(0) : 0;
 
         if (voice) {
           voice.notes.forEach((element, dataIndex) => {
@@ -917,7 +921,9 @@ export class VexFlowRenderer {
                 baseKeySignature,
                 measure,
                 dataIndex,
-                composition.notationSystem ?? 'standard'
+                composition.notationSystem ?? 'standard',
+                primaryStemDir,
+                primaryXShift
               );
               if (staveNote) {
                 tickableDataIndices.push(dataIndex);
@@ -956,7 +962,7 @@ export class VexFlowRenderer {
               // This prevents adjacent beat-groups from flipping up/down, which looks
               // cluttered and is not standard engraving practice.
               let measureMaxDist = -1;
-              let measureStemDir = Stem.DOWN; // equal-distance default
+              let measureStemDir = primaryStemDir ?? Stem.DOWN; // equal-distance default
               for (const el of voice.notes) {
                 if (!('pitch' in el)) continue;
                 const rawDuration = (el as Note).duration;
@@ -965,7 +971,7 @@ export class VexFlowRenderer {
                   .replace(/^(triplet|quintuplet|sextuplet|septuplet)-/, '');
                 if (base !== 'eighth' && base !== 'sixteenth' && base !== 'thirty-second') continue;
                 const dist = Math.abs(pitchToMidi((el as Note).pitch) - middleLineMidi);
-                if (dist > measureMaxDist) {
+                if (!primaryStemDir && dist > measureMaxDist) {
                   measureMaxDist = dist;
                   measureStemDir = pitchToMidi((el as Note).pitch) < middleLineMidi ? Stem.UP : Stem.DOWN;
                 }
@@ -1034,7 +1040,9 @@ export class VexFlowRenderer {
                       baseKeySignature,
                       measure,
                       dataIndex,
-                      composition.notationSystem ?? 'standard'
+                      composition.notationSystem ?? 'standard',
+                      (extraIdx + 1) % 2 === 0 ? Stem.UP : Stem.DOWN,
+                      hasPolyphonicVoices ? this.getVoiceXShift(extraIdx + 1) : 0
                     );
                     if (sn) { extraDataIndices.push(dataIndex); extraTickables.push(sn); }
                   } else {
@@ -1046,19 +1054,24 @@ export class VexFlowRenderer {
               })
               .filter((v) => v.tickables.length > 0);
 
-            const vfVoice = new Voice({ num_beats: voiceBeats, beat_value: effBeatType });
-            vfVoice.setStrict(false);
-            vfVoice.addTickables(tickables);
+            const vfVoice = tickables.length > 0 ? new Voice({ num_beats: voiceBeats, beat_value: effBeatType }) : null;
+            if (vfVoice) {
+              vfVoice.setStrict(false);
+              vfVoice.addTickables(tickables);
+            }
             const extraVfVoices = extraVoiceData.map((ev) => {
               const vv = new Voice({ num_beats: voiceBeats, beat_value: effBeatType });
               vv.setStrict(false);
               vv.addTickables(ev.tickables);
               return vv;
             });
-            new Formatter()
-              .joinVoices([vfVoice, ...extraVfVoices])
-              .format([vfVoice, ...extraVfVoices], mw - 30);
-            vfVoice.draw(this.context, measureStave);
+            const voicesToDraw = vfVoice ? [vfVoice, ...extraVfVoices] : [...extraVfVoices];
+            if (voicesToDraw.length > 0) {
+              const formatter = new Formatter();
+              if (voicesToDraw.length > 1) formatter.joinVoices(voicesToDraw);
+              formatter.format(voicesToDraw, mw - 30);
+            }
+            if (vfVoice) vfVoice.draw(this.context, measureStave);
             extraVfVoices.forEach((ev) => ev.draw(this.context, measureStave));
 
             // Draw beams after the voice so they render on top
@@ -1314,15 +1327,33 @@ export class VexFlowRenderer {
                   const ys: number[] = sn.getYs?.() ?? [];
                   const ny = ys.length > 0 ? ys[0] : 0;
                   if (nx && ny) {
+                    const noteDataIndex = ev.dataIndices[ti];
                     this.notePositions.push({
                       staffIndex,
                       measureIndex,
                       voiceIndex: ev.voiceIndex,
                       noteIndex: ti,
-                      noteDataIndex: ev.dataIndices[ti],
+                      noteDataIndex,
                       x: nx,
                       y: ny,
                     });
+                    const extraNoteElement = ev.voice.notes[noteDataIndex];
+                    if (playingNotes && extraNoteElement && 'pitch' in extraNoteElement) {
+                      const serialized = `${staffIndex}:${measureIndex}:${ev.voiceIndex}:${noteDataIndex}`;
+                      if (playingNotes.has(serialized)) {
+                        const svgEl = this.getSvgElement();
+                        if (svgEl) {
+                          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                          circle.setAttribute('cx', String(nx));
+                          circle.setAttribute('cy', String(ny));
+                          circle.setAttribute('r', '8');
+                          circle.setAttribute('fill', '#fbbf24');
+                          circle.setAttribute('opacity', '0.6');
+                          circle.setAttribute('class', 'playing-note-highlight');
+                          svgEl.insertBefore(circle, svgEl.firstChild);
+                        }
+                      }
+                    }
                   }
                 } catch (_) { /* skip */ }
               });
@@ -1615,7 +1646,9 @@ export class VexFlowRenderer {
     keySignature: string,
     measure?: Measure,
     noteIndex?: number,
-    notationSystem: 'standard' | 'gregorian-chant' = 'standard'
+    notationSystem: 'standard' | 'gregorian-chant' = 'standard',
+    forcedStemDir?: number,
+    forcedXShift?: number
   ): any {
     if (!note.pitch) return null;
 
@@ -1629,10 +1662,18 @@ export class VexFlowRenderer {
     try {
       const staveNote = new StaveNote({ clef, keys: [key], duration });
 
-      // Set stem direction based on music theory rules (notes on/above middle line = down, below = up)
-      // Note: VexFlow may override this based on voice formatting, but we set it as a hint
-      const stemDir = this.getStemDirection(note.pitch, clef);
+      // In multi-voice measures, force opposing stems so lanes read as separate voices.
+      const stemDir = forcedStemDir ?? this.getStemDirection(note.pitch, clef);
       staveNote.setStemDirection(stemDir);
+      // In 3-4 voice situations, notes can visually collapse into one notehead.
+      // A tiny lane-specific x-shift keeps simultaneous voices distinguishable.
+      if (typeof forcedXShift === 'number' && Number.isFinite(forcedXShift) && forcedXShift !== 0) {
+        try {
+          (staveNote as any).setXShift?.(forcedXShift);
+        } catch {
+          // no-op if current VexFlow build lacks setXShift
+        }
+      }
       if (notationSystem === 'gregorian-chant') {
         // Chant uses stemless puncta instead of modern oval heads with stems/flags.
         staveNote.setStemStyle({ strokeStyle: 'transparent', fillStyle: 'transparent' });
@@ -1683,6 +1724,13 @@ export class VexFlowRenderer {
     }
   }
 
+  private getVoiceXShift(voiceIndex: number): number {
+    if (voiceIndex === 0) return 0;
+    if (voiceIndex === 1) return -6;
+    if (voiceIndex === 2) return 6;
+    return -10;
+  }
+
   private createRestNote(rest: Rest, clef: 'treble' | 'bass' | 'alto' | 'tenor'): any {
     const { baseDuration, isDotted } = this.getDurationInfo(rest.duration);
     const duration = durationToVexFlow(baseDuration);
@@ -1693,6 +1741,10 @@ export class VexFlowRenderer {
       // Add augmentation dot if the duration is dotted
       if (isDotted) {
         restNote.addModifier(new Dot(), 0);
+      }
+      if (rest.hidden) {
+        // Keep rhythmic spacing/alignment but hide scan-generated padding rests.
+        restNote.setStyle({ fillStyle: 'transparent', strokeStyle: 'transparent' } as any);
       }
       
       return restNote;
@@ -1926,12 +1978,16 @@ export class VexFlowRenderer {
           const voice = measure.voices[0];
           const tickables: any[] = [];
           const tickableDataIndices: number[] = [];
+          const hasPolyphonicVoices =
+            (measure.voices ?? []).filter((v) => v.notes.some((el) => 'pitch' in el)).length > 1;
+          const primaryStemDir = hasPolyphonicVoices ? Stem.UP : undefined;
+          const primaryXShift = hasPolyphonicVoices ? this.getVoiceXShift(0) : 0;
 
           if (voice) {
             voice.notes.forEach((element, dataIndex) => {
               if ('pitch' in element) {
                 const sn = this.createStaveNote(
-                  element as Note, staff.clef, baseKeySignature, undefined, undefined, composition.notationSystem ?? 'standard');
+                  element as Note, staff.clef, baseKeySignature, undefined, undefined, composition.notationSystem ?? 'standard', primaryStemDir, primaryXShift);
                 if (sn) { tickableDataIndices.push(dataIndex); tickables.push(sn); }
               } else {
                 const rn = this.createRestNote(element as Rest, staff.clef);
@@ -1960,7 +2016,7 @@ export class VexFlowRenderer {
                 // Pre-scan: one stem direction for ALL beam groups in this measure
                 // so adjacent beat-groups never flip up/down independently.
                 let printMeasureMaxDist = -1;
-                let printMeasureStemDir = Stem.DOWN;
+                let printMeasureStemDir = primaryStemDir ?? Stem.DOWN;
                 for (const el of voice.notes) {
                   if (!('pitch' in el)) continue;
                   const rawDuration = (el as Note).duration;
@@ -1969,7 +2025,7 @@ export class VexFlowRenderer {
                     .replace(/^(triplet|quintuplet|sextuplet|septuplet)-/, '');
                   if (base !== 'eighth' && base !== 'sixteenth' && base !== 'thirty-second') continue;
                   const dist = Math.abs(pitchToMidi((el as Note).pitch) - printMiddleLineMidi);
-                  if (dist > printMeasureMaxDist) {
+                  if (!primaryStemDir && dist > printMeasureMaxDist) {
                     printMeasureMaxDist = dist;
                     printMeasureStemDir = pitchToMidi((el as Note).pitch) < printMiddleLineMidi ? Stem.UP : Stem.DOWN;
                   }
@@ -2022,12 +2078,9 @@ export class VexFlowRenderer {
                 flushBeamGroup(); // flush any trailing group
               }
 
-              const vfVoice = new Voice({ num_beats: voiceBeats, beat_value: beatTypeValue });
-              vfVoice.setStrict(false);
-              vfVoice.addTickables(tickables);
               const extraVoiceData = (measure.voices ?? [])
                 .slice(1)
-                .map((v) => {
+                .map((v, extraIdx) => {
                   const extraTickables: any[] = [];
                   v.notes.forEach((element) => {
                     if ('pitch' in element) {
@@ -2037,7 +2090,9 @@ export class VexFlowRenderer {
                         baseKeySignature,
                         undefined,
                         undefined,
-                        composition.notationSystem ?? 'standard'
+                        composition.notationSystem ?? 'standard',
+                        (extraIdx + 1) % 2 === 0 ? Stem.UP : Stem.DOWN,
+                        hasPolyphonicVoices ? this.getVoiceXShift(extraIdx + 1) : 0
                       );
                       if (sn) extraTickables.push(sn);
                     } else {
@@ -2054,10 +2109,18 @@ export class VexFlowRenderer {
                 vv.addTickables(extraTickables);
                 return vv;
               });
-              new Formatter()
-                .joinVoices([vfVoice, ...extraVfVoices])
-                .format([vfVoice, ...extraVfVoices], measWidth - 30);
-              vfVoice.draw(this.context, measureStave);
+              const vfVoice = tickables.length > 0 ? new Voice({ num_beats: voiceBeats, beat_value: beatTypeValue }) : null;
+              if (vfVoice) {
+                vfVoice.setStrict(false);
+                vfVoice.addTickables(tickables);
+              }
+              const voicesToDraw = vfVoice ? [vfVoice, ...extraVfVoices] : [...extraVfVoices];
+              if (voicesToDraw.length > 0) {
+                const formatter = new Formatter();
+                if (voicesToDraw.length > 1) formatter.joinVoices(voicesToDraw);
+                formatter.format(voicesToDraw, measWidth - 30);
+              }
+              if (vfVoice) vfVoice.draw(this.context, measureStave);
               extraVfVoices.forEach((ev) => ev.draw(this.context, measureStave));
 
               // Draw beams after the voice so they render on top

@@ -9,6 +9,7 @@ import { ScoreInfoPanel } from '../components/toolbar/ScoreInfoPanel';
 import { PlaybackControls } from '../components/playback/PlaybackControls';
 import { NoteToolbar } from '../components/toolbar/NoteToolbar';
 import { RestToolbar } from '../components/toolbar/RestToolbar';
+import { VoiceLaneToolbar } from '../components/toolbar/VoiceLaneToolbar';
 import { ClefSelector } from '../components/toolbar/ClefSelector';
 import { InstrumentSelector } from '../components/toolbar/InstrumentSelector';
 import { MeasureControls } from '../components/toolbar/MeasureControls';
@@ -896,6 +897,8 @@ export const EditorPage = () => {
             {!collapsedRows.has('notes') && (
               <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
             {showToolbarTips && <ToolbarTip text={notesTipText} />}
+            <VoiceLaneToolbar />
+                <div className="hidden 2xl:block"><Sep /></div>
             <NoteToolbar />
                 {!isGregorianChant && <div className="hidden 2xl:block"><Sep /></div>}
             {!isGregorianChant && <RestToolbar />}
@@ -1030,6 +1033,7 @@ export const EditorPage = () => {
     notes: isReadOnly ? readOnlyNotice : (
       <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
         {showToolbarTips && <ToolbarTip text={notesTipText} />}
+        <VoiceLaneToolbar />
         <NoteToolbar />
         {!isGregorianChant && <RestToolbar />}
       </div>

@@ -105,6 +105,12 @@ interface ScoreState {
   setSelectedMeasureIndex: (index: number | null) => void;
   selectedVoiceIndex: number;
   setSelectedVoiceIndex: (index: number) => void;
+  voiceVisibility: boolean[];
+  setVoiceVisibility: (voiceIndex: number, visible: boolean) => void;
+  toggleVoiceVisibility: (voiceIndex: number) => void;
+  setAllVoicesVisible: () => void;
+  voiceDurations: NoteDuration[];
+  voiceRestDurations: Array<NoteDuration | null>;
   selectedDuration: NoteDuration;
   setSelectedDuration: (duration: NoteDuration) => void;
   selectedRestDuration: NoteDuration | null;
@@ -131,11 +137,7 @@ const defaultComposition: Composition = {
       measures: [
         {
           number: 1,
-          voices: [
-            {
-              notes: [],
-            },
-          ],
+          voices: [{ notes: [] }, { notes: [] }, { notes: [] }, { notes: [] }],
         },
       ],
     },
@@ -150,6 +152,36 @@ let historyIndex = -1;
 
 const deepCloneComposition = (composition: Composition): Composition =>
   JSON.parse(JSON.stringify(composition)) as Composition;
+
+const MAX_VOICE_LANES = 4;
+const DEFAULT_VOICE_VISIBILITY = [true, true, true, true];
+const DEFAULT_VOICE_DURATIONS: NoteDuration[] = ['quarter', 'quarter', 'quarter', 'quarter'];
+const DEFAULT_VOICE_REST_DURATIONS: Array<NoteDuration | null> = [null, null, null, null];
+
+const clampVoiceIndex = (index: number): number => Math.max(0, Math.min(MAX_VOICE_LANES - 1, index));
+
+const normalizeMeasureVoices = (voices: Voice[] | undefined): Voice[] => {
+  const source = voices ?? [];
+  const out: Voice[] = [];
+  for (let i = 0; i < MAX_VOICE_LANES; i++) {
+    const voice = source[i];
+    out.push({
+      notes: [...(voice?.notes ?? [])],
+    });
+  }
+  return out;
+};
+
+const normalizeCompositionVoices = (composition: Composition): Composition => ({
+  ...composition,
+  staves: composition.staves.map((staff) => ({
+    ...staff,
+    measures: staff.measures.map((measure) => ({
+      ...measure,
+      voices: normalizeMeasureVoices(measure.voices),
+    })),
+  })),
+});
 
 const getRevisionLabel = (trigger: RevisionTrigger): string => {
   switch (trigger) {
@@ -225,6 +257,9 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
   selectedStaffIndex: 0,
   selectedMeasureIndex: 0,
   selectedVoiceIndex: 0,
+  voiceVisibility: [...DEFAULT_VOICE_VISIBILITY],
+  voiceDurations: [...DEFAULT_VOICE_DURATIONS],
+  voiceRestDurations: [...DEFAULT_VOICE_REST_DURATIONS],
   selectedDuration: 'quarter',
   selectedRestDuration: null,
   copiedMeasures: null,
@@ -243,8 +278,13 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         // Don't update updatedAt when just loading - it will be updated when composition changes
       };
     }
+    const normalized = normalizeCompositionVoices(composition);
+    const nextVoiceIndex = clampVoiceIndex(get().selectedVoiceIndex);
     set({ 
-      composition,
+      composition: normalized,
+      selectedVoiceIndex: nextVoiceIndex,
+      selectedDuration: get().voiceDurations[nextVoiceIndex] ?? 'quarter',
+      selectedRestDuration: get().voiceRestDurations[nextVoiceIndex] ?? null,
       canUndo: historyIndex >= 0,
       canRedo: historyIndex < history.length - 1,
     });
@@ -259,6 +299,9 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
       selectedStaffIndex: 0,
       selectedMeasureIndex: 0,
       selectedVoiceIndex: 0,
+      voiceVisibility: [...DEFAULT_VOICE_VISIBILITY],
+      voiceDurations: [...DEFAULT_VOICE_DURATIONS],
+      voiceRestDurations: [...DEFAULT_VOICE_REST_DURATIONS],
       selectedDuration: 'quarter',
       canUndo: false,
       canRedo: false,
@@ -318,7 +361,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
       historyIndex--;
       const prevState = history[historyIndex];
       set({
-        composition: prevState ? JSON.parse(JSON.stringify(prevState)) : defaultComposition,
+        composition: prevState ? normalizeCompositionVoices(JSON.parse(JSON.stringify(prevState))) : normalizeCompositionVoices(defaultComposition),
         canUndo: historyIndex >= 0,
         canRedo: historyIndex < history.length - 1,
       });
@@ -330,7 +373,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
       historyIndex++;
       const nextState = history[historyIndex];
       set({
-        composition: nextState ? JSON.parse(JSON.stringify(nextState)) : defaultComposition,
+        composition: nextState ? normalizeCompositionVoices(JSON.parse(JSON.stringify(nextState))) : normalizeCompositionVoices(defaultComposition),
         canUndo: true,
         canRedo: historyIndex < history.length - 1,
       });
@@ -346,8 +389,9 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     const staff = { ...newStaves[staffIndex] };
     const measures = [...staff.measures];
     const measure = { ...measures[measureIndex] };
-    const voices = [...measure.voices];
-    const voice = { ...voices[voiceIndex] };
+    const voices = normalizeMeasureVoices(measure.voices);
+    const laneIndex = clampVoiceIndex(voiceIndex);
+    const voice = { ...voices[laneIndex] };
     
     // Insert at specific index, or append to end
     if (insertIndex !== undefined && insertIndex >= 0 && insertIndex <= voice.notes.length) {
@@ -357,7 +401,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
       voice.notes = [...voice.notes, element];
     }
     
-    voices[voiceIndex] = voice;
+    voices[laneIndex] = voice;
     measure.voices = voices;
     measures[measureIndex] = measure;
     staff.measures = measures;
@@ -381,7 +425,11 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     const newStaves = JSON.parse(JSON.stringify(composition.staves));
 
     // Pull the note out of its source position
-    const srcVoice = newStaves[fromStaff].measures[fromMeasure].voices[fromVoice];
+    newStaves[fromStaff].measures[fromMeasure].voices = normalizeMeasureVoices(newStaves[fromStaff].measures[fromMeasure].voices);
+    newStaves[toStaff].measures[toMeasure].voices = normalizeMeasureVoices(newStaves[toStaff].measures[toMeasure].voices);
+    const safeFromVoice = clampVoiceIndex(fromVoice);
+    const safeToVoice = clampVoiceIndex(toVoice);
+    const srcVoice = newStaves[fromStaff].measures[fromMeasure].voices[safeFromVoice];
     const [movedNote] = srcVoice.notes.splice(fromIndex, 1);
     if (!movedNote) return;
 
@@ -391,10 +439,10 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     }
 
     // Insert at destination
-    const dstVoice = newStaves[toStaff].measures[toMeasure].voices[toVoice];
+    const dstVoice = newStaves[toStaff].measures[toMeasure].voices[safeToVoice];
     // Adjust toIndex if src and dst are the same voice (element already removed)
     const adjustedIndex =
-      fromStaff === toStaff && fromMeasure === toMeasure && fromVoice === toVoice && toIndex > fromIndex
+      fromStaff === toStaff && fromMeasure === toMeasure && safeFromVoice === safeToVoice && toIndex > fromIndex
         ? toIndex - 1
         : toIndex;
     const clampedIndex = Math.max(0, Math.min(adjustedIndex, dstVoice.notes.length));
@@ -416,10 +464,11 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     const staff = { ...newStaves[staffIndex] };
     const measures = [...staff.measures];
     const measure = { ...measures[measureIndex] };
-    const voices = [...measure.voices];
-    const voice = { ...voices[voiceIndex] };
+    const voices = normalizeMeasureVoices(measure.voices);
+    const laneIndex = clampVoiceIndex(voiceIndex);
+    const voice = { ...voices[laneIndex] };
     voice.notes = voice.notes.filter((_, i) => i !== noteIndex);
-    voices[voiceIndex] = voice;
+    voices[laneIndex] = voice;
     measure.voices = voices;
     measures[measureIndex] = measure;
     staff.measures = measures;
@@ -444,12 +493,13 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     const staff = { ...newStaves[staffIndex] };
     const measures = [...staff.measures];
     const measure = { ...measures[measureIndex] };
-    const voices = [...measure.voices];
-    const voice = { ...voices[voiceIndex] };
+    const voices = normalizeMeasureVoices(measure.voices);
+    const laneIndex = clampVoiceIndex(voiceIndex);
+    const voice = { ...voices[laneIndex] };
     voice.notes = voice.notes.map((note, i) =>
       i === noteIndex ? { ...note, ...updates } : note
     );
-    voices[voiceIndex] = voice;
+    voices[laneIndex] = voice;
     measure.voices = voices;
     measures[measureIndex] = measure;
     staff.measures = measures;
@@ -610,7 +660,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     // Renumber all measures to ensure continuity
     const newMeasure: Measure = {
       number: staff.measures.length + 1,
-      voices: [{ notes: [] }],
+      voices: normalizeMeasureVoices([]),
     };
     
     // Update measure numbers for all measures
@@ -642,7 +692,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
 
     const newMeasure: Measure = {
       number: insertIndex + 1,
-      voices: [{ notes: [] }],
+      voices: normalizeMeasureVoices([]),
     };
 
     measures.splice(insertIndex, 0, newMeasure);
@@ -706,7 +756,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
 
       const copiedMeasure: Measure = {
         number: measure.number,
-        voices: measure.voices.map(voice => ({
+        voices: normalizeMeasureVoices(measure.voices).map(voice => ({
           notes: voice.notes.map(note => {
             // Deep copy each note/rest
             if ('pitch' in note) {
@@ -744,7 +794,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     // Deep copy all measures to paste
     const pastedMeasures: Measure[] = copiedMeasures.map((copiedMeasure, idx) => ({
       number: targetMeasureIndex + idx + 1, // Will be renumbered
-      voices: copiedMeasure.voices.map(voice => ({
+      voices: normalizeMeasureVoices(copiedMeasure.voices).map(voice => ({
         notes: voice.notes.map(note => {
           if ('pitch' in note) {
             return { ...note };
@@ -788,7 +838,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
             // If the target staff doesn't have a measure at this index, we need to add one
             const newMeasure: Measure = {
               number: finalMeasureIndex + 1,
-              voices: [{ notes: [] }],
+              voices: normalizeMeasureVoices([]),
             };
             if (pastedMeasure.timeSignature) newMeasure.timeSignature = pastedMeasure.timeSignature;
             if (pastedMeasure.keySignature) newMeasure.keySignature = pastedMeasure.keySignature;
@@ -798,7 +848,7 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
             while (staff.measures.length <= finalMeasureIndex) {
               staff.measures.push({
                 number: staff.measures.length + 1,
-                voices: [{ notes: [] }],
+                voices: normalizeMeasureVoices([]),
               });
             }
             staff.measures[finalMeasureIndex] = newMeasure;
@@ -824,7 +874,16 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     set({
       composition: {
         ...composition,
-        staves: [...composition.staves, staff],
+        staves: [
+          ...composition.staves,
+          {
+            ...staff,
+            measures: staff.measures.map((measure) => ({
+              ...measure,
+              voices: normalizeMeasureVoices(measure.voices),
+            })),
+          },
+        ],
       },
       canUndo: historyIndex >= 0,
       canRedo: false,
@@ -837,7 +896,16 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     saveToHistory(composition);
     set({
       composition: updateCompositionWithDates(composition, {
-        staves: [...composition.staves, ...staves],
+        staves: [
+          ...composition.staves,
+          ...staves.map((staff) => ({
+            ...staff,
+            measures: staff.measures.map((measure) => ({
+              ...measure,
+              voices: normalizeMeasureVoices(measure.voices),
+            })),
+          })),
+        ],
       }),
       canUndo: historyIndex >= 0,
       canRedo: false,
@@ -853,7 +921,16 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     );
     set({
       composition: updateCompositionWithDates(composition, {
-        staves: [...preserved, ...staves],
+        staves: [
+          ...preserved,
+          ...staves.map((staff) => ({
+            ...staff,
+            measures: staff.measures.map((measure) => ({
+              ...measure,
+              voices: normalizeMeasureVoices(measure.voices),
+            })),
+          })),
+        ],
       }),
       canUndo: historyIndex >= 0,
       canRedo: false,
@@ -1222,9 +1299,46 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
   setSelectedStaffIndex: (index) => set({ selectedStaffIndex: index }),
   setSelectedMeasureIndex: (index) => set({ selectedMeasureIndex: index }),
   setMeasureSelectionStart: (index) => set({ measureSelectionStart: index }),
-  setSelectedVoiceIndex: (index) => set({ selectedVoiceIndex: index }),
-  setSelectedDuration: (duration) => set({ selectedDuration: duration }),
-  setSelectedRestDuration: (duration) => set({ selectedRestDuration: duration }),
+  setSelectedVoiceIndex: (index) => {
+    const laneIndex = clampVoiceIndex(index);
+    const state = get();
+    set({
+      selectedVoiceIndex: laneIndex,
+      selectedDuration: state.voiceDurations[laneIndex] ?? 'quarter',
+      selectedRestDuration: state.voiceRestDurations[laneIndex] ?? null,
+      voiceVisibility: state.voiceVisibility.map((visible, i) => (i === laneIndex ? true : visible)),
+    });
+  },
+  setVoiceVisibility: (voiceIndex, visible) => {
+    const laneIndex = clampVoiceIndex(voiceIndex);
+    const state = get();
+    const nextVisibility = state.voiceVisibility.map((flag, idx) => (idx === laneIndex ? visible : flag));
+    const hasAnyVisible = nextVisibility.some(Boolean);
+    const visibility = hasAnyVisible ? nextVisibility : state.voiceVisibility;
+    set({ voiceVisibility: visibility });
+  },
+  toggleVoiceVisibility: (voiceIndex) => {
+    const laneIndex = clampVoiceIndex(voiceIndex);
+    const state = get();
+    const nextVisibility = state.voiceVisibility.map((flag, idx) => (idx === laneIndex ? !flag : flag));
+    if (!nextVisibility.some(Boolean)) return;
+    set({ voiceVisibility: nextVisibility });
+  },
+  setAllVoicesVisible: () => set({ voiceVisibility: [...DEFAULT_VOICE_VISIBILITY] }),
+  setSelectedDuration: (duration) => {
+    const state = get();
+    const laneIndex = clampVoiceIndex(state.selectedVoiceIndex);
+    const voiceDurations = [...state.voiceDurations];
+    voiceDurations[laneIndex] = duration;
+    set({ selectedDuration: duration, voiceDurations });
+  },
+  setSelectedRestDuration: (duration) => {
+    const state = get();
+    const laneIndex = clampVoiceIndex(state.selectedVoiceIndex);
+    const voiceRestDurations = [...state.voiceRestDurations];
+    voiceRestDurations[laneIndex] = duration;
+    set({ selectedRestDuration: duration, voiceRestDurations });
+  },
   selectedNote: null,
   setSelectedNote: (note) => set({ selectedNote: note }),
   deleteSelectedNote: () => {

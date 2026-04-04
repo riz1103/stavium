@@ -21,7 +21,7 @@ export const StaffControls = () => {
     const newStaff: Staff = {
       clef: 'treble',
       instrument: 'piano',
-      measures: [{ number: 1, voices: [{ notes: [] }] }],
+      measures: [{ number: 1, voices: [{ notes: [] }, { notes: [] }, { notes: [] }, { notes: [] }] }],
     };
     addStaff(newStaff);
     setSelectedStaff(composition.staves.length);

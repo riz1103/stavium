@@ -11,6 +11,7 @@ export const StaffVolumeControls = () => {
   const setStaffMuted  = usePlaybackStore((state) => state.setStaffMuted);
   const setStaffSoloed = usePlaybackStore((state) => state.setStaffSoloed);
   const clearStaffSoloed = usePlaybackStore((state) => state.clearStaffSoloed);
+  const clearVoiceSoloed = usePlaybackStore((state) => state.clearVoiceSoloed);
   const hasAnySoloedStaff = usePlaybackStore((state) => state.hasAnySoloedStaff);
 
   if (!composition) return null;
@@ -21,9 +22,12 @@ export const StaffVolumeControls = () => {
       <span className="sv-toolbar-label">Volume</span>
       {anySoloed && (
         <button
-          onClick={clearStaffSoloed}
+          onClick={() => {
+            clearStaffSoloed();
+            clearVoiceSoloed();
+          }}
           className="px-2 py-1 rounded-md text-xs border border-sv-cyan/40 text-sv-cyan bg-sv-cyan/10 hover:bg-sv-cyan/20 transition-colors"
-          title="Clear all soloed staves"
+          title="Clear all soloed staves and voice lanes"
         >
           Clear Solo
         </button>

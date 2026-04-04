@@ -12,7 +12,7 @@ import {
   JobStatus,
 } from '../services/importsService';
 import { saveComposition } from '../services/compositionService';
-import { importCompositionFromFile } from '../utils/importUtils';
+import { importCompositionFromFileWithOptions, type ScanVoiceMode } from '../utils/importUtils';
 import { Composition } from '../types/music';
 import { storage } from '../services/firebase';
 import { ref, getBytes } from 'firebase/storage';
@@ -108,13 +108,14 @@ function StatusBadge({ status }: { status: JobStatus }) {
 
 async function musicXmlToComposition(
   xmlContent: string,
-  filename: string
+  filename: string,
+  scanVoiceMode: ScanVoiceMode
 ): Promise<Composition> {
   const blob = new Blob([xmlContent], { type: 'application/xml' });
   const file = new File([blob], filename.replace(/\.(pdf|jpg|jpeg|png|tiff|tif)$/i, '.musicxml') || 'import.musicxml', {
     type: 'application/xml',
   });
-  return importCompositionFromFile(file);
+  return importCompositionFromFileWithOptions(file, undefined, { scanVoiceMode });
 }
 
 // ─── Fetch result content ────────────────────────────────────────────────────
@@ -221,6 +222,7 @@ export const ImportsPage = () => {
   const [selectedPDF, setSelectedPDF] = useState<File | null>(null);
   const [pageRange, setPageRange] = useState<string>('');
   const [preprocess, setPreprocess] = useState(false);
+  const [scanVoiceMode, setScanVoiceMode] = useState<ScanVoiceMode>('conservative');
   const [currentTime, setCurrentTime] = useState(new Date()); // For real-time progress updates
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   const avatarDropdownRef = useRef<HTMLDivElement>(null);
@@ -374,7 +376,7 @@ export const ImportsPage = () => {
     try {
       setActionLoading(job.id);
       const xmlContent = await fetchJobResult(job.id);
-      const composition = await musicXmlToComposition(xmlContent, getFilename(job));
+      const composition = await musicXmlToComposition(xmlContent, getFilename(job), scanVoiceMode);
       setComposition({ ...composition, userId: user?.uid });
       navigate('/editor', { state: { imported: true } });
     } catch (err) {
@@ -391,7 +393,7 @@ export const ImportsPage = () => {
     try {
       setActionLoading(job.id + '_save');
       const xmlContent = await fetchJobResult(job.id);
-      const composition = await musicXmlToComposition(xmlContent, getFilename(job));
+      const composition = await musicXmlToComposition(xmlContent, getFilename(job), scanVoiceMode);
       const savedId = await saveComposition(
         { ...composition, userId: user.uid, createdAt: new Date() },
         user.uid,
@@ -822,6 +824,26 @@ export const ImportsPage = () => {
                 Improve OCR on scans by enhancing contrast and cleaning the image before conversion. Turn on for low-quality or noisy scans.
               </p>
             </label>
+          </div>
+
+          {/* ── Scan voice split mode ───────────────────────────────────────────── */}
+          <div className="mb-6 p-3 rounded-lg bg-sv-card/50 border border-sv-border">
+            <label htmlFor="scan-voice-mode" className="block text-sm font-medium text-sv-text mb-1.5">
+              Scan voice split mode
+            </label>
+            <select
+              id="scan-voice-mode"
+              value={scanVoiceMode}
+              onChange={(e) => setScanVoiceMode(e.target.value as ScanVoiceMode)}
+              className="w-full sm:w-80 px-3 py-2 rounded-lg bg-sv-elevated border border-sv-border text-sv-text text-sm
+                         focus:outline-none focus:ring-2 focus:ring-sv-cyan/50 focus:border-sv-cyan/50 transition-all"
+            >
+              <option value="conservative">Conservative (recommended)</option>
+              <option value="aggressive">Aggressive multi-voice split</option>
+            </select>
+            <p className="text-xs text-sv-text-muted mt-1.5">
+              Conservative keeps scans cleaner and avoids noisy voice splitting. Aggressive keeps more detected parallel voices.
+            </p>
           </div>
 
           {/* ── PDF Page Range Input (shown when PDF is selected) ───────────────── */}

@@ -18,17 +18,30 @@ To scan or import from PDF or scanned images:
 2. Click the "OCR Imports" button (cloud icon) in the top-right, OR use the top nav and click "Imports"
 3. On the Imports page: drop PDF or image files (JPEG, PNG, TIFF) in the upload zone, or click to browse
 4. For PDFs: optionally enter a page range (e.g. 1-3), then click "Upload PDF"
-5. Jobs run in the background — check the Import Jobs list for status. When complete, click "Open in Editor"
+5. Set "Scan voice split mode":
+   - Conservative (recommended) = cleaner scans, less noisy splitting
+   - Aggressive multi-voice split = keep more detected parallel voices
+6. Jobs run in the background — check the Import Jobs list for status. When complete, click "Open in Editor"
 
 ## Importing MIDI or MusicXML (direct)
 1. On the Dashboard, click the "MIDI / XML" button (down arrow icon)
 2. Select a .mid, .midi, .musicxml, .xml, or .mxl file
 3. The composition opens directly in the editor
+4. Imported polyphony maps into editable V1-V4 lanes per staff
+5. For scanned PDF/image imports, the selected scan voice split mode controls lane splitting behavior
+6. For scanned imports, secondary-lane filler rests used only for timing alignment are hidden for cleaner notation
 
 ## Editor layout
 - Top header: Back button, Score Info (ℹ️), Help (?), title, Edit/View toggle, Undo/Redo, Save
 - Toolbar sections (collapsible): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected)
 - Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars)
+
+## Multi-voice lanes (V1-V4)
+- In Notes, use Voices to pick V1, V2, V3, or V4 for editing.
+- Each lane has its own visibility toggle (show/hide).
+- Each lane has playback controls: M (mute) and S (solo).
+- Each lane remembers its own rhythm context (selected note duration and rest mode).
+- Use "Show all" in Voices to restore all lanes quickly.
 
 ## First score onboarding
 - In edit mode for new users, the editor can show a "First score checklist" near the top of the toolbar area.
