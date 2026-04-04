@@ -30,6 +30,17 @@ import { MeasurePropertiesPanel } from '../components/toolbar/MeasurePropertiesP
 import { StaffVolumeControls } from '../components/toolbar/StaffVolumeControls';
 import { AIArrangementPanel } from '../components/toolbar/AIArrangementPanel';
 import { ScoreReviewPanel } from '../components/review/ScoreReviewPanel';
+import { Measure } from '../types/music';
+import {
+  CollaborationPresence,
+  CompositionMeasurePatch,
+  clearCompositionMeasurePatches,
+  clearCompositionPresence,
+  publishCompositionPresence,
+  publishMeasurePatch,
+  subscribeToCompositionPresence,
+  subscribeToMeasurePatches,
+} from '../services/collaborationService';
 import {
   FirstScoreOnboardingState,
   getFirstScoreOnboardingState,
@@ -57,6 +68,9 @@ const defaultFirstScoreProgress: FirstScoreProgress = {
   savedScore: false,
 };
 
+const measureKey = (staffIndex: number, measureIndex: number) => `${staffIndex}:${measureIndex}`;
+const hashMeasure = (measure: Measure | undefined): string => JSON.stringify(measure ?? null);
+
 export const EditorPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -69,8 +83,10 @@ export const EditorPage = () => {
   const clearRevisionHistory = useScoreStore((state) => state.clearRevisionHistory);
   const setRevisionHistory = useScoreStore((state) => state.setRevisionHistory);
   const selectedNote = useScoreStore((state) => state.selectedNote);
+  const setSelectedNote = useScoreStore((state) => state.setSelectedNote);
   const selectedStaffIndex = useScoreStore((state) => state.selectedStaffIndex);
   const selectedMeasureIndex = useScoreStore((state) => state.selectedMeasureIndex);
+  const selectedVoiceIndex = useScoreStore((state) => state.selectedVoiceIndex);
   const [title, setTitle] = useState('Untitled Composition');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -180,6 +196,35 @@ export const EditorPage = () => {
   const [toolbarTipsHidden, setToolbarTipsHidden] = useState(false);
   const [showFirstScoreCelebration, setShowFirstScoreCelebration] = useState(false);
   const [firstScoreProgress, setFirstScoreProgress] = useState<FirstScoreProgress>(defaultFirstScoreProgress);
+  const [discardingLiveChanges, setDiscardingLiveChanges] = useState(false);
+  const [discardNotice, setDiscardNotice] = useState<string | null>(null);
+  const [collaborators, setCollaborators] = useState<CollaborationPresence[]>([]);
+  const lastMeasureHashesRef = useRef<Map<string, string>>(new Map());
+  const measureUpdateTimesRef = useRef<Map<string, number>>(new Map());
+  const pendingPublishTimersRef = useRef<Map<string, number>>(new Map());
+  const seenPatchIdsRef = useRef<Set<string>>(new Set());
+  const lastPatchCountRef = useRef(0);
+  const suppressPublishMeasureKeysRef = useRef<Set<string>>(new Set());
+  const cursorActivityRef = useRef<{
+    staffIndex: number | null;
+    measureIndex: number | null;
+    voiceIndex: number | null;
+    noteIndex: number | null;
+    svgX?: number;
+    svgY?: number;
+  }>({
+    staffIndex: null,
+    measureIndex: null,
+    voiceIndex: null,
+    noteIndex: null,
+  });
+  const cursorPublishTimerRef = useRef<number | null>(null);
+  const skipNextPatchPublishRef = useRef(false);
+  const suppressNextDiscardToastRef = useRef(false);
+  const remoteCollaborators = useMemo(
+    () => collaborators.filter((c) => c.uid !== user?.uid),
+    [collaborators, user?.uid]
+  );
 
   const hasAnyScoreElements = useMemo(() => {
     if (!composition) return false;
@@ -289,6 +334,239 @@ export const EditorPage = () => {
     firstScoreProgress.savedScore,
   ].filter(Boolean).length;
   const totalChecklistItems = 3;
+
+  const syncMeasureHashesFromComposition = (target: typeof composition) => {
+    const nextHashes = new Map<string, string>();
+    if (!target) {
+      lastMeasureHashesRef.current = nextHashes;
+      return;
+    }
+    target.staves.forEach((staff, staffIndex) => {
+      staff.measures.forEach((measure, measureIndex) => {
+        nextHashes.set(measureKey(staffIndex, measureIndex), hashMeasure(measure));
+      });
+    });
+    lastMeasureHashesRef.current = nextHashes;
+  };
+
+  const applyRemoteMeasurePatch = (patch: CompositionMeasurePatch) => {
+    const current = useScoreStore.getState().composition;
+    if (!current) return;
+    const targetStaff = current.staves[patch.staffIndex];
+    const targetMeasure = targetStaff?.measures?.[patch.measureIndex];
+    if (!targetMeasure) return;
+
+    const key = measureKey(patch.staffIndex, patch.measureIndex);
+    const currentHash = hashMeasure(targetMeasure);
+    if (currentHash === patch.nextHash) return;
+
+    const localUpdatedAt = measureUpdateTimesRef.current.get(key) ?? 0;
+    const remoteUpdatedAt = Math.max(patch.createdAtMs, patch.clientTimestamp || 0);
+    const shouldApply =
+      currentHash === patch.baseHash ||
+      remoteUpdatedAt >= localUpdatedAt;
+
+    if (!shouldApply) return;
+
+    const nextComposition = {
+      ...current,
+      staves: current.staves.map((staff, staffIndex) => {
+        if (staffIndex !== patch.staffIndex) return staff;
+        return {
+          ...staff,
+          measures: staff.measures.map((measure, measureIndex) =>
+            measureIndex === patch.measureIndex ? patch.measure : measure
+          ),
+        };
+      }),
+    };
+    suppressPublishMeasureKeysRef.current.add(key);
+    measureUpdateTimesRef.current.set(key, remoteUpdatedAt);
+    setComposition(nextComposition);
+  };
+
+  const publishPresence = async () => {
+    if (!composition?.id || !user?.uid) return;
+    try {
+      await publishCompositionPresence({
+        compositionId: composition.id,
+        uid: user.uid,
+        displayName: user.displayName,
+        email: user.email,
+        isEditing: !isReadOnly,
+        selection: {
+          staffIndex: selectedStaffIndex,
+          measureIndex: selectedMeasureIndex,
+          voiceIndex: selectedVoiceIndex,
+          noteIndex: selectedNote?.noteIndex ?? null,
+        },
+        cursor: cursorActivityRef.current,
+      });
+    } catch (error) {
+      console.warn('Presence sync failed:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (!discardNotice) return;
+    const timer = window.setTimeout(() => setDiscardNotice(null), 4500);
+    return () => window.clearTimeout(timer);
+  }, [discardNotice]);
+
+  useEffect(() => {
+    return () => {
+      if (cursorPublishTimerRef.current) {
+        window.clearTimeout(cursorPublishTimerRef.current);
+        cursorPublishTimerRef.current = null;
+      }
+      pendingPublishTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      pendingPublishTimersRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    seenPatchIdsRef.current.clear();
+    lastPatchCountRef.current = 0;
+    syncMeasureHashesFromComposition(composition);
+    if (!composition?.id || !user?.uid) {
+      setCollaborators([]);
+      return;
+    }
+
+    const unsubPresence = subscribeToCompositionPresence(
+      composition.id,
+      (presence) => setCollaborators(presence),
+      (error) => console.warn('Presence subscription error:', error)
+    );
+
+    const unsubPatches = subscribeToMeasurePatches(
+      composition.id,
+      (patches) => {
+        const previousPatchCount = lastPatchCountRef.current;
+        lastPatchCountRef.current = patches.length;
+        if (previousPatchCount > 0 && patches.length === 0) {
+          void (async () => {
+            const restored = await getComposition(composition.id!);
+            if (!restored) return;
+            const shouldShowToast = !suppressNextDiscardToastRef.current;
+            suppressNextDiscardToastRef.current = false;
+            skipNextPatchPublishRef.current = true;
+            seenPatchIdsRef.current.clear();
+            suppressPublishMeasureKeysRef.current.clear();
+            measureUpdateTimesRef.current.clear();
+            syncMeasureHashesFromComposition(restored);
+            setComposition(restored);
+            setTitle(restored.title || 'Untitled Composition');
+            setSelectedNote(null);
+            if (shouldShowToast) {
+              setDiscardNotice('Live changes were discarded by another editor; score restored to last save.');
+            }
+          })();
+          return;
+        }
+        patches.forEach((patch) => {
+          if (seenPatchIdsRef.current.has(patch.id)) return;
+          seenPatchIdsRef.current.add(patch.id);
+          if (patch.actorUid === user.uid) return;
+          applyRemoteMeasurePatch(patch);
+        });
+      },
+      (error) => console.warn('Patch subscription error:', error)
+    );
+
+    void publishPresence();
+    const heartbeat = window.setInterval(() => {
+      void publishPresence();
+    }, 15_000);
+
+    const handleUnload = () => {
+      void clearCompositionPresence(composition.id!, user.uid);
+    };
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      window.clearInterval(heartbeat);
+      window.removeEventListener('beforeunload', handleUnload);
+      void clearCompositionPresence(composition.id!, user.uid);
+      unsubPresence();
+      unsubPatches();
+    };
+  }, [composition?.id, user?.uid]);
+
+  useEffect(() => {
+    void publishPresence();
+  }, [
+    composition?.id,
+    user?.uid,
+    isReadOnly,
+    selectedStaffIndex,
+    selectedMeasureIndex,
+    selectedVoiceIndex,
+    selectedNote?.noteIndex,
+  ]);
+
+  useEffect(() => {
+    if (!composition?.id || !user?.uid || !composition) return;
+    if (skipNextPatchPublishRef.current) {
+      skipNextPatchPublishRef.current = false;
+      syncMeasureHashesFromComposition(composition);
+      return;
+    }
+    const previousHashes = lastMeasureHashesRef.current;
+    const changedMeasures: Array<{
+      key: string;
+      staffIndex: number;
+      measureIndex: number;
+      measure: Measure;
+      baseHash: string;
+      nextHash: string;
+    }> = [];
+    const nextHashes = new Map<string, string>();
+
+    composition.staves.forEach((staff, staffIndex) => {
+      staff.measures.forEach((measure, measureIndex) => {
+        const key = measureKey(staffIndex, measureIndex);
+        const nextHash = hashMeasure(measure);
+        const baseHash = previousHashes.get(key) ?? hashMeasure(undefined);
+        nextHashes.set(key, nextHash);
+        if (baseHash !== nextHash) {
+          changedMeasures.push({ key, staffIndex, measureIndex, measure, baseHash, nextHash });
+        }
+      });
+    });
+    lastMeasureHashesRef.current = nextHashes;
+
+    if (changedMeasures.length === 0) return;
+
+    const now = Date.now();
+    changedMeasures.forEach((change) => {
+      if (suppressPublishMeasureKeysRef.current.has(change.key)) {
+        suppressPublishMeasureKeysRef.current.delete(change.key);
+        return;
+      }
+      measureUpdateTimesRef.current.set(change.key, now);
+      const priorTimer = pendingPublishTimersRef.current.get(change.key);
+      if (priorTimer) window.clearTimeout(priorTimer);
+
+      const timer = window.setTimeout(() => {
+        void publishMeasurePatch({
+          compositionId: composition.id!,
+          actorUid: user.uid,
+          actorName: user.displayName,
+          staffIndex: change.staffIndex,
+          measureIndex: change.measureIndex,
+          measure: change.measure,
+          baseHash: change.baseHash,
+          nextHash: change.nextHash,
+          clientTimestamp: Date.now(),
+        }).catch((error) => {
+          console.warn('Measure patch publish failed:', error);
+        });
+        pendingPublishTimersRef.current.delete(change.key);
+      }, 180);
+      pendingPublishTimersRef.current.set(change.key, timer);
+    });
+  }, [composition, composition?.id, user?.uid, user?.displayName]);
   
   const loadComposition = async (compositionId: string) => {
     try {
@@ -296,6 +574,7 @@ export const EditorPage = () => {
       clearRevisionHistory();
       const comp = await getComposition(compositionId);
       if (comp) {
+        syncMeasureHashesFromComposition(comp);
         setComposition(comp);
         const revisionTimeline = await getCompositionRevisionTimeline(comp.id || compositionId);
         setRevisionHistory(
@@ -430,6 +709,58 @@ export const EditorPage = () => {
   };
 
   const handleBack = () => navigate('/dashboard');
+  const handleDiscardLiveChanges = async () => {
+    if (!composition?.id || !user?.uid) return;
+    const confirmed = window.confirm(
+      'Discard all unsaved live collaboration changes and restore the last saved score?'
+    );
+    if (!confirmed) return;
+
+    try {
+      setDiscardingLiveChanges(true);
+      suppressNextDiscardToastRef.current = true;
+      await clearCompositionMeasurePatches(composition.id);
+      const restored = await getComposition(composition.id);
+      if (restored) {
+        skipNextPatchPublishRef.current = true;
+        seenPatchIdsRef.current.clear();
+        suppressPublishMeasureKeysRef.current.clear();
+        measureUpdateTimesRef.current.clear();
+        syncMeasureHashesFromComposition(restored);
+        setComposition(restored);
+        setTitle(restored.title || 'Untitled Composition');
+        setSelectedNote(null);
+        alert('Unsaved live collaboration changes discarded. Restored last saved version.');
+      } else {
+        suppressNextDiscardToastRef.current = false;
+        alert('Could not reload saved score after discard.');
+      }
+    } catch (error) {
+      suppressNextDiscardToastRef.current = false;
+      console.error('Error discarding live collaboration changes:', error);
+      alert('Failed to discard live collaboration changes.');
+    } finally {
+      setDiscardingLiveChanges(false);
+    }
+  };
+  const handleCursorActivity = (payload: {
+    staffIndex: number | null;
+    measureIndex: number | null;
+    voiceIndex: number | null;
+    noteIndex: number | null;
+    svgX?: number;
+    svgY?: number;
+  }) => {
+    cursorActivityRef.current = payload;
+    if (!composition?.id || !user?.uid) return;
+    if (cursorPublishTimerRef.current) {
+      window.clearTimeout(cursorPublishTimerRef.current);
+    }
+    cursorPublishTimerRef.current = window.setTimeout(() => {
+      void publishPresence();
+      cursorPublishTimerRef.current = null;
+    }, 120);
+  };
 
   if (loading) {
     return (
@@ -843,6 +1174,30 @@ export const EditorPage = () => {
           <span>💬</span>
           <span className="hidden sm:inline">Review</span>
         </button>
+        {remoteCollaborators.length > 0 && (
+          <div className="hidden lg:flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-[11px] text-sv-text-muted">In score:</span>
+            {remoteCollaborators.slice(0, 3).map((collab) => (
+              <span
+                key={collab.id}
+                className="px-2 py-1 rounded-full text-[11px] border"
+                style={{
+                  borderColor: `${collab.color}66`,
+                  background: `${collab.color}20`,
+                  color: collab.color,
+                }}
+                title={collab.email || collab.displayName || 'Collaborator'}
+              >
+                {collab.displayName || collab.email?.split('@')[0] || 'Collaborator'}
+              </span>
+            ))}
+            {remoteCollaborators.length > 3 && (
+              <span className="text-[11px] text-sv-text-dim">
+                +{remoteCollaborators.length - 3}
+              </span>
+            )}
+          </div>
+        )}
         {showFirstScoreCelebration && (
           <div className="sv-onboarding-success flex-shrink-0 hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 text-xs font-medium">
             <span>✅</span>
@@ -963,6 +1318,24 @@ export const EditorPage = () => {
 
         {/* Save (hidden in read-only mode) */}
         <button
+          onClick={handleDiscardLiveChanges}
+          disabled={discardingLiveChanges || !composition?.id || isReadOnly}
+          className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all duration-200 ${
+            discardingLiveChanges
+              ? 'bg-sv-elevated border-sv-border text-sv-text-dim'
+              : 'bg-sv-elevated border-sv-border text-rose-400 hover:text-rose-300 hover:border-rose-500/50'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+          title={
+            !composition?.id
+              ? 'Save score first to enable discard'
+              : isReadOnly
+              ? 'Switch to Edit mode to discard unsaved changes'
+              : 'Removes unsaved live co-edit changes and restores last saved version.'
+          }
+        >
+          {discardingLiveChanges ? 'Discarding…' : 'Discard Unsaved Changes'}
+        </button>
+        <button
           onClick={handleSave}
           disabled={saving || isReadOnly}
           style={{ display: isReadOnly ? 'none' : undefined }}
@@ -1002,7 +1375,11 @@ export const EditorPage = () => {
 
       {/* ── Score Canvas ──────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden bg-sv-bg">
-        <ScoreEditor isReadOnly={isReadOnly} />
+        <ScoreEditor
+          isReadOnly={isReadOnly}
+          remotePresence={remoteCollaborators}
+          onCursorActivity={handleCursorActivity}
+        />
       </div>
 
       {/* ── Playback bar (always visible) ─────────────────────────────────── */}
@@ -1066,6 +1443,11 @@ export const EditorPage = () => {
         staves={composition?.staves ?? []}
         user={user}
       />
+      {discardNotice && (
+        <div className="fixed right-4 top-20 z-50 max-w-sm rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-sm text-amber-200 shadow-lg">
+          {discardNotice}
+        </div>
+      )}
     </div>
   );
 };

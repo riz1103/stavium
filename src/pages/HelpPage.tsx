@@ -16,6 +16,12 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'Real-time Co-editing (v1)',
+    date: 'Apr 2026',
+    details:
+      'Shared scores now show live "In score" presence badges, cursor/selection highlights for active collaborators, and conflict-safe per-measure merge behavior so simultaneous edits are less likely to clobber each other.',
+  },
+  {
     title: 'First Score Checklist + Toolbar Tips',
     date: 'Apr 2026',
     details:
@@ -54,6 +60,14 @@ const WHATS_NEW_ITEMS = [
 ];
 
 const FAQ_ITEMS = [
+  {
+    q: 'How does real-time co-editing work in the editor?',
+    a: 'On shared/public scores, Stavium now shows who is currently in the score, along with live cursor/selection highlights on the page. Edits sync per measure so simultaneous work in different measures merges safely, and same-measure conflicts fall back to latest measure patch.',
+  },
+  {
+    q: 'How do I discard unsaved live collaboration changes?',
+    a: 'Use the "Discard Unsaved Changes" button in the editor header while in Edit mode. It removes unsaved live co-edit patches for the current score and reloads the last saved version of the composition. Collaborators in the same score also see a toast that the score was restored.',
+  },
   {
     q: 'What is the "First score checklist" in the editor?',
     a: 'When you open a new score in edit mode, Stavium can show a quick onboarding checklist in the toolbar area: place your first note, play once, and save your score. After all three are complete, a short success confirmation appears with a subtle fade/slide animation.',
@@ -349,6 +363,12 @@ export const HelpPage = () => {
               <div>
                 <h2 className="text-2xl font-bold text-sv-text mb-4">Editor Features</h2>
                 <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Real-time Co-editing (v1)</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Collaborators now appear in the editor header under "In score", with live cursor/selection highlights rendered directly on the score. Real-time edits sync per measure with conflict-safe merge behavior to reduce overwrite risk during concurrent composition.
+                    </p>
+                  </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Notes & Rests</h3>
                     <p className="text-sv-text-muted text-sm">

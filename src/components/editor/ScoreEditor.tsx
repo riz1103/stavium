@@ -17,6 +17,7 @@ import {
 import { Note, Rest, MusicElement } from '../../types/music';
 import { midiToPitch, pitchToMidi, applyKeySignature, applyKeySignatureAndMeasureAccidentals } from '../../utils/noteUtils';
 import { durationToBeats } from '../../utils/durationUtils';
+import type { CollaborationPresence } from '../../services/collaborationService';
 
 // ── Diatonic step lookup tables ──────────────────────────────────────────────
 // step 0 = top staff line, each step = STEP_SIZE px downward
@@ -175,9 +176,22 @@ const DRAG_THRESHOLD  = 8;   // px of movement to enter drag mode
 
 interface ScoreEditorProps {
   isReadOnly?: boolean;
+  remotePresence?: CollaborationPresence[];
+  onCursorActivity?: (payload: {
+    staffIndex: number | null;
+    measureIndex: number | null;
+    voiceIndex: number | null;
+    noteIndex: number | null;
+    svgX?: number;
+    svgY?: number;
+  }) => void;
 }
 
-export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
+export const ScoreEditor = ({
+  isReadOnly = false,
+  remotePresence = [],
+  onCursorActivity,
+}: ScoreEditorProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef  = useRef<VexFlowRenderer | null>(null);
 
@@ -485,6 +499,19 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
     return { staffIndex, measureIndex: Math.min(measureIndex, maxMeasure) };
   };
 
+  const reportCursorActivity = (
+    payload: {
+      staffIndex: number | null;
+      measureIndex: number | null;
+      voiceIndex: number | null;
+      noteIndex: number | null;
+      svgX?: number;
+      svgY?: number;
+    }
+  ) => {
+    onCursorActivity?.(payload);
+  };
+
   // ── Helper: SVG Y + staff → diatonic pitch string ───────────────────────
   const svgYToPitch = (svgY: number, staffIndex: number, clef: 'treble' | 'bass' | 'alto' | 'tenor'): string => {
     const topLineY = getTopLineYForStaff(staffIndex);
@@ -529,9 +556,26 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
     if (!svg || !composition) return;
 
     const loc = resolveStaffMeasure(svg.x, svg.y);
-    if (!loc) { setSelectedNote(null); return; }
+    if (!loc) {
+      setSelectedNote(null);
+      reportCursorActivity({
+        staffIndex: null,
+        measureIndex: null,
+        voiceIndex: selectedVoiceIndex,
+        noteIndex: null,
+      });
+      return;
+    }
 
     const note = findNoteNear(svg.x, svg.y, loc.staffIndex, loc.measureIndex, selectedVoiceIndex);
+    reportCursorActivity({
+      staffIndex: loc.staffIndex,
+      measureIndex: loc.measureIndex,
+      voiceIndex: selectedVoiceIndex,
+      noteIndex: note?.noteIndex ?? null,
+      svgX: svg.x,
+      svgY: svg.y,
+    });
     if (!note) return; // not on a note — pointerUp will handle addNote
 
     suppressAddNote.current = true; // we're interacting with an existing note
@@ -613,6 +657,14 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
           targetPitch        = svgYToPitch(svg.y, loc.staffIndex, clef);
           targetInsertIndex  = calculateInsertionIndex(svg.x, loc.staffIndex, loc.measureIndex, ds.noteRef.voiceIndex);
           offStaff           = false;
+          reportCursorActivity({
+            staffIndex: loc.staffIndex,
+            measureIndex: loc.measureIndex,
+            voiceIndex: ds.noteRef.voiceIndex,
+            noteIndex: ds.noteRef.noteIndex,
+            svgX: svg.x,
+            svgY: svg.y,
+          });
         } else {
           // Cursor left all staves
           const si = ds.noteRef.staffIndex;
@@ -636,6 +688,14 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
           }
           const bottomLine = topLine + staffLineSpan;
           offStaff = svg.y < topLine - 40 || svg.y > bottomLine + 40;
+          reportCursorActivity({
+            staffIndex: ds.noteRef.staffIndex,
+            measureIndex: ds.noteRef.measureIndex,
+            voiceIndex: ds.noteRef.voiceIndex,
+            noteIndex: ds.noteRef.noteIndex,
+            svgX: svg.x,
+            svgY: svg.y,
+          });
         }
       }
     }
@@ -714,7 +774,16 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
     if (!svg || !composition) return;
 
     const loc = resolveStaffMeasure(svg.x, svg.y);
-    if (!loc) { setSelectedNote(null); return; }
+    if (!loc) {
+      setSelectedNote(null);
+      reportCursorActivity({
+        staffIndex: null,
+        measureIndex: null,
+        voiceIndex: selectedVoiceIndex,
+        noteIndex: null,
+      });
+      return;
+    }
 
     const { staffIndex, measureIndex } = loc;
     const staff = composition.staves[staffIndex];
@@ -725,6 +794,14 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
     useScoreStore.getState().setSelectedStaffIndex(staffIndex);
 
     const insertIndex = calculateInsertionIndex(svg.x, staffIndex, measureIndex, selectedVoiceIndex);
+    reportCursorActivity({
+      staffIndex,
+      measureIndex,
+      voiceIndex: selectedVoiceIndex,
+      noteIndex: insertIndex,
+      svgX: svg.x,
+      svgY: svg.y,
+    });
 
     // Check if rest mode is active
     if (selectedRestDuration) {
@@ -911,6 +988,83 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
   const isDragging   = dragState?.hasMoved ?? false;
   const dragOffStaff = dragState?.offStaff ?? false;
   const dragPitch    = dragState?.targetPitch ?? null;
+  const remotePresenceMarkers = useMemo(() => {
+    if (!composition || remotePresence.length === 0) return [];
+    const layout = getMeasureLayout(composition);
+    const notePositions = rendererRef.current?.getNotePositions() ?? [];
+
+    return remotePresence.map((entry) => {
+      const displayName = entry.displayName || entry.email || 'Collaborator';
+      const selection = entry.selection;
+      const cursor = entry.cursor;
+
+      let selectedNotePos: RenderedNotePosition | null = null;
+      if (
+        selection &&
+        typeof selection.staffIndex === 'number' &&
+        typeof selection.measureIndex === 'number' &&
+        typeof selection.noteIndex === 'number'
+      ) {
+        selectedNotePos =
+          notePositions.find(
+            (p) =>
+              p.staffIndex === selection.staffIndex &&
+              p.measureIndex === selection.measureIndex &&
+              p.noteDataIndex === selection.noteIndex
+          ) ?? null;
+      }
+
+      let measureRect:
+        | { x: number; y: number; width: number; height: number }
+        | null = null;
+      if (
+        selection &&
+        typeof selection.staffIndex === 'number' &&
+        typeof selection.measureIndex === 'number' &&
+        layout[selection.measureIndex]
+      ) {
+        const topLineY = getTopLineYForStaff(selection.staffIndex);
+        const measure = layout[selection.measureIndex];
+        if (topLineY !== null && measure) {
+          measureRect = {
+            x: measure.x,
+            y: topLineY - 12,
+            width: measure.width,
+            height: staffLineSpan + 24,
+          };
+        }
+      }
+
+      let cursorPoint: { x: number; y: number } | null = null;
+      if (
+        cursor &&
+        typeof cursor.staffIndex === 'number' &&
+        typeof cursor.measureIndex === 'number'
+      ) {
+        if (typeof cursor.svgX === 'number' && typeof cursor.svgY === 'number') {
+          cursorPoint = { x: cursor.svgX, y: cursor.svgY };
+        } else {
+          const topLineY = getTopLineYForStaff(cursor.staffIndex);
+          const measure = layout[cursor.measureIndex];
+          if (topLineY !== null && measure) {
+            cursorPoint = {
+              x: measure.x + measure.width * 0.5,
+              y: topLineY + staffLineSpan * 0.5,
+            };
+          }
+        }
+      }
+
+      return {
+        id: entry.id,
+        color: entry.color,
+        displayName,
+        selectedNotePos,
+        measureRect,
+        cursorPoint,
+      };
+    });
+  }, [composition, remotePresence, staffLineSpan]);
 
   // Auto-scroll to keep the currently playing note centred horizontally.
   // We throttle by measure: only scroll once each time the playback moves to a
@@ -1029,7 +1183,59 @@ export const ScoreEditor = ({ isReadOnly = false }: ScoreEditorProps) => {
             WebkitTouchCallout: 'none',
           }}
           title={isReadOnly ? 'View only — click Edit to make changes' : 'Click to add · Drag to move · Hold to delete · Drag off staff to remove'}
-        />
+        >
+          {remotePresenceMarkers.map((entry) => (
+            <div key={entry.id} className="pointer-events-none absolute inset-0 z-20">
+              {entry.measureRect && (
+                <div
+                  className="absolute rounded-md"
+                  style={{
+                    left: entry.measureRect.x,
+                    top: entry.measureRect.y,
+                    width: entry.measureRect.width,
+                    height: entry.measureRect.height,
+                    border: `1px solid ${entry.color}77`,
+                    background: `${entry.color}15`,
+                  }}
+                />
+              )}
+              {entry.selectedNotePos && (
+                <div
+                  className="absolute w-4 h-4 rounded-full -translate-x-1/2 -translate-y-1/2"
+                  style={{
+                    left: entry.selectedNotePos.x,
+                    top: entry.selectedNotePos.y,
+                    border: `2px solid ${entry.color}`,
+                    boxShadow: `0 0 0 4px ${entry.color}33`,
+                  }}
+                />
+              )}
+              {entry.cursorPoint && (
+                <>
+                  <div
+                    className="absolute w-[2px] h-6 -translate-x-1/2 -translate-y-1/2"
+                    style={{
+                      left: entry.cursorPoint.x,
+                      top: entry.cursorPoint.y,
+                      background: entry.color,
+                    }}
+                  />
+                  <div
+                    className="absolute text-[10px] px-1.5 py-0.5 rounded -translate-x-1/2 -translate-y-full whitespace-nowrap"
+                    style={{
+                      left: entry.cursorPoint.x,
+                      top: entry.cursorPoint.y - 8,
+                      color: '#ffffff',
+                      background: entry.color,
+                    }}
+                  >
+                    {entry.displayName}
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
         {!hasVisibleStaves && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="px-3 py-2 rounded-lg bg-sv-card/90 border border-sv-border text-sv-text-muted text-sm">

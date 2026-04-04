@@ -89,6 +89,16 @@ Click "Score Info" in the editor header → use the Sharing section to set Priva
 - Open a thread to reply asynchronously.
 - Use "Resolve thread" / "Unresolve thread" to manage review status.
 
+## Real-time co-editing (v1)
+- For shared/public scores, the editor header can show who is currently active as "In score" badges.
+- The score canvas can show live collaborator cursor and selection highlights.
+- Co-editing merge behavior is per-measure:
+  - edits in different measures merge safely
+  - same-measure conflicts use latest incoming measure patch as fallback resolution.
+- To roll back unsaved live patches, use "Discard Unsaved Changes" in the editor header (Edit mode only).
+- Tooltip for that button: "Removes unsaved live co-edit changes and restores last saved version."
+- When one editor discards, collaborators in the same score see a toast that live changes were discarded and the score was restored.
+
 ## Export
 Use the Export toolbar (in Structure section) — export to PDF or MIDI. Exports also create timeline snapshots.
 
