@@ -12,6 +12,28 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'faq', label: 'FAQ', icon: '❓' },
   { id: 'chat', label: 'AI Assistant', icon: '💬' },
 ];
+const HELP_LAST_UPDATED = 'Apr 2026';
+
+const WHATS_NEW_ITEMS = [
+  {
+    title: 'Practice Playback Mode',
+    date: 'Apr 2026',
+    details:
+      'Added loop selection, per-staff solo/mute workflow, metronome toggle, and count-in with 1 or 2 bars.',
+  },
+  {
+    title: 'Version Timeline Upgrade',
+    date: 'Apr 2026',
+    details:
+      'Timeline now opens in a robust popover/sheet UI, includes Current state, filter chips (All/Save/MIDI/PDF), and easier restore flow.',
+  },
+  {
+    title: 'Toolbar Density + Responsive Rows',
+    date: 'Apr 2026',
+    details:
+      'Desktop toolbars now wrap better at narrower widths, with a Compact/Comfortable density toggle in Score Settings.',
+  },
+];
 
 const FAQ_ITEMS = [
   {
@@ -53,6 +75,18 @@ const FAQ_ITEMS = [
   {
     q: 'Why is playback silent or delayed?',
     a: 'Browsers require a user gesture before playing audio. Click the Play button once to start. Some instruments may need time to load (soundfonts). On first use, the app preloads instruments in the background.',
+  },
+  {
+    q: 'How do I use Practice Playback mode?',
+    a: 'Use the bottom playback bar: set From/To for measure range, enable Loop, or click Loop Selection to loop the currently selected measure range. Turn on Metronome and Count in, then choose 1b or 2b for count-in length. You can also solo/mute staves in Score Settings > Volume.',
+  },
+  {
+    q: 'What is Compact Toolbar?',
+    a: 'In Score Settings, use Density > Compact Toolbar. Checked keeps controls tighter for smaller screens; unchecked switches to a more comfortable spacing layout.',
+  },
+  {
+    q: 'How do I use Version History timeline?',
+    a: 'Open the Timeline button in Structure. The panel shows a Current state card, filter chips (All/Save/MIDI/PDF), and revision entries. Click Restore on any snapshot (edit mode only) to roll back.',
   },
   {
     q: 'How do I add more staves (e.g., for SATB choir)?',
@@ -124,7 +158,12 @@ export const HelpPage = () => {
               <img src="/stavium_logo.png" alt="Stavium" className="w-9 h-9 rounded-lg object-cover" />
               <div>
                 <span className="text-lg font-bold tracking-widest text-sv-text uppercase">Help</span>
-                <span className="hidden sm:block text-xs text-sv-text-dim tracking-[0.2em] uppercase -mt-0.5">Documentation · FAQ · AI Assistant</span>
+                <div className="hidden sm:flex items-center gap-2 -mt-0.5">
+                  <span className="text-xs text-sv-text-dim tracking-[0.2em] uppercase">Documentation · FAQ · AI Assistant</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded border border-sv-border text-sv-text-dim">
+                    Last updated: {HELP_LAST_UPDATED}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -159,6 +198,23 @@ export const HelpPage = () => {
           {activeTab === 'overview' && (
             <section className="space-y-8">
               <div>
+                <h2 className="text-2xl font-bold text-sv-text mb-4">What&apos;s New</h2>
+                <div className="space-y-3">
+                  {WHATS_NEW_ITEMS.map((item) => (
+                    <div key={item.title} className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <h3 className="text-base font-semibold text-sv-cyan">{item.title}</h3>
+                        <span className="text-[11px] px-2 py-0.5 rounded border border-sv-border text-sv-text-dim">
+                          {item.date}
+                        </span>
+                      </div>
+                      <p className="text-sv-text-muted text-sm leading-relaxed">{item.details}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
                 <h2 className="text-2xl font-bold text-sv-text mb-4">What is Stavium?</h2>
                 <p className="text-sv-text-muted leading-relaxed">
                   Stavium is a web-based music composition and notation platform. Compose multi-staff scores for choirs and ensembles,
@@ -174,7 +230,7 @@ export const HelpPage = () => {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-sv-cyan mt-0.5">•</span>
-                    Live playback with tempo, instruments, and per-staff volume
+                    Practice playback mode: loop ranges, count-in, metronome, solo/mute, per-staff volume
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-sv-cyan mt-0.5">•</span>
@@ -262,13 +318,25 @@ export const HelpPage = () => {
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Score Settings</h3>
                     <p className="text-sv-text-muted text-sm">
-                      Set tempo (BPM), per-staff volume, and instrument sounds. Playback uses high-quality soundfonts that load in the background.
+                      Set tempo (BPM), per-staff volume, quick solo/mute, instrument sounds, and toolbar density (Compact/Comfortable). Playback uses high-quality soundfonts that load in the background.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Practice Playback</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Use measure range playback (From/To), Loop, and Loop Selection for rehearsal workflows. Enable Metronome and Count in (1 or 2 bars) for tighter entrances and repeated practice passes.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Expression (when note selected)</h3>
                     <p className="text-sv-text-muted text-sm">
                       Add accidentals, ties, slurs, articulations (staccato, accent), dynamics (p, pp, f, ff), lyrics, and chord symbols.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Version Timeline</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Track snapshot history from saves/exports. The timeline panel supports quick filtering by trigger type and restoring older revisions when needed.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">

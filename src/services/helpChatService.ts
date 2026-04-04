@@ -28,7 +28,25 @@ To scan or import from PDF or scanned images:
 ## Editor layout
 - Top header: Back button, Score Info (ℹ️), Help (?), title, Edit/View toggle, Undo/Redo, Save
 - Toolbar sections (collapsible): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected)
-- Bottom: Playback controls (Play, tempo, progress bar)
+- Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars)
+
+## Practice Playback mode
+- Range playback: set From/To in the bottom bar
+- Loop selected measures: click "Loop Selection" (uses current selected measure range) and/or enable "Loop"
+- Count-in + metronome: enable "Count in" and "Metronome", choose 1b or 2b count-in
+- Staff rehearsal focus: use Score Settings → Volume controls to mute/solo staves quickly
+
+## Version history timeline
+- Open "Timeline" from the Structure section
+- Timeline panel has:
+  - Current state card
+  - Filter chips: All / Save / MIDI / PDF
+  - Restore button per snapshot (requires edit mode)
+
+## Toolbar density
+- In Score Settings there is a Density control:
+  - "Compact Toolbar" checked = tighter controls
+  - unchecked = "Comfortable Toolbar" with roomier spacing
 
 ## Adding notes
 1. Select a duration in the Notes toolbar (whole, half, quarter, eighth, sixteenth, 32nd)
@@ -44,7 +62,7 @@ To scan or import from PDF or scanned images:
 Click "Score Info" in the editor header → use the Sharing section to set Private, Shared (by email), or Public
 
 ## Export
-Use the Export toolbar (in Structure section) — export to PDF or MIDI
+Use the Export toolbar (in Structure section) — export to PDF or MIDI. Exports also create timeline snapshots.
 
 ## Keyboard shortcuts
 Ctrl+Z undo, Ctrl+Y redo, Ctrl+S save

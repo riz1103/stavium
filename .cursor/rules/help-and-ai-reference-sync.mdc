@@ -1,0 +1,25 @@
+---
+description: Keep Help docs and AI reference in sync with features
+alwaysApply: true
+---
+
+# Help + AI Reference Sync
+
+When implementing or changing user-facing features, always update docs in the same task.
+
+## Required updates
+
+- Update `src/pages/HelpPage.tsx` for any new or changed workflows.
+- Update `src/services/helpChatService.ts` system context so AI guidance matches current UI/flows.
+
+## Minimum content expectations
+
+- Add or adjust FAQ entries when behavior changes.
+- Update Feature descriptions when controls, labels, or toolbar sections change.
+- Add/refresh "What's New" items for notable shipped features.
+
+## Quality guardrails
+
+- Never document menus/buttons that do not exist.
+- Use current labels as shown in the UI.
+- Keep instructions task-oriented and concise.
