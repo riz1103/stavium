@@ -88,6 +88,18 @@ To scan or import from PDF or scanned images:
   - "Compact Toolbar" checked = tighter controls
   - unchecked = "Comfortable Toolbar" with roomier spacing
 
+## Engraving controls (v1)
+- In Score Settings (standard notation), engraving controls include:
+  - Spacing preset: Compact / Balanced / Spacious
+  - Collisions cleanup: Off / Standard / Aggressive
+  - Breaks controls: System, Page, Clear
+- Break toggles apply at the currently selected measure.
+- If the pickup bar is selected, break toggles target the next full measure automatically.
+- Manual break points are shown on the score canvas as SYS/PAGE badges at the target barline.
+- Clicking a SYS/PAGE badge removes that specific manual break.
+- Pickup measure (measure 0) does not support manual System/Page break toggles.
+- Use these controls before PDF export to improve print layout quality.
+
 ## Adding notes
 1. Select a duration in the Notes toolbar (whole, half, quarter, eighth, sixteenth, 32nd)
 2. Optional: click "Dot" for dotted values, and use the Tuplet selector for tuplets (3:2, 5:4, 6:4, 7:4)
@@ -125,7 +137,7 @@ Click "Score Info" in the editor header → use the Sharing section to set Priva
 - When one editor discards, collaborators in the same score see a toast that live changes were discarded and the score was restored.
 
 ## Export
-Use the Export toolbar (in Structure section) — export to PDF or MIDI. Exports also create timeline snapshots.
+Use the Export toolbar (in Structure section) — export to PDF or MIDI. Exports also create timeline snapshots. For higher-quality PDF engraving, adjust Score Settings → Spacing / Collisions / Breaks first.
 
 ## Deleting compositions
 - Deleting a composition from the Dashboard removes the score and related collaboration/history data.

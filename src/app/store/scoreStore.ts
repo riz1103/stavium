@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol, NotationSystem, GregorianChantDivision, GregorianChantSpacingDensity, GregorianChantInterpretation } from '../../types/music';
+import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol, NotationSystem, GregorianChantDivision, GregorianChantSpacingDensity, GregorianChantInterpretation, EngravingMeasureSpacingPreset, EngravingCollisionCleanupLevel } from '../../types/music';
 
 export type RevisionTrigger = 'manual-save' | 'export-midi' | 'export-pdf';
 
@@ -89,6 +89,12 @@ interface ScoreState {
   updateNotationSystem: (notationSystem: NotationSystem) => void;
   updateChantSpacingDensity: (density: GregorianChantSpacingDensity) => void;
   updateChantInterpretation: (profile: GregorianChantInterpretation) => void;
+  updateEngravingMeasureSpacing: (preset: EngravingMeasureSpacingPreset) => void;
+  updateEngravingCollisionCleanup: (level: EngravingCollisionCleanupLevel) => void;
+  toggleEngravingSystemBreak: (measureIndex: number) => void;
+  clearEngravingSystemBreaks: () => void;
+  toggleEngravingPageBreak: (measureIndex: number) => void;
+  clearEngravingPageBreaks: () => void;
   setAnacrusis: (enabled: boolean, pickupBeats?: number) => void;
   setShowMeasureNumbers: (show: boolean) => void;
   setPlayChords: (play: boolean) => void;
@@ -128,6 +134,10 @@ const defaultComposition: Composition = {
   notationSystem: 'standard',
   chantSpacingDensity: 'normal',
   chantInterpretation: 'medium',
+  engravingMeasureSpacing: 'balanced',
+  engravingCollisionCleanup: 'standard',
+  engravingSystemBreaks: [],
+  engravingPageBreaks: [],
   showMeasureNumbers: true,
   privacy: 'private',
   staves: [
@@ -160,6 +170,23 @@ const DEFAULT_VOICE_REST_DURATIONS: Array<NoteDuration | null> = [null, null, nu
 
 const clampVoiceIndex = (index: number): number => Math.max(0, Math.min(MAX_VOICE_LANES - 1, index));
 
+const clampToNonNegativeInteger = (value: unknown): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const rounded = Math.floor(value);
+  return rounded >= 0 ? rounded : null;
+};
+
+const normalizeBreakList = (breaks: unknown): number[] => {
+  if (!Array.isArray(breaks)) return [];
+  return Array.from(
+    new Set(
+      breaks
+        .map(clampToNonNegativeInteger)
+        .filter((value): value is number => value !== null && value > 0)
+    )
+  ).sort((a, b) => a - b);
+};
+
 const normalizeMeasureVoices = (voices: Voice[] | undefined): Voice[] => {
   const source = voices ?? [];
   const out: Voice[] = [];
@@ -174,6 +201,10 @@ const normalizeMeasureVoices = (voices: Voice[] | undefined): Voice[] => {
 
 const normalizeCompositionVoices = (composition: Composition): Composition => ({
   ...composition,
+  engravingMeasureSpacing: composition.engravingMeasureSpacing ?? 'balanced',
+  engravingCollisionCleanup: composition.engravingCollisionCleanup ?? 'standard',
+  engravingSystemBreaks: normalizeBreakList(composition.engravingSystemBreaks),
+  engravingPageBreaks: normalizeBreakList(composition.engravingPageBreaks),
   staves: composition.staves.map((staff) => ({
     ...staff,
     measures: staff.measures.map((measure) => ({
@@ -1171,6 +1202,88 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     saveToHistory(composition);
     set({
       composition: updateCompositionWithDates(composition, { chantInterpretation: profile }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  updateEngravingMeasureSpacing: (preset) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+    set({
+      composition: updateCompositionWithDates(composition, { engravingMeasureSpacing: preset }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  updateEngravingCollisionCleanup: (level) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+    set({
+      composition: updateCompositionWithDates(composition, { engravingCollisionCleanup: level }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  toggleEngravingSystemBreak: (measureIndex) => {
+    const { composition } = get();
+    if (!composition) return;
+    const normalizedIndex = clampToNonNegativeInteger(measureIndex);
+    if (normalizedIndex === null || normalizedIndex <= 0) return;
+    saveToHistory(composition);
+    const current = normalizeBreakList(composition.engravingSystemBreaks);
+    const exists = current.includes(normalizedIndex);
+    const engravingSystemBreaks = exists
+      ? current.filter((value) => value !== normalizedIndex)
+      : [...current, normalizedIndex].sort((a, b) => a - b);
+    set({
+      composition: updateCompositionWithDates(composition, { engravingSystemBreaks }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  clearEngravingSystemBreaks: () => {
+    const { composition } = get();
+    if (!composition) return;
+    if (!composition.engravingSystemBreaks || composition.engravingSystemBreaks.length === 0) return;
+    saveToHistory(composition);
+    set({
+      composition: updateCompositionWithDates(composition, { engravingSystemBreaks: [] }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  toggleEngravingPageBreak: (measureIndex) => {
+    const { composition } = get();
+    if (!composition) return;
+    const normalizedIndex = clampToNonNegativeInteger(measureIndex);
+    if (normalizedIndex === null || normalizedIndex <= 0) return;
+    saveToHistory(composition);
+    const current = normalizeBreakList(composition.engravingPageBreaks);
+    const exists = current.includes(normalizedIndex);
+    const engravingPageBreaks = exists
+      ? current.filter((value) => value !== normalizedIndex)
+      : [...current, normalizedIndex].sort((a, b) => a - b);
+    set({
+      composition: updateCompositionWithDates(composition, { engravingPageBreaks }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  clearEngravingPageBreaks: () => {
+    const { composition } = get();
+    if (!composition) return;
+    if (!composition.engravingPageBreaks || composition.engravingPageBreaks.length === 0) return;
+    saveToHistory(composition);
+    set({
+      composition: updateCompositionWithDates(composition, { engravingPageBreaks: [] }),
       canUndo: historyIndex >= 0,
       canRedo: false,
     });

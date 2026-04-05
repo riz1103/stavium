@@ -133,6 +133,8 @@ export type GregorianChantOrnament = 'none' | 'episema' | 'mora';
 export type GregorianChantDivision = 'none' | 'minima' | 'minor' | 'major' | 'finalis';
 export type GregorianChantSpacingDensity = 'tight' | 'normal' | 'spacious';
 export type GregorianChantInterpretation = 'subtle' | 'medium' | 'expressive';
+export type EngravingMeasureSpacingPreset = 'compact' | 'balanced' | 'spacious';
+export type EngravingCollisionCleanupLevel = 'off' | 'standard' | 'aggressive';
 
 export interface LinkedPartSource {
   /** Source full-score composition id this part is derived from. */
@@ -203,6 +205,14 @@ export interface Composition {
   chantSpacingDensity?: GregorianChantSpacingDensity;
   /** Performance profile for chant ornaments (interpretive timing). */
   chantInterpretation?: GregorianChantInterpretation;
+  /** Engraving spacing preset used for score layout and PDF rendering. */
+  engravingMeasureSpacing?: EngravingMeasureSpacingPreset;
+  /** Measure indices where a new system should begin in print/PDF layout. */
+  engravingSystemBreaks?: number[];
+  /** Measure indices where a new page should begin in print/PDF layout. */
+  engravingPageBreaks?: number[];
+  /** Collision cleanup profile for dense polyphonic notation layout. */
+  engravingCollisionCleanup?: EngravingCollisionCleanupLevel;
   /** Present when this document is a linked derived part from a full score staff. */
   linkedPartSource?: LinkedPartSource;
 }

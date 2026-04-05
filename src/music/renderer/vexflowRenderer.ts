@@ -34,6 +34,35 @@ export const getPickupMeasureWidth = (pickupBeats: number, beatsPerMeasure: numb
 /** Extra pixels added to a measure that starts with change symbols (clef/key/time). */
 export const CHANGE_SYMBOL_WIDTH = 70;
 
+const getMeasureSpacingScale = (composition: Composition): number => {
+  if (composition.notationSystem === 'gregorian-chant') {
+    return composition.chantSpacingDensity === 'tight'
+      ? 0.82
+      : composition.chantSpacingDensity === 'spacious'
+      ? 1.2
+      : 1;
+  }
+  switch (composition.engravingMeasureSpacing ?? 'balanced') {
+    case 'compact':
+      return 0.88;
+    case 'spacious':
+      return 1.16;
+    default:
+      return 1;
+  }
+};
+
+const normalizeBreakIndices = (indices: number[] | undefined, maxMeasures: number): number[] => {
+  if (!indices?.length || maxMeasures <= 1) return [];
+  return Array.from(
+    new Set(
+      indices
+        .filter((value) => Number.isInteger(value) && value > 0 && value < maxMeasures)
+        .map((value) => Math.floor(value))
+    )
+  ).sort((a, b) => a - b);
+};
+
 function chantMeasureVisualUnits(measure: Measure | undefined): number {
   if (!measure?.voices?.length) return 0;
   const symbolWeight: Record<GregorianChantSymbol, number> = {
@@ -105,12 +134,7 @@ function measureHasChanges(measure: Measure | undefined): boolean {
 export function getMeasureLayout(composition: Composition): Array<{ x: number; width: number }> {
   const refMeasures = composition.staves[0]?.measures ?? [];
   const isGregorianChant = composition.notationSystem === 'gregorian-chant';
-  const chantSpacingScale =
-    composition.chantSpacingDensity === 'tight'
-      ? 0.82
-      : composition.chantSpacingDensity === 'spacious'
-      ? 1.2
-      : 1;
+  const spacingScale = getMeasureSpacingScale(composition);
   const maxMeasures = Math.max(...composition.staves.map((s) => s.measures.length), 1);
   const layout: Array<{ x: number; width: number }> = [];
   let cx = LEFT_MARGIN + CLEF_WIDTH;
@@ -127,17 +151,17 @@ export function getMeasureLayout(composition: Composition): Array<{ x: number; w
         ...composition.staves.map((staff) => chantMeasureVisualUnits(staff.measures[i])),
         0
       );
-      w = Math.max(Math.round(220 * chantSpacingScale), Math.round((120 + chantUnits * 28) * chantSpacingScale));
+      w = Math.max(Math.round(220 * spacingScale), Math.round((120 + chantUnits * 28) * spacingScale));
     } else if (isPickup) {
       const globalBPM = Number(composition.timeSignature.split('/')[0]);
-      w = getPickupMeasureWidth(composition.pickupBeats ?? 1, globalBPM);
+      w = Math.round(getPickupMeasureWidth(composition.pickupBeats ?? 1, globalBPM) * spacingScale);
     } else {
       // Scale width proportionally to the effective time signature
       const effTs  = effectiveTimeSig(refMeasures, i, composition.timeSignature);
       const [n, d] = effTs.split('/').map(Number);
       // quarter-note equivalents per measure = n * (4/d)
       const factor = (n * 4) / (d * 4); // simplifies to n/d
-      w = Math.max(100, Math.round(factor * MEASURE_WIDTH));
+      w = Math.max(90, Math.round(factor * MEASURE_WIDTH * spacingScale));
     }
 
     // Extra room for notation-change symbols at the start of this measure
@@ -664,6 +688,15 @@ export class VexFlowRenderer {
     const showMeasureNumbers = !isGregorianChant && composition.showMeasureNumbers !== false;
     const showTempoMarkings = !isGregorianChant;
     const showKeyAndTimeSignatures = !isGregorianChant;
+    const collisionCleanup = isGregorianChant
+      ? 'off'
+      : (composition.engravingCollisionCleanup ?? 'standard');
+    const formatterPadding =
+      collisionCleanup === 'aggressive'
+        ? 42
+        : collisionCleanup === 'off'
+        ? 22
+        : 30;
     const baseKeySignature = isGregorianChant ? 'C' : composition.keySignature;
     const [beatsPerMeasure] = composition.timeSignature.split('/').map(Number);
 
@@ -672,6 +705,11 @@ export class VexFlowRenderer {
 
     // Use getMeasureLayout so pickup measure width is consistent with click handler
     const layout = getMeasureLayout(composition);
+    const maxMeasures = Math.max(...composition.staves.map((staff) => staff.measures.length), 1);
+    const manualSystemBreaks = normalizeBreakIndices(composition.engravingSystemBreaks, maxMeasures);
+    const manualPageBreaks = normalizeBreakIndices(composition.engravingPageBreaks, maxMeasures);
+    const manualSystemBreakSet = new Set<number>(manualSystemBreaks);
+    const manualPageBreakSet = new Set<number>(manualPageBreaks);
     const totalStavesWidth = layout.length > 0
       ? layout[layout.length - 1].x + layout[layout.length - 1].width - LEFT_MARGIN + 40
       : CLEF_WIDTH + 40;
@@ -910,7 +948,8 @@ export class VexFlowRenderer {
         const hasPolyphonicVoices =
           (measure.voices ?? []).filter((v) => v.notes.some((el) => 'pitch' in el)).length > 1;
         const primaryStemDir = hasPolyphonicVoices ? Stem.UP : undefined;
-        const primaryXShift = hasPolyphonicVoices ? this.getVoiceXShift(0) : 0;
+        const applyVoiceOffsets = hasPolyphonicVoices && collisionCleanup !== 'off';
+        const primaryXShift = applyVoiceOffsets ? this.getVoiceXShift(0, collisionCleanup) : 0;
 
         if (voice) {
           voice.notes.forEach((element, dataIndex) => {
@@ -1042,7 +1081,7 @@ export class VexFlowRenderer {
                       dataIndex,
                       composition.notationSystem ?? 'standard',
                       (extraIdx + 1) % 2 === 0 ? Stem.UP : Stem.DOWN,
-                      hasPolyphonicVoices ? this.getVoiceXShift(extraIdx + 1) : 0
+                      applyVoiceOffsets ? this.getVoiceXShift(extraIdx + 1, collisionCleanup) : 0
                     );
                     if (sn) { extraDataIndices.push(dataIndex); extraTickables.push(sn); }
                   } else {
@@ -1069,7 +1108,7 @@ export class VexFlowRenderer {
             if (voicesToDraw.length > 0) {
               const formatter = new Formatter();
               if (voicesToDraw.length > 1) formatter.joinVoices(voicesToDraw);
-              formatter.format(voicesToDraw, mw - 30);
+              formatter.format(voicesToDraw, mw - formatterPadding);
             }
             if (vfVoice) vfVoice.draw(this.context, measureStave);
             extraVfVoices.forEach((ev) => ev.draw(this.context, measureStave));
@@ -1215,7 +1254,8 @@ export class VexFlowRenderer {
 
             // ── Draw lyrics (below staff) ─────────────────────────────────────────
             if (voice) {
-              const lyricBaselineY = y + STAFF_LINE_OFFSET + staffLineSpan + 28;
+              const lyricBaselineY =
+                y + STAFF_LINE_OFFSET + staffLineSpan + (collisionCleanup === 'aggressive' ? 34 : 28);
               voice.notes.forEach((element, dataIndex) => {
                 if (!('pitch' in element) || !element.lyric) return;
                 const tickableIdx = tickableDataIndices.indexOf(dataIndex);
@@ -1493,6 +1533,68 @@ export class VexFlowRenderer {
             }
           }
         });
+
+        // ── Manual engraving break markers (barline badges) ──────────────────
+        // Show markers at the left barline of the measure where the break starts.
+        const svgElement = this.getSvgElement();
+        if (svgElement && !isGregorianChant) {
+          const markerY = measureNumberY - 24;
+          const drawBreakMarker = (
+            x: number,
+            y: number,
+            label: string,
+            breakType: 'system' | 'page',
+            measureIndex: number,
+            fill: string,
+            stroke: string
+          ) => {
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', String(x - 17));
+            rect.setAttribute('y', String(y - 9));
+            rect.setAttribute('width', '34');
+            rect.setAttribute('height', '16');
+            rect.setAttribute('rx', '4');
+            rect.setAttribute('fill', fill);
+            rect.setAttribute('stroke', stroke);
+            rect.setAttribute('stroke-width', '1');
+            rect.setAttribute('class', 'manual-break-badge');
+            rect.setAttribute('data-break-badge', 'true');
+            rect.setAttribute('data-break-type', breakType);
+            rect.setAttribute('data-measure-index', String(measureIndex));
+            svgElement.appendChild(rect);
+
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', String(x));
+            text.setAttribute('y', String(y + 3));
+            text.setAttribute('font-family', 'Arial, sans-serif');
+            text.setAttribute('font-size', '9');
+            text.setAttribute('font-weight', '700');
+            text.setAttribute('fill', '#ffffff');
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('class', 'manual-break-badge');
+            text.setAttribute('data-break-badge', 'true');
+            text.setAttribute('data-break-type', breakType);
+            text.setAttribute('data-measure-index', String(measureIndex));
+            text.textContent = label;
+            svgElement.appendChild(text);
+          };
+
+          for (let measureIndex = 1; measureIndex < maxMeasures; measureIndex++) {
+            const hasSystem = manualSystemBreakSet.has(measureIndex);
+            const hasPage = manualPageBreakSet.has(measureIndex);
+            if (!hasSystem && !hasPage) continue;
+            const leftBarX = layout[measureIndex]?.x;
+            if (typeof leftBarX !== 'number') continue;
+            if (hasPage) {
+              drawBreakMarker(leftBarX, markerY, 'PAGE', 'page', measureIndex, '#7c3aed', '#5b21b6');
+            }
+            if (hasSystem && !hasPage) {
+              drawBreakMarker(leftBarX, markerY, 'SYS', 'system', measureIndex, '#0ea5e9', '#0369a1');
+            } else if (hasSystem && hasPage) {
+              drawBreakMarker(leftBarX, markerY - 18, 'SYS', 'system', measureIndex, '#0ea5e9', '#0369a1');
+            }
+          }
+        }
       }
     });
 
@@ -1724,7 +1826,17 @@ export class VexFlowRenderer {
     }
   }
 
-  private getVoiceXShift(voiceIndex: number): number {
+  private getVoiceXShift(
+    voiceIndex: number,
+    collisionCleanup: 'off' | 'standard' | 'aggressive' = 'standard'
+  ): number {
+    if (collisionCleanup === 'off') return 0;
+    if (collisionCleanup === 'aggressive') {
+      if (voiceIndex === 0) return 0;
+      if (voiceIndex === 1) return -8;
+      if (voiceIndex === 2) return 8;
+      return -13;
+    }
     if (voiceIndex === 0) return 0;
     if (voiceIndex === 1) return -6;
     if (voiceIndex === 2) return 6;
@@ -1778,12 +1890,16 @@ export class VexFlowRenderer {
   ): SVGSVGElement | null {
     const { pageWidth, labelWidth } = opts;
     const isGregorianChant = composition.notationSystem === 'gregorian-chant';
-    const chantSpacingScale =
-      composition.chantSpacingDensity === 'tight'
-        ? 0.82
-        : composition.chantSpacingDensity === 'spacious'
-        ? 1.2
-        : 1;
+    const spacingScale = getMeasureSpacingScale(composition);
+    const collisionCleanup = isGregorianChant
+      ? 'off'
+      : (composition.engravingCollisionCleanup ?? 'standard');
+    const formatterPadding =
+      collisionCleanup === 'aggressive'
+        ? 42
+        : collisionCleanup === 'off'
+        ? 22
+        : 30;
     const staffLineCount = isGregorianChant ? 4 : 5;
     const staffLineSpan = (staffLineCount - 1) * LINE_SPACING;
     const showKeyAndTimeSignatures = !isGregorianChant;
@@ -1795,6 +1911,7 @@ export class VexFlowRenderer {
     const PRINT_MEAS_W   = 200;   // each measure stave width (full measure)
     const STAVE_TOP      = 40;    // top-of-stave offset inside each system
     const SYSTEM_GAP     = 40;    // extra vertical gap between systems
+    const PAGE_GAP       = 90;    // extra visual gap where manual page breaks occur
     const TITLE_H        = 80;    // reserved at the very top for title text
 
     const [beatsPerMeasure, beatTypeValue] =
@@ -1824,26 +1941,53 @@ export class VexFlowRenderer {
         );
         measureWidths.push(
           Math.max(
-            Math.round(220 * chantSpacingScale),
-            Math.round((120 + chantUnits * 28) * chantSpacingScale)
+            Math.round(220 * spacingScale),
+            Math.round((120 + chantUnits * 28) * spacingScale)
           )
         );
       } else if (composition.anacrusis && i === 0) {
-        measureWidths.push(getPickupMeasureWidthForPrint(pickupBeats, beatsPerMeasure));
+        measureWidths.push(Math.round(getPickupMeasureWidthForPrint(pickupBeats, beatsPerMeasure) * spacingScale));
       } else {
-        measureWidths.push(PRINT_MEAS_W);
+        measureWidths.push(Math.max(90, Math.round(PRINT_MEAS_W * spacingScale)));
       }
     }
 
-    // How many measures fit after the label column and clef header
-    // Use average width for layout calculation (slightly conservative)
+    // How many measures fit after the label column and clef header.
     const availForMeasures = pageWidth - labelWidth - PRINT_CLEF_W;
-    const measPerSys = Math.max(1, Math.floor(availForMeasures / PRINT_MEAS_W));
-    const numSystems = Math.ceil(maxMeasures / measPerSys);
+    const normalizedSystemBreaks = normalizeBreakIndices(composition.engravingSystemBreaks, maxMeasures);
+    const normalizedPageBreaks = normalizeBreakIndices(composition.engravingPageBreaks, maxMeasures);
+    const forcedSystemBreakSet = new Set<number>([...normalizedSystemBreaks, ...normalizedPageBreaks]);
+    const forcedPageBreakSet = new Set<number>(normalizedPageBreaks);
+    const systems: Array<{ start: number; end: number; pageIndex: number }> = [];
+    let cursor = 0;
+    let pageIndex = 0;
+    while (cursor < maxMeasures) {
+      const start = cursor;
+      let end = start;
+      let width = 0;
+      while (end < maxMeasures) {
+        if (end > start && forcedSystemBreakSet.has(end)) break;
+        const nextWidth = width + (measureWidths[end] ?? PRINT_MEAS_W);
+        if (end > start && nextWidth > availForMeasures) break;
+        width = nextWidth;
+        end++;
+      }
+      if (end === start) end = start + 1;
+      systems.push({ start, end, pageIndex });
+      cursor = end;
+      if (cursor < maxMeasures && forcedPageBreakSet.has(cursor)) {
+        pageIndex += 1;
+      }
+    }
+    const numSystems = systems.length;
+    const pageBreakTransitions = Math.max(0, systems.reduce((count, sys, idx) => {
+      if (idx === 0) return 0;
+      return count + (systems[idx - 1].pageIndex !== sys.pageIndex ? 1 : 0);
+    }, 0));
 
     const systemH  = numStaves * ROW_SPACING + SYSTEM_GAP;
     const totalW   = pageWidth;
-    const totalH   = TITLE_H + numSystems * systemH + 40;
+    const totalH   = TITLE_H + numSystems * systemH + pageBreakTransitions * PAGE_GAP + 40;
 
     // Resize renderer to the full print canvas
     this.canvasWidth  = totalW;
@@ -1867,9 +2011,15 @@ export class VexFlowRenderer {
 
     // Horizontal note area bounds per system (used for cross-system slur anchors).
     const systemXBounds: Array<{ left: number; right: number }> = [];
+    const systemYOffsets: number[] = [];
+    let cumulativePageGap = 0;
     for (let s = 0; s < numSystems; s++) {
-      const sStart = s * measPerSys;
-      const sEnd = Math.min(sStart + measPerSys, maxMeasures);
+      if (s > 0 && systems[s - 1].pageIndex !== systems[s].pageIndex) {
+        cumulativePageGap += PAGE_GAP;
+      }
+      systemYOffsets[s] = TITLE_H + s * systemH + cumulativePageGap;
+      const sStart = systems[s].start;
+      const sEnd = systems[s].end;
       let widthSum = 0;
       for (let m = sStart; m < sEnd; m++) widthSum += (measureWidths[m] ?? PRINT_MEAS_W);
       const left = labelWidth + PRINT_CLEF_W;
@@ -1896,9 +2046,9 @@ export class VexFlowRenderer {
     }>>();
 
     for (let sysIdx = 0; sysIdx < numSystems; sysIdx++) {
-      const sysStartM = sysIdx * measPerSys;
-      const sysEndM   = Math.min(sysStartM + measPerSys, maxMeasures);
-      const sysY      = TITLE_H + sysIdx * systemH;
+      const sysStartM = systems[sysIdx].start;
+      const sysEndM   = systems[sysIdx].end;
+      const sysY      = systemYOffsets[sysIdx] ?? (TITLE_H + sysIdx * systemH);
 
       visibleStaves.forEach(({ staff, index: staffIdx }, visibleRowIdx) => {
         const staveY = sysY + STAVE_TOP + visibleRowIdx * ROW_SPACING;
@@ -1981,7 +2131,8 @@ export class VexFlowRenderer {
           const hasPolyphonicVoices =
             (measure.voices ?? []).filter((v) => v.notes.some((el) => 'pitch' in el)).length > 1;
           const primaryStemDir = hasPolyphonicVoices ? Stem.UP : undefined;
-          const primaryXShift = hasPolyphonicVoices ? this.getVoiceXShift(0) : 0;
+          const applyVoiceOffsets = hasPolyphonicVoices && collisionCleanup !== 'off';
+          const primaryXShift = applyVoiceOffsets ? this.getVoiceXShift(0, collisionCleanup) : 0;
 
           if (voice) {
             voice.notes.forEach((element, dataIndex) => {
@@ -2092,7 +2243,7 @@ export class VexFlowRenderer {
                         undefined,
                         composition.notationSystem ?? 'standard',
                         (extraIdx + 1) % 2 === 0 ? Stem.UP : Stem.DOWN,
-                        hasPolyphonicVoices ? this.getVoiceXShift(extraIdx + 1) : 0
+                        applyVoiceOffsets ? this.getVoiceXShift(extraIdx + 1, collisionCleanup) : 0
                       );
                       if (sn) extraTickables.push(sn);
                     } else {
@@ -2118,7 +2269,7 @@ export class VexFlowRenderer {
               if (voicesToDraw.length > 0) {
                 const formatter = new Formatter();
                 if (voicesToDraw.length > 1) formatter.joinVoices(voicesToDraw);
-                formatter.format(voicesToDraw, measWidth - 30);
+                formatter.format(voicesToDraw, measWidth - formatterPadding);
               }
               if (vfVoice) vfVoice.draw(this.context, measureStave);
               extraVfVoices.forEach((ev) => ev.draw(this.context, measureStave));
@@ -2244,7 +2395,8 @@ export class VexFlowRenderer {
                     }
                   }
                 }
-                const lyricBaselineY = staveY + STAFF_LINE_OFFSET + staffLineSpan + 24;
+                const lyricBaselineY =
+                  staveY + STAFF_LINE_OFFSET + staffLineSpan + (collisionCleanup === 'aggressive' ? 30 : 24);
                 voice.notes.forEach((element, dataIndex) => {
                   if (!('pitch' in element) || !element.lyric) return;
                   const tickableIdx = tickableDataIndices.indexOf(dataIndex);
@@ -2350,6 +2502,34 @@ export class VexFlowRenderer {
           serif.setAttribute('x2', String(bx + 3)); serif.setAttribute('y2', String(sy));
           serif.setAttribute('stroke', '#000'); serif.setAttribute('stroke-width', '2');
           svgEl.appendChild(serif);
+        }
+      }
+
+      // Manual page break indicator between systems (editor/PDF preview aid).
+      if (svgEl && sysIdx < numSystems - 1) {
+        const currentPage = systems[sysIdx].pageIndex;
+        const nextPage = systems[sysIdx + 1].pageIndex;
+        if (nextPage !== currentPage) {
+          const y = (systemYOffsets[sysIdx + 1] ?? sysY + systemH) - PAGE_GAP / 2;
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', String(labelWidth - 16));
+          line.setAttribute('x2', String(totalW - 16));
+          line.setAttribute('y1', String(y));
+          line.setAttribute('y2', String(y));
+          line.setAttribute('stroke', '#b0b8c4');
+          line.setAttribute('stroke-width', '1');
+          line.setAttribute('stroke-dasharray', '7 5');
+          svgEl.appendChild(line);
+
+          const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          txt.setAttribute('x', String(totalW / 2));
+          txt.setAttribute('y', String(y - 6));
+          txt.setAttribute('text-anchor', 'middle');
+          txt.setAttribute('font-family', 'Arial, sans-serif');
+          txt.setAttribute('font-size', '10');
+          txt.setAttribute('fill', '#6b7280');
+          txt.textContent = 'Page break';
+          svgEl.appendChild(txt);
         }
       }
     }

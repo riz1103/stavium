@@ -16,6 +16,12 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'Engraving Controls (v1)',
+    date: 'Apr 2026',
+    details:
+      'Score Settings now includes engraving controls for Measure Spacing presets (Compact/Balanced/Spacious), manual System/Page break toggles on the selected measure, and Collision cleanup profiles (Off/Standard/Aggressive) to improve dense passage readability in PDF exports.',
+  },
+  {
     title: 'Linked Part Extraction (v1)',
     date: 'Apr 2026',
     details:
@@ -78,6 +84,14 @@ const WHATS_NEW_ITEMS = [
 ];
 
 const FAQ_ITEMS = [
+  {
+    q: 'How do I control measure spacing, system breaks, and page breaks for export?',
+    a: 'In the editor, open Score Settings. Use Spacing to choose Compact, Balanced, or Spacious. Select a measure, then in Breaks click System or Page to toggle a manual break at that measure. If the pickup bar is selected, break toggles target the next full measure automatically. Use Clear to remove all manual breaks. Manual break points also appear on the score as small SYS/PAGE badges at the target barline, and clicking a badge removes that specific break quickly.',
+  },
+  {
+    q: 'What does Collision cleanup do?',
+    a: 'Collision cleanup adjusts how aggressively Stavium separates dense polyphonic notation. In Score Settings, choose Off, Standard, or Aggressive. Standard is the default; Aggressive increases separation to reduce crowded noteheads and lyrics in complex passages.',
+  },
   {
     q: 'How do I create individual vocal/instrument parts from a full score?',
     a: 'Open the full score in Edit mode, go to Structure, then use Part Extraction > Generate linked parts. Stavium creates one linked composition per staff and keeps each part tied to its source staff for rehearsal and printing workflows.',
@@ -168,7 +182,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do I export my composition?',
-    a: 'Use the Export toolbar in the editor. You can export to PDF (for printing) or MIDI (for use in DAWs and other music software).',
+    a: 'Use the Export toolbar in the editor. You can export to PDF (for printing) or MIDI (for use in DAWs and other music software). For competition-ready PDF layout, configure Score Settings > Spacing, Collisions, and Breaks before exporting.',
   },
   {
     q: 'If I delete a composition, are reviews and timeline history also deleted?',
@@ -369,7 +383,7 @@ export const HelpPage = () => {
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h4 className="font-semibold text-amber-400 mb-2">Partially Supported / Workflow Dependent</h4>
                     <p className="text-sv-text-muted text-sm">
-                      Advanced engraving controls still evolve over time, but imported and hand-authored polyphony now uses explicit V1-V4 editing lanes with visibility controls.
+                      Advanced engraving now includes v1 spacing presets, manual page/system breaks, and collision cleanup controls. Additional refinement passes for edge-case notation are still evolving.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
@@ -413,6 +427,12 @@ export const HelpPage = () => {
               <div>
                 <h2 className="text-2xl font-bold text-sv-text mb-4">Editor Features</h2>
                 <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Engraving Controls (v1)</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      In Score Settings, use Spacing presets (Compact/Balanced/Spacious), Collision cleanup (Off/Standard/Aggressive), and Breaks controls (System/Page/Clear) to improve print layout quality before PDF export. Manual break points are shown in-canvas as SYS/PAGE barline badges, and each badge is clickable to clear that break.
+                    </p>
+                  </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Linked Part Extraction</h3>
                     <p className="text-sv-text-muted text-sm">

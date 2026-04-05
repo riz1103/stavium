@@ -206,6 +206,8 @@ export const ScoreEditor = ({
   const selectedStaffIndex   = useScoreStore((s) => s.selectedStaffIndex);
   const addNote            = useScoreStore((s) => s.addNote);
   const moveNote           = useScoreStore((s) => s.moveNote);
+  const toggleEngravingSystemBreak = useScoreStore((s) => s.toggleEngravingSystemBreak);
+  const toggleEngravingPageBreak = useScoreStore((s) => s.toggleEngravingPageBreak);
   const setSelectedNote    = useScoreStore((s) => s.setSelectedNote);
   const setSelectedRestDuration = useScoreStore((s) => s.setSelectedRestDuration);
   const deleteSelectedNote = useScoreStore((s) => s.deleteSelectedNote);
@@ -567,6 +569,26 @@ export const ScoreEditor = ({
   const handlePointerDown = (clientX: number, clientY: number, event?: React.MouseEvent | React.TouchEvent) => {
     // In read-only mode, block all editing interactions
     if (isReadOnly) return;
+
+    const eventTarget = event?.target instanceof Element ? event.target : null;
+    const breakBadge = eventTarget?.closest('[data-break-badge="true"]') as HTMLElement | null;
+    if (breakBadge) {
+      const breakType = breakBadge.getAttribute('data-break-type');
+      const rawMeasureIndex = breakBadge.getAttribute('data-measure-index');
+      const measureIndex = rawMeasureIndex !== null ? Number(rawMeasureIndex) : NaN;
+      if (Number.isInteger(measureIndex) && measureIndex > 0) {
+        if (breakType === 'system') {
+          toggleEngravingSystemBreak(measureIndex);
+        } else if (breakType === 'page') {
+          toggleEngravingPageBreak(measureIndex);
+        }
+        suppressAddNote.current = true;
+        cancelLongPress();
+        dragStateRef.current = null;
+        setDragState(null);
+        return;
+      }
+    }
 
     suppressAddNote.current = false;
 
@@ -1200,7 +1222,7 @@ export const ScoreEditor = ({
             WebkitUserSelect: 'none',
             WebkitTouchCallout: 'none',
           }}
-          title={isReadOnly ? 'View only — click Edit to make changes' : 'Click to add · Drag to move · Hold to delete · Drag off staff to remove'}
+          title={isReadOnly ? 'View only — click Edit to make changes' : 'Click to add · Drag to move · Hold to delete · Drag off staff to remove · Click SYS/PAGE badge to clear break'}
         >
           {remotePresenceMarkers.map((entry) => (
             <div key={entry.id} className="pointer-events-none absolute inset-0 z-20">

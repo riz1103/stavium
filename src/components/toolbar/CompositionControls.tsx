@@ -50,11 +50,18 @@ export const CompositionControls = ({ isReadOnly = false }: CompositionControlsP
   const updateNotationSystem  = useScoreStore((s) => s.updateNotationSystem);
   const updateChantSpacingDensity = useScoreStore((s) => s.updateChantSpacingDensity);
   const updateChantInterpretation = useScoreStore((s) => s.updateChantInterpretation);
+  const updateEngravingMeasureSpacing = useScoreStore((s) => s.updateEngravingMeasureSpacing);
+  const updateEngravingCollisionCleanup = useScoreStore((s) => s.updateEngravingCollisionCleanup);
+  const toggleEngravingSystemBreak = useScoreStore((s) => s.toggleEngravingSystemBreak);
+  const clearEngravingSystemBreaks = useScoreStore((s) => s.clearEngravingSystemBreaks);
+  const toggleEngravingPageBreak = useScoreStore((s) => s.toggleEngravingPageBreak);
+  const clearEngravingPageBreaks = useScoreStore((s) => s.clearEngravingPageBreaks);
   const updateTimeSignature   = useScoreStore((s) => s.updateTimeSignature);
   const updateKeySignature    = useScoreStore((s) => s.updateKeySignature);
   const updateTempo           = useScoreStore((s) => s.updateTempo);
   const setAnacrusis          = useScoreStore((s) => s.setAnacrusis);
   const setShowMeasureNumbers = useScoreStore((s) => s.setShowMeasureNumbers);
+  const selectedMeasureIndex = useScoreStore((s) => s.selectedMeasureIndex);
   
   // Playback tempo for view-only users
   const playbackTempo = usePlaybackStore((s) => s.playbackTempo);
@@ -71,6 +78,24 @@ export const CompositionControls = ({ isReadOnly = false }: CompositionControlsP
     ? (playbackTempo !== null ? playbackTempo : composition.tempo)
     : composition.tempo;
   const isGregorianChant = composition.notationSystem === 'gregorian-chant';
+  const selectedMeasureLabel = selectedMeasureIndex === null || selectedMeasureIndex === undefined
+    ? null
+    : composition.anacrusis && selectedMeasureIndex > 0
+    ? selectedMeasureIndex
+    : composition.anacrusis && selectedMeasureIndex === 0
+    ? 0
+    : selectedMeasureIndex + 1;
+  const selectedMeasureForBreakRaw = selectedMeasureIndex ?? -1;
+  const selectedMeasureForBreak = composition.anacrusis && selectedMeasureForBreakRaw === 0
+    ? 1
+    : selectedMeasureForBreakRaw;
+  const selectedBreakTargetLabel = selectedMeasureForBreak > 0
+    ? `M${composition.anacrusis ? selectedMeasureForBreak : selectedMeasureForBreak + 1}`
+    : null;
+  const systemBreaks = composition.engravingSystemBreaks ?? [];
+  const pageBreaks = composition.engravingPageBreaks ?? [];
+  const hasSystemBreakAtSelection = selectedMeasureForBreak > 0 && systemBreaks.includes(selectedMeasureForBreak);
+  const hasPageBreakAtSelection = selectedMeasureForBreak > 0 && pageBreaks.includes(selectedMeasureForBreak);
 
   return (
     <div className="sv-toolbar flex-wrap gap-y-2">
@@ -179,6 +204,75 @@ export const CompositionControls = ({ isReadOnly = false }: CompositionControlsP
       {!isReadOnly && !isGregorianChant && (
         <>
           <div className="w-px self-stretch bg-sv-border mx-0.5" />
+
+          <div className="flex items-center gap-1.5">
+            <span className="sv-toolbar-label">Spacing</span>
+            <select
+              value={composition.engravingMeasureSpacing ?? 'balanced'}
+              onChange={(e) => updateEngravingMeasureSpacing(e.target.value as 'compact' | 'balanced' | 'spacious')}
+              className="sv-select w-28"
+              title="Measure spacing preset for editor/PDF layout"
+            >
+              <option value="compact">Compact</option>
+              <option value="balanced">Balanced</option>
+              <option value="spacious">Spacious</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="sv-toolbar-label">Collisions</span>
+            <select
+              value={composition.engravingCollisionCleanup ?? 'standard'}
+              onChange={(e) => updateEngravingCollisionCleanup(e.target.value as 'off' | 'standard' | 'aggressive')}
+              className="sv-select w-28"
+              title="Cleanup profile for dense notation collisions"
+            >
+              <option value="off">Off</option>
+              <option value="standard">Standard</option>
+              <option value="aggressive">Aggressive</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="sv-toolbar-label">Breaks</span>
+            <button
+              type="button"
+              onClick={() => toggleEngravingSystemBreak(selectedMeasureForBreak)}
+              disabled={selectedMeasureForBreak <= 0}
+              title={selectedBreakTargetLabel ? `Toggle system break at ${selectedBreakTargetLabel}` : 'Toggle system break at selected measure'}
+              className={selectedMeasureForBreak <= 0 ? 'sv-btn-ghost opacity-50 cursor-not-allowed' : hasSystemBreakAtSelection ? 'sv-btn-primary' : 'sv-btn-ghost'}
+            >
+              {hasSystemBreakAtSelection ? 'System ✓' : 'System'}
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleEngravingPageBreak(selectedMeasureForBreak)}
+              disabled={selectedMeasureForBreak <= 0}
+              title={selectedBreakTargetLabel ? `Toggle page break at ${selectedBreakTargetLabel}` : 'Toggle page break at selected measure'}
+              className={selectedMeasureForBreak <= 0 ? 'sv-btn-ghost opacity-50 cursor-not-allowed' : hasPageBreakAtSelection ? 'sv-btn-primary' : 'sv-btn-ghost'}
+            >
+              {hasPageBreakAtSelection ? 'Page ✓' : 'Page'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearEngravingSystemBreaks();
+                clearEngravingPageBreaks();
+              }}
+              disabled={systemBreaks.length === 0 && pageBreaks.length === 0}
+              title="Clear all manual system/page breaks"
+              className={systemBreaks.length === 0 && pageBreaks.length === 0 ? 'sv-btn-ghost opacity-50 cursor-not-allowed' : 'sv-btn-ghost'}
+            >
+              Clear
+            </button>
+            <span className="text-[11px] text-sv-text-dim">
+              {selectedMeasureLabel === null
+                ? 'Select a measure'
+                : selectedMeasureLabel === 0
+                ? `Pickup selected (${selectedBreakTargetLabel ?? 'no target'})`
+                : `M${selectedMeasureLabel}`}
+            </span>
+          </div>
 
           {/* Pickup measure */}
           <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-sv-text-muted">
