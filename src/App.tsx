@@ -9,7 +9,6 @@ import { Dashboard } from './pages/Dashboard';
 import { EditorPage } from './pages/EditorPage';
 import { ImportsPage } from './pages/ImportsPage';
 import { HelpPage } from './pages/HelpPage';
-import { sharedScheduler } from './music/playback/toneScheduler';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AnimatedRoutes
@@ -75,14 +74,6 @@ function App() {
     const unsubscribe = onAuthChange((u) => {
       setUser(u);
       setLoading(false);
-
-      // ── Eager soundfont warm-up for logged-in users ───────────────────────
-      // Always kick off preload as soon as auth state is known. The scheduler
-      // internally dedupes concurrent calls, so this is safe even if Dashboard
-      // triggers it again.
-      if (u) {
-        sharedScheduler.preloadAllSoundfonts().catch(() => {});
-      }
     });
     return () => unsubscribe();
   }, [setUser, setLoading]);
@@ -126,7 +117,7 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ConnectivityBanner isOffline={isOffline} showBackOnline={showBackOnline} />
       <AnimatedRoutes user={user} />
     </BrowserRouter>

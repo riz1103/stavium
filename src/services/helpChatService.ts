@@ -36,6 +36,18 @@ To scan or import from PDF or scanned images:
 - Toolbar sections (collapsible): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected)
 - Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars)
 
+## Linked part extraction (v1)
+- In Edit mode, open Structure and use "Part Extraction".
+- "Generate linked parts" creates one separate linked composition per source staff.
+- In Part Extraction, users can select one or multiple staves.
+- Under each selected staff, users can choose "All voices" or specific lanes (V1-V4).
+- Selecting specific lanes stores only those voice lanes in extracted linked parts.
+- Linked parts are intended for rehearsal/printing workflows (for example, individual SATB or instrument packets).
+- Saving the full score auto-syncs already generated linked parts.
+- When opening a linked part directly, use "Refresh from source" in Part Extraction to pull latest source changes.
+- In View mode, users can still open existing linked parts (and open source from a linked part), but generate/sync/refresh actions require Edit mode.
+- Linked parts remain normal compositions for PDF/MIDI export.
+
 ## Multi-voice lanes (V1-V4)
 - In Notes, use Voices to pick V1, V2, V3, or V4 for editing.
 - Each lane has its own visibility toggle (show/hide).

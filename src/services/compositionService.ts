@@ -18,6 +18,7 @@ import {
 import { FirebaseError } from 'firebase/app';
 import { db } from './firebase';
 import { Composition } from '../types/music';
+import { buildLinkedPartComposition } from '../utils/partExtractionUtils';
 
 const COMPOSITIONS_COLLECTION = 'compositions';
 const COMPOSITION_REVISIONS_COLLECTION = 'compositionRevisions';
@@ -87,6 +88,18 @@ export interface CompositionOwnershipTransfer {
   expiresAt: string;
   respondedAt?: string;
   respondedByUid?: string;
+}
+
+export interface LinkedPartSyncResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  partIds: string[];
+}
+
+export interface LinkedPartSelection {
+  staffIndex: number;
+  voiceIndex?: number | null;
 }
 
 const toFirestoreTimestamp = (value: unknown): Timestamp => {
@@ -350,6 +363,12 @@ const chunkArray = <T,>(items: T[], chunkSize: number): T[][] => {
   return chunks;
 };
 
+const normalizeLinkedPartVoiceIndex = (value: number | null | undefined): number | null =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 4 ? value : null;
+
+const linkedPartKey = (staffIndex: number, voiceIndex: number | null) =>
+  `${staffIndex}:${voiceIndex === null ? 'all' : voiceIndex}`;
+
 const deleteDocRefsInBatches = async (refs: Array<ReturnType<typeof doc>>): Promise<void> => {
   if (refs.length === 0) return;
   // Keep safely below Firestore's 500-op batch limit.
@@ -513,6 +532,199 @@ export const getComposition = async (
   }
 };
 
+export const getLinkedPartCompositions = async (
+  sourceCompositionId: string,
+  viewerUid: string
+): Promise<Composition[]> => {
+  if (!sourceCompositionId || !viewerUid) return [];
+  try {
+    const colRef = collection(db, COMPOSITIONS_COLLECTION);
+    // Query by owner first (always index-friendly), then filter linked-part metadata client-side.
+    // This avoids permission-denied query shapes caused by broad collection scans.
+    const q = query(colRef, where('userId', '==', viewerUid));
+    const snapshots = await getDocsWithRetry(
+      q,
+      () => getDocs(q),
+      'linked-parts-by-owner'
+    );
+
+    return snapshots.docs
+      .map((docSnap) => {
+        const data = docSnap.data() as any;
+        return {
+          ...data,
+          id: docSnap.id,
+          createdAt: data.createdAt?.toDate?.() ?? data.createdAt,
+          updatedAt: data.updatedAt?.toDate?.() ?? data.updatedAt,
+          pendingOwnershipTransferExpiresAt:
+            data.pendingOwnershipTransferExpiresAt?.toDate?.() ?? data.pendingOwnershipTransferExpiresAt,
+        } as Composition;
+      })
+      .filter((composition) => composition.linkedPartSource?.compositionId === sourceCompositionId);
+  } catch (error) {
+    console.error('Error loading linked part compositions:', error);
+    return [];
+  }
+};
+
+export const syncLinkedPartsFromSource = async (params: {
+  sourceComposition: Composition;
+  sourceCompositionId: string;
+  ownerUid: string;
+  viewerUid: string;
+  partSelections?: LinkedPartSelection[];
+  modifiedByUid?: string;
+  ownerMeta?: { ownerEmail?: string | null; ownerName?: string | null };
+}): Promise<LinkedPartSyncResult> => {
+  const source = params.sourceComposition;
+  const sourceCompositionId = params.sourceCompositionId;
+  if (!source || !sourceCompositionId) {
+    return { created: 0, updated: 0, skipped: 0, partIds: [] };
+  }
+
+  const existingParts = await getLinkedPartCompositions(sourceCompositionId, params.viewerUid);
+  const existingByPartKey = new Map<string, Composition>();
+  existingParts.forEach((part) => {
+    const staffIndex = part.linkedPartSource?.staffIndex;
+    if (typeof staffIndex === 'number') {
+      const voiceIndex = normalizeLinkedPartVoiceIndex(part.linkedPartSource?.voiceIndex);
+      existingByPartKey.set(linkedPartKey(staffIndex, voiceIndex), part);
+    }
+  });
+
+  const normalizeSelection = (
+    selections: LinkedPartSelection[]
+  ): Array<{ staffIndex: number; voiceIndex: number | null }> =>
+    Array.from(
+      new Map(
+        selections
+          .filter(
+            (selection) =>
+              Number.isInteger(selection.staffIndex) &&
+              selection.staffIndex >= 0 &&
+              selection.staffIndex < source.staves.length
+          )
+          .map((selection) => {
+            const normalized = {
+              staffIndex: selection.staffIndex,
+              voiceIndex: normalizeLinkedPartVoiceIndex(selection.voiceIndex),
+            };
+            return [linkedPartKey(normalized.staffIndex, normalized.voiceIndex), normalized] as const;
+          })
+      ).values()
+    );
+
+  const requestedSelections = normalizeSelection(params.partSelections ?? []);
+  const fallbackExistingSelections = normalizeSelection(
+    existingParts.map((part) => ({
+      staffIndex: part.linkedPartSource?.staffIndex ?? -1,
+      voiceIndex: part.linkedPartSource?.voiceIndex ?? null,
+    }))
+  );
+  const fallbackAllStaffSelections = source.staves.map((_, staffIndex) => ({
+    staffIndex,
+    voiceIndex: null as number | null,
+  }));
+  const targets =
+    requestedSelections.length > 0
+      ? requestedSelections
+      : fallbackExistingSelections.length > 0
+      ? fallbackExistingSelections
+      : fallbackAllStaffSelections;
+
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const partIds: string[] = [];
+
+  for (const target of targets) {
+    const existing = existingByPartKey.get(linkedPartKey(target.staffIndex, target.voiceIndex));
+    const nextPart = buildLinkedPartComposition({
+      sourceComposition: source,
+      sourceCompositionId,
+      sourceStaffIndex: target.staffIndex,
+      sourceVoiceIndex: target.voiceIndex,
+      preserveExistingId: existing?.id,
+      preserveCreatedAt: existing?.createdAt,
+      preserveOwnerId: existing?.userId ?? params.ownerUid,
+      preservePrivacy: existing?.privacy,
+      preserveSharePermission: existing?.sharePermission,
+      preserveSharedEmails: existing?.sharedEmails,
+    });
+
+    const nextSignature = nextPart.linkedPartSource?.sourceSignature;
+    const previousSignature = existing?.linkedPartSource?.sourceSignature;
+    if (existing && previousSignature && nextSignature && previousSignature === nextSignature) {
+      skipped += 1;
+      if (existing.id) partIds.push(existing.id);
+      continue;
+    }
+
+    const savedId = await saveComposition(
+      nextPart,
+      existing?.userId ?? params.ownerUid,
+      params.modifiedByUid,
+      params.ownerMeta
+    );
+
+    if (existing?.id) {
+      updated += 1;
+    } else {
+      created += 1;
+    }
+    partIds.push(savedId);
+  }
+
+  return { created, updated, skipped, partIds };
+};
+
+export const refreshLinkedPartComposition = async (params: {
+  partComposition: Composition;
+  ownerUid: string;
+  modifiedByUid?: string;
+  ownerMeta?: { ownerEmail?: string | null; ownerName?: string | null };
+}): Promise<{ partId: string | null; refreshed: boolean; reason?: string }> => {
+  const linked = params.partComposition.linkedPartSource;
+  if (!linked) {
+    return { partId: params.partComposition.id ?? null, refreshed: false, reason: 'not-linked-part' };
+  }
+
+  const source = await getComposition(linked.compositionId);
+  if (!source) {
+    return { partId: params.partComposition.id ?? null, refreshed: false, reason: 'missing-source' };
+  }
+  if (!source.staves[linked.staffIndex]) {
+    return { partId: params.partComposition.id ?? null, refreshed: false, reason: 'missing-source-staff' };
+  }
+
+  const refreshedPart = buildLinkedPartComposition({
+    sourceComposition: source,
+    sourceCompositionId: linked.compositionId,
+    sourceStaffIndex: linked.staffIndex,
+    sourceVoiceIndex: normalizeLinkedPartVoiceIndex(linked.voiceIndex),
+    preserveExistingId: params.partComposition.id,
+    preserveCreatedAt: params.partComposition.createdAt,
+    preserveOwnerId: params.partComposition.userId ?? params.ownerUid,
+    preservePrivacy: params.partComposition.privacy,
+    preserveSharePermission: params.partComposition.sharePermission,
+    preserveSharedEmails: params.partComposition.sharedEmails,
+  });
+
+  const nextSignature = refreshedPart.linkedPartSource?.sourceSignature;
+  const previousSignature = params.partComposition.linkedPartSource?.sourceSignature;
+  if (nextSignature && previousSignature && nextSignature === previousSignature) {
+    return { partId: params.partComposition.id ?? null, refreshed: false, reason: 'up-to-date' };
+  }
+
+  const savedId = await saveComposition(
+    refreshedPart,
+    params.partComposition.userId ?? params.ownerUid,
+    params.modifiedByUid,
+    params.ownerMeta
+  );
+  return { partId: savedId, refreshed: true };
+};
+
 /**
  * Return all compositions the user can see:
  * - their own
@@ -543,10 +755,16 @@ export const getUserCompositions = async (
   ];
 
   if (userEmail) {
+    const normalizedEmail = normalizeEmail(userEmail);
     namedQueries.push({
       label: 'shared-with-email',
       promise: (() => {
-        const q = query(colRef, where('sharedEmails', 'array-contains', userEmail));
+        // Include privacy guard so the query shape matches read rules for shared docs.
+        const q = query(
+          colRef,
+          where('privacy', '==', 'shared'),
+          where('sharedEmails', 'array-contains', normalizedEmail)
+        );
         return getDocsWithRetry(q, () => getDocs(q), 'dashboard-shared-with-email');
       })(),
     });
@@ -560,7 +778,14 @@ export const getUserCompositions = async (
 
   results.forEach((result, i) => {
     if (result.status === 'rejected') {
-      console.warn(`[compositions] "${namedQueries[i].label}" query failed:`, result.reason);
+      const label = namedQueries[i].label;
+      // Shared-email query can be blocked in older deployments before indexes/rules catch up.
+      // Skip noisy console warnings and keep dashboard usable from other successful queries.
+      if (label === 'shared-with-email') {
+        console.debug(`[compositions] "${label}" query skipped:`, result.reason);
+        return;
+      }
+      console.warn(`[compositions] "${label}" query failed:`, result.reason);
       return;
     }
     successfulQueries += 1;

@@ -134,6 +134,25 @@ export type GregorianChantDivision = 'none' | 'minima' | 'minor' | 'major' | 'fi
 export type GregorianChantSpacingDensity = 'tight' | 'normal' | 'spacious';
 export type GregorianChantInterpretation = 'subtle' | 'medium' | 'expressive';
 
+export interface LinkedPartSource {
+  /** Source full-score composition id this part is derived from. */
+  compositionId: string;
+  /** Staff index in the source score used to build this part. */
+  staffIndex: number;
+  /** Optional voice index (0-3) when this linked part captures a single voice lane only. */
+  voiceIndex?: number | null;
+  /** Human-readable source staff label at sync time. */
+  staffLabel: string;
+  /** Source score title at sync time. */
+  sourceTitle: string;
+  /** Signature of source content used for stale/update checks. */
+  sourceSignature: string;
+  /** ISO timestamp when source was last known during sync. */
+  sourceUpdatedAt: string;
+  /** ISO timestamp when this part was last synced. */
+  syncedAt: string;
+}
+
 export interface Composition {
   id?: string;
   title: string;
@@ -184,6 +203,8 @@ export interface Composition {
   chantSpacingDensity?: GregorianChantSpacingDensity;
   /** Performance profile for chant ornaments (interpretive timing). */
   chantInterpretation?: GregorianChantInterpretation;
+  /** Present when this document is a linked derived part from a full score staff. */
+  linkedPartSource?: LinkedPartSource;
 }
 
 export type Instrument = 

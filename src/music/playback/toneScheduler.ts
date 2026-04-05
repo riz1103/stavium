@@ -429,7 +429,6 @@ export class ToneScheduler {
         format: 'mp3',
       });
       this.sfPlayers.set(name, player);
-      console.log(`[Soundfont] Loaded: ${name} (${sfName})`);
       return player;
     } catch (err) {
       console.warn(`[Soundfont] Failed to load "${name}", using synth fallback:`, err);
@@ -467,18 +466,6 @@ export class ToneScheduler {
    * playback delay. Returns a promise that resolves when all instruments are loaded.
    */
   async preloadInstruments(composition: Composition, includeCommon: boolean = true): Promise<void> {
-    try {
-      // Ensure AudioContext is started (required for soundfont loading)
-      await Tone.start();
-      const ac = this.getAC();
-      if (ac.state === 'suspended') await ac.resume();
-    } catch (err) {
-      // AudioContext might not be available yet (user hasn't interacted)
-      // That's okay, we'll try again when playback starts
-      console.debug('AudioContext not available for preloading, will retry on playback:', err);
-      return;
-    }
-
     const instrumentsToLoad = new Set<string>();
 
     // Collect all instruments from the composition
@@ -507,7 +494,6 @@ export class ToneScheduler {
     });
 
     await Promise.all(loadPromises);
-    console.log(`[Soundfont] Preloaded ${instrumentsToLoad.size} instrument(s)`);
   }
 
   // ── Note Preview ─────────────────────────────────────────────────────────────
@@ -1328,13 +1314,6 @@ export class ToneScheduler {
    * when unlock fails so assets are cached before editing/playback starts.
    */
   async preloadPiano(): Promise<void> {
-    // Best effort: try to unlock, but never block/abort preload when unavailable.
-    try { await Tone.start(); } catch {}
-    try {
-      const ac = this.getAC();
-      if (ac.state === 'suspended') ac.resume().catch(() => {});
-    } catch {}
-
     try {
       await this.loadSoundfont('piano');
     } catch (err) {
@@ -1355,13 +1334,6 @@ export class ToneScheduler {
     if (this.preloadAllPromise) return this.preloadAllPromise;
 
     this.preloadAllPromise = (async () => {
-      // Best effort: try to unlock, but DO NOT abort preloading if not possible.
-      try { await Tone.start(); } catch {}
-      try {
-        const ac = this.getAC();
-        if (ac.state === 'suspended') ac.resume().catch(() => {});
-      } catch {}
-
       // ── 1. Piano first ─────────────────────────────────────────────────────
       if (!this.sfPlayers.has('piano')) {
         try { await this.loadSoundfont('piano'); } catch {}
@@ -1378,7 +1350,6 @@ export class ToneScheduler {
 
       // ── 3. Mark browser cache as warm for subsequent sessions ─────────────
       markSoundfontCacheWarm();
-      console.log('[Soundfont] All instruments preloaded. Cache marked warm for next session.');
     })().finally(() => {
       this.preloadAllPromise = null;
     });

@@ -16,6 +16,12 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'Linked Part Extraction (v1)',
+    date: 'Apr 2026',
+    details:
+      'From Structure, use Part Extraction to generate one linked score per staff (vocal/instrument parts) from a full score. Saving the full score now auto-syncs existing linked parts, and opening a linked part gives a "Refresh from source" action when you want the latest source edits.',
+  },
+  {
     title: 'Multi-Voice Editing Lanes (V1-V4)',
     date: 'Apr 2026',
     details:
@@ -72,6 +78,22 @@ const WHATS_NEW_ITEMS = [
 ];
 
 const FAQ_ITEMS = [
+  {
+    q: 'How do I create individual vocal/instrument parts from a full score?',
+    a: 'Open the full score in Edit mode, go to Structure, then use Part Extraction > Generate linked parts. Stavium creates one linked composition per staff and keeps each part tied to its source staff for rehearsal and printing workflows.',
+  },
+  {
+    q: 'How do linked parts stay updated after I edit the full score?',
+    a: 'When you save the full score, Stavium automatically syncs existing linked parts derived from that score. If you open a linked part directly, use "Refresh from source" in Part Extraction to pull the latest source changes on demand.',
+  },
+  {
+    q: 'Can I extract only one voice lane (V1-V4) into linked parts?',
+    a: 'Yes. In Part Extraction, select one or more staves, then choose All voices or specific lanes (V1-V4) per staff. You can mix targets, such as Alto V1+V2 and Tenor V1 only, in one sync run.',
+  },
+  {
+    q: 'Can I access linked parts in View mode?',
+    a: 'Yes. In View mode you can open existing linked parts (and open source from a linked part). Creating/syncing or refreshing linked parts requires Edit mode.',
+  },
   {
     q: 'How do I edit multiple voices on one staff?',
     a: 'In Notes, use the Voices control to pick V1, V2, V3, or V4. Add notes/rests in the selected lane, toggle each lane visibility with the eye button, and use lane-level M (mute) or S (solo) for playback focus.',
@@ -391,6 +413,12 @@ export const HelpPage = () => {
               <div>
                 <h2 className="text-2xl font-bold text-sv-text mb-4">Editor Features</h2>
                 <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Linked Part Extraction</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Generate individual linked parts from a full score directly in Structure. Select single or multiple staves, then choose All voices or specific V1-V4 lanes per staff before syncing. Open linked parts from either Edit or View mode, and refresh from source when needed.
+                    </p>
+                  </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Multi-Voice Lanes</h3>
                     <p className="text-sv-text-muted text-sm">

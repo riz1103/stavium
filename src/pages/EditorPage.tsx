@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useUserStore } from '../app/store/userStore';
 import { RevisionTrigger, useScoreStore } from '../app/store/scoreStore';
 import { usePlaybackStore } from '../app/store/playbackStore';
-import { ensureCompositionOwnerMetadata, getComposition, getCompositionRevisionTimeline, saveComposition, saveCompositionRevisionSnapshot } from '../services/compositionService';
+import { ensureCompositionOwnerMetadata, getComposition, getCompositionRevisionTimeline, saveComposition, saveCompositionRevisionSnapshot, syncLinkedPartsFromSource } from '../services/compositionService';
 import { ScoreEditor } from '../components/editor/ScoreEditor';
 import { ScoreInfoPanel } from '../components/toolbar/ScoreInfoPanel';
 import { PlaybackControls } from '../components/playback/PlaybackControls';
@@ -30,6 +30,7 @@ import { ChordEditor } from '../components/toolbar/ChordEditor';
 import { MeasurePropertiesPanel } from '../components/toolbar/MeasurePropertiesPanel';
 import { StaffVolumeControls } from '../components/toolbar/StaffVolumeControls';
 import { AIArrangementPanel } from '../components/toolbar/AIArrangementPanel';
+import { PartExtractionPanel } from '../components/toolbar/PartExtractionPanel';
 import { ScoreReviewPanel } from '../components/review/ScoreReviewPanel';
 import { Measure } from '../types/music';
 import {
@@ -691,6 +692,23 @@ export const EditorPage = () => {
       };
       setComposition(syncedComposition);
 
+      // Keep previously generated linked parts in sync whenever the full score is saved.
+      if (!syncedComposition.linkedPartSource && syncedComposition.id) {
+        void syncLinkedPartsFromSource({
+          sourceComposition: syncedComposition,
+          sourceCompositionId: syncedComposition.id,
+          ownerUid: user.uid,
+          viewerUid: user.uid,
+          modifiedByUid: user.uid,
+          ownerMeta: {
+            ownerEmail: user.email,
+            ownerName: user.displayName,
+          },
+        }).catch((syncError) => {
+          console.warn('Linked part sync after save failed:', syncError);
+        });
+      }
+
       // First save from /editor (new composition): move to /editor/:id so
       // subsequent saves update this same composition instead of creating new ones.
       if (!id && savedId) {
@@ -885,6 +903,8 @@ export const EditorPage = () => {
           <Sep />
           <StaffVolumeControls />
           <Sep />
+          <PartExtractionPanel isReadOnly={true} />
+          <Sep />
           <ExportToolbar isReadOnly={true} onSnapshotEvent={persistRevisionSnapshot} />
           <Sep />
           <VersionHistoryPanel isReadOnly={true} />
@@ -925,6 +945,8 @@ export const EditorPage = () => {
             <MeasurePropertiesPanel />
                 {!isGregorianChant && <div className="hidden 2xl:block"><Sep /></div>}
             {!isGregorianChant && <AIArrangementPanel isReadOnly={isReadOnly} />}
+                <div className="hidden 2xl:block"><Sep /></div>
+            <PartExtractionPanel isReadOnly={isReadOnly} />
                 <div className="hidden 2xl:block"><Sep /></div>
             <ExportToolbar isReadOnly={false} onSnapshotEvent={persistRevisionSnapshot} />
                 <div className="hidden 2xl:block"><Sep /></div>
@@ -1077,6 +1099,7 @@ export const EditorPage = () => {
           <MeasurePropertiesPanel />
         </div>
         {!isGregorianChant && <AIArrangementPanel isReadOnly={isReadOnly} />}
+        <PartExtractionPanel isReadOnly={isReadOnly} />
         <StaffVolumeControls />
       </div>
     ),
@@ -1098,6 +1121,7 @@ export const EditorPage = () => {
         </div>
         <div className="flex gap-2 flex-wrap">
           {!isReadOnly && <UndoRedoToolbar />}
+          <PartExtractionPanel isReadOnly={isReadOnly} />
           <ExportToolbar isReadOnly={isReadOnly} onSnapshotEvent={persistRevisionSnapshot} />
           <VersionHistoryPanel isReadOnly={isReadOnly} />
         </div>
