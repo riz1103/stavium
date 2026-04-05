@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useScoreStore } from '../../app/store/scoreStore';
 import { usePlaybackStore } from '../../app/store/playbackStore';
 import { sharedScheduler } from '../../music/playback/toneScheduler';
+import { MidiInputPanel } from '../input/MidiInputPanel';
 
-export const PlaybackControls = () => {
+export const PlaybackControls = ({ isReadOnly = false }: { isReadOnly?: boolean }) => {
   const composition = useScoreStore((state) => state.composition);
   const playbackState = usePlaybackStore((state) => state.state);
   const setPlaybackState = usePlaybackStore((state) => state.setState);
@@ -373,6 +374,7 @@ export const PlaybackControls = () => {
           </select>
         </div>
       )}
+      {!isGregorianChant && <MidiInputPanel isReadOnly={isReadOnly} />}
     </div>
   );
 };

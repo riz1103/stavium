@@ -54,6 +54,8 @@ export type NavigationMark =
 export interface Note {
   pitch: Pitch;
   duration: NoteDuration;
+  /** Internal UI flag for live-capture preview notes during real-time recording. */
+  provisional?: boolean;
   accidental?: Accidental;
   /** Optional lyric syllable/text rendered beneath the note head. */
   lyric?: string;

@@ -39,6 +39,7 @@ import {
   CompositionMeasurePatch,
   clearCompositionMeasurePatches,
   clearCompositionPresence,
+  getCompositionEditingSnapshot,
   publishCompositionPresence,
   publishMeasurePatch,
   subscribeToCompositionPresence,
@@ -110,6 +111,7 @@ export const EditorPage = () => {
   const skipNextIdLoadRef = useRef(false);
   // Loaded compositions start in read-only mode; new compositions start in edit mode
   const [isReadOnly, setIsReadOnly] = useState(!!id);
+  const [viewModeLiveUpdates, setViewModeLiveUpdates] = useState(false);
 
   // Collapsible toolbar sections — persisted in localStorage
   const [collapsedRows, setCollapsedRows] = useState<Set<string>>(() => {
@@ -201,13 +203,20 @@ export const EditorPage = () => {
   const [firstScoreProgress, setFirstScoreProgress] = useState<FirstScoreProgress>(defaultFirstScoreProgress);
   const [discardingLiveChanges, setDiscardingLiveChanges] = useState(false);
   const [discardNotice, setDiscardNotice] = useState<string | null>(null);
+  const allowLiveScoreSync = !isReadOnly || viewModeLiveUpdates;
   const [collaborators, setCollaborators] = useState<CollaborationPresence[]>([]);
+  const [editorsOnOpen, setEditorsOnOpen] = useState<CollaborationPresence[]>([]);
+  const [editorsOnOpenCheckedAt, setEditorsOnOpenCheckedAt] = useState<string | null>(null);
   const lastMeasureHashesRef = useRef<Map<string, string>>(new Map());
   const measureUpdateTimesRef = useRef<Map<string, number>>(new Map());
   const pendingPublishTimersRef = useRef<Map<string, number>>(new Map());
   const seenPatchIdsRef = useRef<Set<string>>(new Set());
   const lastPatchCountRef = useRef(0);
   const suppressPublishMeasureKeysRef = useRef<Set<string>>(new Set());
+  const lastAppliedPatchAtRef = useRef<Map<string, number>>(new Map());
+  const lastPresencePayloadRef = useRef<string | null>(null);
+  const lastPresenceSentAtRef = useRef(0);
+  const lastSyncedOnboardingRef = useRef<string | null>(null);
   const cursorActivityRef = useRef<{
     staffIndex: number | null;
     measureIndex: number | null;
@@ -258,6 +267,14 @@ export const EditorPage = () => {
         setFirstScoreDone(remote.firstScoreDone);
         setChecklistDismissed(remote.checklistDismissed);
         setToolbarTipsHidden(remote.toolbarTipsHidden);
+        lastSyncedOnboardingRef.current = JSON.stringify(remote);
+      } else {
+        lastSyncedOnboardingRef.current = JSON.stringify({
+          ...defaultFirstScoreProgress,
+          firstScoreDone: false,
+          checklistDismissed: false,
+          toolbarTipsHidden: false,
+        } satisfies FirstScoreOnboardingState);
       }
 
       setOnboardingHydrated(true);
@@ -279,10 +296,14 @@ export const EditorPage = () => {
       checklistDismissed,
       toolbarTipsHidden,
     };
+    const payloadJson = JSON.stringify(payload);
+    if (payloadJson === lastSyncedOnboardingRef.current) return;
     const timer = window.setTimeout(() => {
       saveFirstScoreOnboardingState(user.uid, payload).catch((error) => {
         console.warn('Failed to sync onboarding state:', error);
+        return;
       });
+      lastSyncedOnboardingRef.current = payloadJson;
     }, 350);
     return () => window.clearTimeout(timer);
   }, [
@@ -352,28 +373,44 @@ export const EditorPage = () => {
     lastMeasureHashesRef.current = nextHashes;
   };
 
-  const applyRemoteMeasurePatch = (patch: CompositionMeasurePatch) => {
+  const applyRemoteMeasurePatch = (patch: CompositionMeasurePatch): boolean => {
     const current = useScoreStore.getState().composition;
-    if (!current) return;
-    const targetStaff = current.staves[patch.staffIndex];
-    const targetMeasure = targetStaff?.measures?.[patch.measureIndex];
-    if (!targetMeasure) return;
+    if (!current) return false;
+    const ensureMeasureShell = (number: number): Measure => ({
+      number,
+      voices: [{ notes: [] }, { notes: [] }, { notes: [] }, { notes: [] }],
+    });
+
+    const staves = current.staves.map((staff) => ({
+      ...staff,
+      measures: [...staff.measures],
+    }));
+    const staffTemplate = staves[0];
+    while (staves.length <= patch.staffIndex) {
+      const nextIndex = staves.length;
+      staves.push({
+        clef: staffTemplate?.clef ?? 'treble',
+        instrument: staffTemplate?.instrument ?? 'piano',
+        name: `Staff ${nextIndex + 1}`,
+        measures: [],
+      });
+    }
+    const targetStaff = staves[patch.staffIndex];
+    while (targetStaff.measures.length <= patch.measureIndex) {
+      targetStaff.measures.push(ensureMeasureShell(targetStaff.measures.length + 1));
+    }
+    const targetMeasure = targetStaff.measures[patch.measureIndex];
 
     const key = measureKey(patch.staffIndex, patch.measureIndex);
     const currentHash = hashMeasure(targetMeasure);
-    if (currentHash === patch.nextHash) return;
-
-    const localUpdatedAt = measureUpdateTimesRef.current.get(key) ?? 0;
+    if (currentHash === patch.nextHash) return true;
     const remoteUpdatedAt = Math.max(patch.createdAtMs, patch.clientTimestamp || 0);
-    const shouldApply =
-      currentHash === patch.baseHash ||
-      remoteUpdatedAt >= localUpdatedAt;
-
-    if (!shouldApply) return;
+    const lastAppliedAt = lastAppliedPatchAtRef.current.get(key) ?? 0;
+    if (remoteUpdatedAt < lastAppliedAt) return true;
 
     const nextComposition = {
       ...current,
-      staves: current.staves.map((staff, staffIndex) => {
+      staves: staves.map((staff, staffIndex) => {
         if (staffIndex !== patch.staffIndex) return staff;
         return {
           ...staff,
@@ -385,26 +422,41 @@ export const EditorPage = () => {
     };
     suppressPublishMeasureKeysRef.current.add(key);
     measureUpdateTimesRef.current.set(key, remoteUpdatedAt);
+    lastAppliedPatchAtRef.current.set(key, remoteUpdatedAt);
     setComposition(nextComposition);
+    return true;
   };
 
-  const publishPresence = async () => {
+  const publishPresence = async (options?: { force?: boolean }) => {
     if (!composition?.id || !user?.uid) return;
+    if (isReadOnly) return;
+    const payload = {
+      compositionId: composition.id,
+      uid: user.uid,
+      displayName: user.displayName,
+      email: user.email,
+      isEditing: !isReadOnly,
+      selection: {
+        staffIndex: selectedStaffIndex,
+        measureIndex: selectedMeasureIndex,
+        voiceIndex: selectedVoiceIndex,
+        noteIndex: selectedNote?.noteIndex ?? null,
+      },
+      cursor: cursorActivityRef.current,
+    } as const;
+    const signature = JSON.stringify(payload);
+    const now = Date.now();
+    if (
+      !options?.force &&
+      signature === lastPresencePayloadRef.current &&
+      now - lastPresenceSentAtRef.current < 12_000
+    ) {
+      return;
+    }
     try {
-      await publishCompositionPresence({
-        compositionId: composition.id,
-        uid: user.uid,
-        displayName: user.displayName,
-        email: user.email,
-        isEditing: !isReadOnly,
-        selection: {
-          staffIndex: selectedStaffIndex,
-          measureIndex: selectedMeasureIndex,
-          voiceIndex: selectedVoiceIndex,
-          noteIndex: selectedNote?.noteIndex ?? null,
-        },
-        cursor: cursorActivityRef.current,
-      });
+      await publishCompositionPresence(payload);
+      lastPresencePayloadRef.current = signature;
+      lastPresenceSentAtRef.current = now;
     } catch (error) {
       console.warn('Presence sync failed:', error);
     }
@@ -430,24 +482,41 @@ export const EditorPage = () => {
   useEffect(() => {
     seenPatchIdsRef.current.clear();
     lastPatchCountRef.current = 0;
+    lastAppliedPatchAtRef.current.clear();
     syncMeasureHashesFromComposition(composition);
-    if (!composition?.id || !user?.uid) {
+    if (!composition?.id || !user?.uid || !allowLiveScoreSync) {
       setCollaborators([]);
       return;
     }
-
-    const unsubPresence = subscribeToCompositionPresence(
-      composition.id,
-      (presence) => setCollaborators(presence),
-      (error) => console.warn('Presence subscription error:', error)
-    );
+    let unsubPresence: (() => void) | null = null;
+    let heartbeat: number | null = null;
+    let handleUnload: (() => void) | null = null;
+    if (!isReadOnly) {
+      unsubPresence = subscribeToCompositionPresence(
+        composition.id,
+        (presence) => setCollaborators(presence),
+        (error) => console.warn('Presence subscription error:', error)
+      );
+      lastPresencePayloadRef.current = null;
+      lastPresenceSentAtRef.current = 0;
+      void publishPresence({ force: true });
+      heartbeat = window.setInterval(() => {
+        void publishPresence({ force: true });
+      }, 15_000);
+      handleUnload = () => {
+        void clearCompositionPresence(composition.id!, user.uid);
+      };
+      window.addEventListener('beforeunload', handleUnload);
+    } else {
+      setCollaborators([]);
+    }
 
     const unsubPatches = subscribeToMeasurePatches(
       composition.id,
-      (patches) => {
+      (patches, snapshotSize) => {
         const previousPatchCount = lastPatchCountRef.current;
-        lastPatchCountRef.current = patches.length;
-        if (previousPatchCount > 0 && patches.length === 0) {
+        lastPatchCountRef.current = snapshotSize;
+        if (previousPatchCount > 0 && snapshotSize === 0) {
           void (async () => {
             const restored = await getComposition(composition.id!);
             if (!restored) return;
@@ -469,34 +538,32 @@ export const EditorPage = () => {
         }
         patches.forEach((patch) => {
           if (seenPatchIdsRef.current.has(patch.id)) return;
-          seenPatchIdsRef.current.add(patch.id);
-          if (patch.actorUid === user.uid) return;
-          applyRemoteMeasurePatch(patch);
+          const handled = applyRemoteMeasurePatch(patch);
+          if (handled) {
+            seenPatchIdsRef.current.add(patch.id);
+          }
         });
       },
       (error) => console.warn('Patch subscription error:', error)
     );
 
-    void publishPresence();
-    const heartbeat = window.setInterval(() => {
-      void publishPresence();
-    }, 15_000);
-
-    const handleUnload = () => {
-      void clearCompositionPresence(composition.id!, user.uid);
-    };
-    window.addEventListener('beforeunload', handleUnload);
-
     return () => {
-      window.clearInterval(heartbeat);
-      window.removeEventListener('beforeunload', handleUnload);
-      void clearCompositionPresence(composition.id!, user.uid);
-      unsubPresence();
+      if (heartbeat !== null) window.clearInterval(heartbeat);
+      if (handleUnload) {
+        window.removeEventListener('beforeunload', handleUnload);
+      }
+      if (!isReadOnly) {
+        void clearCompositionPresence(composition.id!, user.uid);
+      }
+      if (unsubPresence) {
+        unsubPresence();
+      }
       unsubPatches();
     };
-  }, [composition?.id, user?.uid]);
+  }, [composition?.id, user?.uid, isReadOnly, allowLiveScoreSync]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     void publishPresence();
   }, [
     composition?.id,
@@ -509,7 +576,7 @@ export const EditorPage = () => {
   ]);
 
   useEffect(() => {
-    if (!composition?.id || !user?.uid || !composition) return;
+    if (!composition?.id || !user?.uid || !composition || isReadOnly) return;
     if (skipNextPatchPublishRef.current) {
       skipNextPatchPublishRef.current = false;
       syncMeasureHashesFromComposition(composition);
@@ -569,17 +636,23 @@ export const EditorPage = () => {
       }, 180);
       pendingPublishTimersRef.current.set(change.key, timer);
     });
-  }, [composition, composition?.id, user?.uid, user?.displayName]);
+  }, [composition, composition?.id, user?.uid, user?.displayName, isReadOnly]);
   
   const loadComposition = async (compositionId: string) => {
     try {
       setLoading(true);
+      setViewModeLiveUpdates(false);
       clearRevisionHistory();
+      setEditorsOnOpen([]);
+      setEditorsOnOpenCheckedAt(null);
       const comp = await getComposition(compositionId);
       if (comp) {
         syncMeasureHashesFromComposition(comp);
         setComposition(comp);
-        const revisionTimeline = await getCompositionRevisionTimeline(comp.id || compositionId);
+        const [revisionTimeline, editingSnapshot] = await Promise.all([
+          getCompositionRevisionTimeline(comp.id || compositionId),
+          getCompositionEditingSnapshot(comp.id || compositionId, user?.uid),
+        ]);
         setRevisionHistory(
           revisionTimeline.map((revision) => ({
             id: revision.id,
@@ -589,6 +662,8 @@ export const EditorPage = () => {
             composition: revision.composition,
           }))
         );
+        setEditorsOnOpen(editingSnapshot);
+        setEditorsOnOpenCheckedAt(new Date().toISOString());
         setTitle(comp.title);
         setIsReadOnly(true); // Always start read-only when opening a saved composition
         resetPlaybackTempo(null); // Reset playback tempo when loading new composition
@@ -772,6 +847,7 @@ export const EditorPage = () => {
     svgY?: number;
   }) => {
     cursorActivityRef.current = payload;
+    if (isReadOnly) return;
     if (!composition?.id || !user?.uid) return;
     if (cursorPublishTimerRef.current) {
       window.clearTimeout(cursorPublishTimerRef.current);
@@ -1247,6 +1323,37 @@ export const EditorPage = () => {
             <span className="hidden sm:inline">View Only</span>
           </div>
         )}
+        {isReadOnly && composition?.id && (
+          <label
+            className={`flex-shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs ${
+              viewModeLiveUpdates
+                ? 'border-emerald-400/40 bg-emerald-500/12 text-emerald-300'
+                : 'border-sv-border bg-sv-elevated text-sv-text-muted'
+            }`}
+            title="When on, this score view receives live collaboration updates in View mode."
+          >
+            <input
+              type="checkbox"
+              checked={viewModeLiveUpdates}
+              onChange={(e) => setViewModeLiveUpdates(e.target.checked)}
+              className="w-3.5 h-3.5"
+            />
+            <span className="hidden sm:inline">Live score updates</span>
+            <span className="sm:hidden">Live</span>
+          </label>
+        )}
+        {isReadOnly && editorsOnOpen.length > 0 && (
+          <div
+            className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-medium"
+            title={`Checked on load${editorsOnOpenCheckedAt ? ` at ${new Date(editorsOnOpenCheckedAt).toLocaleTimeString()}` : ''}. Snapshot only (not live status).`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+            <span className="hidden sm:inline">
+              Being edited ({editorsOnOpen.length})
+            </span>
+            <span className="sm:hidden">Editing</span>
+          </div>
+        )}
 
         {/* Title input */}
         <input
@@ -1416,7 +1523,7 @@ export const EditorPage = () => {
 
       {/* ── Playback bar (always visible) ─────────────────────────────────── */}
       <div className="flex-shrink-0 border-t border-sv-border bg-sv-card">
-        <PlaybackControls />
+        <PlaybackControls isReadOnly={isReadOnly} />
       </div>
 
       {/* ── Mobile: Tab bar + sliding tool panel ──────────────────────────── */}

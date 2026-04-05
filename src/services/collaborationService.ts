@@ -95,6 +95,27 @@ const COLLABORATOR_COLORS = [
   '#eab308',
 ];
 
+const removeUndefinedValues = (value: any): any => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => removeUndefinedValues(item))
+      .filter((item) => item !== undefined);
+  }
+  if (typeof value === 'object' && value.constructor === Object) {
+    const next: Record<string, unknown> = {};
+    Object.entries(value).forEach(([key, entry]) => {
+      const cleaned = removeUndefinedValues(entry);
+      if (cleaned !== undefined) {
+        next[key] = cleaned;
+      }
+    });
+    return next;
+  }
+  return value;
+};
+
 const toIso = (value: unknown): string => {
   if (value instanceof Timestamp) return value.toDate().toISOString();
   if (value instanceof Date) return value.toISOString();
@@ -198,6 +219,25 @@ export const subscribeToCompositionPresence = (
   );
 };
 
+export const getCompositionEditingSnapshot = async (
+  compositionId: string,
+  excludeUid?: string
+): Promise<CollaborationPresence[]> => {
+  if (!compositionId) return [];
+  const q = query(
+    collection(db, PRESENCE_COLLECTION),
+    where('compositionId', '==', compositionId)
+  );
+  const snapshot = await getDocs(q);
+  const now = Date.now();
+  return snapshot.docs
+    .map(mapPresence)
+    .filter((entry) => entry.isEditing)
+    .filter((entry) => new Date(entry.expiresAt).getTime() > now)
+    .filter((entry) => !excludeUid || entry.uid !== excludeUid)
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+};
+
 export const publishCompositionPresence = async (params: PublishPresenceParams): Promise<void> => {
   const presenceId = `${params.compositionId}_${params.uid}`;
   const docRef = doc(db, PRESENCE_COLLECTION, presenceId);
@@ -225,7 +265,7 @@ export const clearCompositionPresence = async (compositionId: string, uid: strin
 };
 
 export const publishMeasurePatch = async (params: PublishMeasurePatchParams): Promise<void> => {
-  await addDoc(collection(db, PATCH_COLLECTION), {
+  const payload = removeUndefinedValues({
     compositionId: params.compositionId,
     actorUid: params.actorUid,
     actorName: params.actorName ?? null,
@@ -237,11 +277,12 @@ export const publishMeasurePatch = async (params: PublishMeasurePatchParams): Pr
     clientTimestamp: params.clientTimestamp,
     createdAt: serverTimestamp(),
   });
+  await addDoc(collection(db, PATCH_COLLECTION), payload);
 };
 
 export const subscribeToMeasurePatches = (
   compositionId: string,
-  callback: (patches: CompositionMeasurePatch[]) => void,
+  callback: (patches: CompositionMeasurePatch[], snapshotSize: number) => void,
   onError?: (error: Error) => void
 ): (() => void) => {
   const q = query(
@@ -251,10 +292,12 @@ export const subscribeToMeasurePatches = (
   return onSnapshot(
     q,
     (snapshot) => {
-      const patches = snapshot.docs
-        .map(mapMeasurePatch)
+      const patches = snapshot
+        .docChanges()
+        .filter((change) => change.type === 'added' || change.type === 'modified')
+        .map((change) => mapMeasurePatch(change.doc))
         .sort((a, b) => a.createdAtMs - b.createdAtMs);
-      callback(patches);
+      callback(patches, snapshot.size);
     },
     (error) => {
       console.error('[collaborationService] Measure patch snapshot error:', error);

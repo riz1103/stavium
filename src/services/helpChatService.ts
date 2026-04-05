@@ -34,7 +34,66 @@ To scan or import from PDF or scanned images:
 ## Editor layout
 - Top header: Back button, Score Info (ℹ️), Help (?), title, Edit/View toggle, Undo/Redo, Save
 - Toolbar sections (collapsible): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected)
-- Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars)
+- Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars) and a MIDI Input panel
+
+## MIDI keyboard input (Phase 3)
+- Use the "MIDI Input" panel in the bottom playback bar (standard notation mode).
+- Input modes:
+  - "Step Input": by default, each key press inserts one note using the currently selected Note toolbar duration.
+    - Optional toggle: "Adaptive hold-to-duration" shows a short provisional note on key-down and updates its displayed duration while held, then finalizes on key-up.
+    - Adaptive timing uses the current measure timing context (effective local tempo + time signature), not only a fixed global tempo.
+    - If a held adaptive note crosses a barline, it is split across measures with ties instead of being forced into one measure.
+    - While holding a key in adaptive mode, the MIDI panel shows a live duration label that updates as hold time increases.
+    - Near-simultaneous key presses are grouped and distributed across available voice lanes (up to four) for chord-like step entry.
+  - "Real-time": records performed timing from incoming MIDI notes.
+- "Chord grouping" (Off / Tight / Normal / Loose) controls onset-grouping sensitivity for BOTH Step and Real-time multi-key input.
+- "Record click" toggle is shown for Real-time mode only.
+- Quantization options in Real-time mode: Off, 1/4, 1/8, 1/16, 1/8T.
+  - With Quantize = Off, a tiny legato gap tolerance is still applied so near-contiguous human key presses do not produce unintended micro-rests.
+- In Real-time mode:
+  1) choose quantization
+  2) optionally enable "Record click" if you want a click track while recording
+  3) optionally enable "Auto pickup (from first onset)" for pickup-style starts
+  4) click "Start Recording"
+  5) audio/instruments initialize first, then a short pre-roll arming countdown (~2s) runs
+  6) play notes on a connected MIDI device or the virtual piano
+  7) optional: click "Pause Recording", then "Resume Recording" (resume also uses a short countdown)
+  8) click "Stop Recording" to commit notes to the score
+- During active recording, the panel shows a live REC timer (elapsed recording time).
+- "Record click" is heard during active recording only (not during arming countdown).
+- During active recording, provisional notes appear on the score in real time:
+  - on note-on, a short initial note appears
+  - while held, its displayed duration updates live
+  - if held across a barline, the live preview extends into following measure(s) with ties
+  - silence is previewed live as duration-adaptive rests, using remaining measure capacity and continuing across bars (including full-measure rests)
+  - simultaneous/near-simultaneous key onsets are grouped and mapped across available voice lanes (up to four) so chord-like attacks are preserved
+  - users can tune the grouping sensitivity with "Chord grouping": Off / Tight / Normal / Loose
+  - on stop, captured timing is committed with selected quantization.
+- During MIDI entry (Step or Real-time), the score view auto-follows the active measure.
+- If no physical MIDI input is connected, use the built-in virtual piano in the same panel.
+- The virtual piano is rendered as a real piano-style keyboard with white and black keys that can be clicked/tapped.
+- Virtual/MIDI key monitoring sustains while a key is held (especially noticeable on sustaining timbres like organ), and releases on key-up.
+- Repeated strikes of the same pitch are shown as distinct retriggers (brief re-attack emphasis) rather than one continuous held highlight when the note is not sustained.
+- In the virtual keyboard area, browser context menu / long-press callout is suppressed so touch multi-key playing is not interrupted by right-click style menus.
+- Browser gesture defaults are suppressed inside the virtual keyboard area (inline and fullscreen) so they do not interrupt performance, while multi-finger key presses remain playable.
+- Virtual piano view options:
+  - Keyboard range buttons: "Simple" (compact), "Extended" (larger), "Ultra (88-key)" (full A0-C8)
+  - "Full screen piano" opens a large overlay keyboard; press Esc or Close to exit.
+  - "Octave jump" buttons:
+    - in Simple mode, shift the visible one-octave window to the selected C range
+    - in Extended/Ultra, center the scroll position around the selected C octave.
+  - Computer keyboard mapping works in all keyboard views; in Simple view the visible octave auto-shifts as needed so mapped notes stay visible.
+  - Optional toggle: "Show playback on keyboard" highlights virtual piano keys while score playback is running.
+- Optional toggle: "Computer keyboard input" enables note input from physical computer keys (US-layout default map).
+  - "Edit key map" opens a fullscreen 88-key visual piano modal for rebinding; click a piano key, press a computer key, and mapping saves locally on that device/browser.
+  - In Step mode, enabling "Computer keyboard input" auto-switches Chord grouping to Off by default for immediate single-note entry; users can still manually change grouping afterward.
+- On mobile-sized viewports, the MIDI panel starts collapsed by default to preserve staff visibility.
+- Users can toggle the panel with Show/Hide in the MIDI panel header.
+- MIDI input targets the currently selected Staff/Measure/Voice.
+- In View mode (read-only), virtual piano controls still stay enabled for preview/audition:
+  - users can play keys, switch Keyboard size (Simple/Extended/Ultra), use Octave jump, and open Full screen piano
+  - this does not insert notes or modify the composition.
+  - the MIDI panel shows a hint badge: "Preview only - no score input".
 
 ## Linked part extraction (v1)
 - In Edit mode, open Structure and use "Part Extraction".
@@ -106,12 +165,17 @@ To scan or import from PDF or scanned images:
   - Tremolo slash count on selected note stem
   - Ottava controls: start (8va / 8vb / 15ma / 15mb) and Ottava End
   - Pedal controls: Ped. (start) and ✶ (end)
-- In Measure Properties (standard notation), under "Repeats / Endings / Navigation":
+- In Measure Properties (standard notation), open it from Structure via the "Measure Props" button (shows current bar like M3/M4), then under "Repeats / Endings / Navigation":
   - Toggle Repeat Start / Repeat End
   - Toggle Segno / Coda
   - Enter ending text (e.g. "1." or "2.")
   - Select navigation mark: D.C., D.C. al Coda, D.S., D.S. al Coda, To Coda, Fine
 - The same measure-level controls are also available in Note Expression via Advanced Notation.
+- Mid-composition changes (key/time/tempo/clef):
+  - Select the target measure first.
+  - Open Structure → "Measure Props" (shows current bar like M3/M4).
+  - Set Key Signature, Time Signature, Tempo, or Clef.
+  - These overrides apply from that measure onward until another override appears later.
 - Playback interpretation (current behavior):
   - Repeats/endings and D.S./D.C./To Coda/Fine are followed during playback sequencing
   - Ottava markings transpose sounding pitch while active
@@ -123,11 +187,14 @@ To scan or import from PDF or scanned images:
 1. Select a duration in the Notes toolbar (whole, half, quarter, eighth, sixteenth, 32nd)
 2. Optional: click "Dot" for dotted values, and use the Tuplet selector for tuplets (3:2, 5:4, 6:4, 7:4)
 3. Click on the staff where you want the note
-4. Select a note to change pitch (drag), add accidentals (including double-sharp/double-flat), ties, slurs, articulations, dynamics, lyrics, chords
+4. If the selected duration does not fit the remaining beats, Stavium splits it across subsequent measures and ties note segments automatically, reflowing right-side notes when needed and creating new measures as needed.
+5. Select a note to change pitch (drag), add accidentals (including double-sharp/double-flat), ties, slurs, articulations, dynamics, lyrics, chords
+6. Deleting notes (Delete/Backspace, long-press delete, or drag-off-staff delete) now reflows right-side content from that measure so timing stays valid.
 
 ## Adding rests
 - Use the Rest toolbar for whole through 32nd rests
 - Tuplet rests are supported via the Rest toolbar Tuplet selector
+- If a rest duration overflows the remaining beats, it is split across following measures (with right-side reflow when needed) and measures are auto-created as needed.
 
 ## Sharing
 Click "Score Info" in the editor header → use the Sharing section to set Private, Shared (by email), or Public
@@ -148,6 +215,12 @@ Click "Score Info" in the editor header → use the Sharing section to set Priva
 ## Real-time co-editing (v1)
 - For shared/public scores, the editor header can show who is currently active as "In score" badges.
 - The score canvas can show live collaborator cursor and selection highlights.
+- In View mode, there is a "Live score updates" toggle in the header:
+  - OFF (default) reduces background collaboration network traffic while read-only
+  - ON keeps the read-only score synced with incoming live measure updates
+  - This toggle is not persisted; it resets to OFF when a composition is loaded.
+- On composition open, the editor performs a one-time presence check and may show a "Being edited" badge in the header.
+  - This badge is a load-time snapshot only and does not continuously poll status by itself.
 - Co-editing merge behavior is per-measure:
   - edits in different measures merge safely
   - same-measure conflicts use latest incoming measure patch as fallback resolution.

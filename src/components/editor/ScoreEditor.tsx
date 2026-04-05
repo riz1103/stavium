@@ -14,7 +14,7 @@ import {
   getMeasureLayout,
   RenderedNotePosition,
 } from '../../music/renderer/vexflowRenderer';
-import { Note, Rest, MusicElement } from '../../types/music';
+import { Note, Rest, MusicElement, NoteDuration } from '../../types/music';
 import { midiToPitch, pitchToMidi, applyKeySignature, applyKeySignatureAndMeasureAccidentals } from '../../utils/noteUtils';
 import { durationToBeats } from '../../utils/durationUtils';
 import type { CollaborationPresence } from '../../services/collaborationService';
@@ -128,6 +128,25 @@ Object.entries(TENOR_STEP_TO_MIDI).forEach(([step, midi]) => {
   TENOR_MIDI_TO_STEP[midi] = Number(step);
 });
 
+const ENTRY_SPLIT_DURATIONS: NoteDuration[] = [
+  'whole',
+  'dotted-half',
+  'half',
+  'dotted-quarter',
+  'quarter',
+  'triplet-half',
+  'triplet-quarter',
+  'dotted-eighth',
+  'eighth',
+  'triplet-eighth',
+  'dotted-sixteenth',
+  'sixteenth',
+  'triplet-sixteenth',
+  'thirty-second',
+  'triplet-thirty-second',
+];
+const ENTRY_EPSILON = 0.0001;
+
 function midiToDiatonicStep(midi: number, clef: 'treble' | 'bass' | 'alto' | 'tenor'): number {
   const table = clef === 'treble'
     ? TREBLE_MIDI_TO_STEP
@@ -205,12 +224,14 @@ export const ScoreEditor = ({
   const measureSelectionStart = useScoreStore((s) => s.measureSelectionStart);
   const selectedStaffIndex   = useScoreStore((s) => s.selectedStaffIndex);
   const addNote            = useScoreStore((s) => s.addNote);
+  const addMeasure         = useScoreStore((s) => s.addMeasure);
+  const setComposition     = useScoreStore((s) => s.setComposition);
   const moveNote           = useScoreStore((s) => s.moveNote);
+  const removeNote         = useScoreStore((s) => s.removeNote);
   const toggleEngravingSystemBreak = useScoreStore((s) => s.toggleEngravingSystemBreak);
   const toggleEngravingPageBreak = useScoreStore((s) => s.toggleEngravingPageBreak);
   const setSelectedNote    = useScoreStore((s) => s.setSelectedNote);
   const setSelectedRestDuration = useScoreStore((s) => s.setSelectedRestDuration);
-  const deleteSelectedNote = useScoreStore((s) => s.deleteSelectedNote);
   const playingNotes       = usePlaybackStore((s) => s.playingNotes);
   const playbackState     = usePlaybackStore((s) => s.state);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -220,6 +241,13 @@ export const ScoreEditor = ({
   );
   const hasVisibleStaves = visibleStaffIndices.length > 0;
   const staffLineSpan = (composition?.notationSystem === 'gregorian-chant' ? 3 : 4) * 10;
+  const durationDefs = useMemo(
+    () =>
+      ENTRY_SPLIT_DURATIONS.map((duration) => ({ duration, beats: durationToBeats(duration) }))
+        .filter((entry) => entry.beats > 0)
+        .sort((a, b) => b.beats - a.beats),
+    []
+  );
   const getTopLineYForStaff = (staffIndex: number): number | null => {
     const rowIndex = visibleStaffIndices.indexOf(staffIndex);
     if (rowIndex < 0) return null;
@@ -244,6 +272,7 @@ export const ScoreEditor = ({
 
   // Auto-scroll: track the last measure we scrolled to so we only scroll once per measure
   const lastAutoScrollMeasureRef = useRef<number>(-1);
+  const lastMidiFollowMeasureRef = useRef<number>(-1);
 
   // Preview scheduler for note previews (uses actual instrument sounds)
   const previewSchedulerRef = useRef<ToneScheduler | null>(null);
@@ -491,6 +520,237 @@ export const ScoreEditor = ({
     return voice.notes.length;
   };
 
+  const parseTimeSignature = (timeSignature: string): { numerator: number; denominator: number } => {
+    const [rawNum, rawDen] = timeSignature.split('/').map(Number);
+    const numerator = Number.isFinite(rawNum) && rawNum > 0 ? rawNum : 4;
+    const denominator = Number.isFinite(rawDen) && rawDen > 0 ? rawDen : 4;
+    return { numerator, denominator };
+  };
+
+  const getEffectiveTimeSignatureForMeasure = (measureIndex: number): string => {
+    const latest = useScoreStore.getState().composition;
+    if (!latest) return '4/4';
+    const measures = latest.staves[0]?.measures ?? [];
+    for (let i = measureIndex; i >= 0; i--) {
+      const sig = measures[i]?.timeSignature;
+      if (sig) return sig;
+    }
+    return latest.timeSignature || '4/4';
+  };
+
+  const getMeasureCapacityBeats = (measureIndex: number): number => {
+    const latest = useScoreStore.getState().composition;
+    if (!latest) return 4;
+    const { numerator, denominator } = parseTimeSignature(getEffectiveTimeSignatureForMeasure(measureIndex));
+    const beats = numerator * (4 / denominator);
+    if (latest.anacrusis && measureIndex === 0) {
+      const pickupBeats = Math.max(1, latest.pickupBeats ?? 1);
+      return pickupBeats * (4 / denominator);
+    }
+    return Number.isFinite(beats) && beats > 0 ? beats : 4;
+  };
+
+  const ensureMeasureExists = (staffIndex: number, measureIndex: number) => {
+    let guard = 0;
+    while (guard < 256) {
+      const latest = useScoreStore.getState().composition;
+      const count = latest?.staves[staffIndex]?.measures.length ?? 0;
+      if (measureIndex < count) return;
+      addMeasure(staffIndex);
+      guard++;
+    }
+  };
+
+  const getVoiceUsedBeatsAtIndex = (
+    staffIndex: number,
+    measureIndex: number,
+    voiceIndex: number,
+    insertIndex: number
+  ): number => {
+    const latest = useScoreStore.getState().composition;
+    const voice = latest?.staves[staffIndex]?.measures?.[measureIndex]?.voices?.[voiceIndex];
+    if (!voice) return 0;
+    return voice.notes.slice(0, Math.max(0, insertIndex)).reduce((sum, el) => sum + durationToBeats(el.duration), 0);
+  };
+
+  const appendEntryAcrossMeasures = (
+    staffIndex: number,
+    measureIndex: number,
+    voiceIndex: number,
+    insertIndex: number,
+    beats: number,
+    buildElement: (duration: NoteDuration, hasMoreSegments: boolean) => Note | Rest
+  ) => {
+    let remaining = Math.max(0, beats);
+    let currentMeasure = measureIndex;
+    let currentInsert = insertIndex;
+
+    while (remaining > ENTRY_EPSILON) {
+      ensureMeasureExists(staffIndex, currentMeasure);
+      const used = getVoiceUsedBeatsAtIndex(staffIndex, currentMeasure, voiceIndex, currentInsert);
+      const capacity = getMeasureCapacityBeats(currentMeasure);
+      if (used >= capacity - ENTRY_EPSILON) {
+        currentMeasure += 1;
+        currentInsert = 0;
+        continue;
+      }
+
+      const available = Math.max(0, capacity - used);
+      const chunkTarget = Math.min(remaining, available);
+      if (chunkTarget <= ENTRY_EPSILON) {
+        currentMeasure += 1;
+        currentInsert = 0;
+        continue;
+      }
+
+      const fallback = durationDefs[durationDefs.length - 1];
+      const chosen =
+        durationDefs.find((def) => def.beats <= chunkTarget + ENTRY_EPSILON) ??
+        durationDefs.reduce((best, candidate) =>
+          Math.abs(candidate.beats - chunkTarget) < Math.abs(best.beats - chunkTarget) ? candidate : best
+        , fallback);
+      const segmentBeats = Math.min(chosen.beats, chunkTarget);
+      const hasMore = remaining - segmentBeats > ENTRY_EPSILON;
+      addNote(staffIndex, currentMeasure, voiceIndex, buildElement(chosen.duration, hasMore), currentInsert);
+      remaining -= segmentBeats;
+      currentMeasure += 1;
+      currentInsert = 0;
+    }
+  };
+
+  const cloneComposition = (source: NonNullable<typeof composition>) =>
+    JSON.parse(JSON.stringify(source)) as NonNullable<typeof composition>;
+
+  const getEffectiveTimeSignatureFromDraft = (
+    draft: NonNullable<typeof composition>,
+    measureIndex: number
+  ): string => {
+    const measures = draft.staves[0]?.measures ?? [];
+    for (let i = measureIndex; i >= 0; i--) {
+      const sig = measures[i]?.timeSignature;
+      if (sig) return sig;
+    }
+    return draft.timeSignature || '4/4';
+  };
+
+  const getMeasureCapacityFromDraft = (
+    draft: NonNullable<typeof composition>,
+    measureIndex: number
+  ): number => {
+    const { numerator, denominator } = parseTimeSignature(getEffectiveTimeSignatureFromDraft(draft, measureIndex));
+    const beats = numerator * (4 / denominator);
+    if (draft.anacrusis && measureIndex === 0) {
+      const pickupBeats = Math.max(1, draft.pickupBeats ?? 1);
+      return pickupBeats * (4 / denominator);
+    }
+    return Number.isFinite(beats) && beats > 0 ? beats : 4;
+  };
+
+  const ensureMeasureExistsInDraft = (draft: NonNullable<typeof composition>, measureIndex: number) => {
+    while ((draft.staves[0]?.measures.length ?? 0) <= measureIndex) {
+      draft.staves.forEach((staff) => {
+        staff.measures.push({
+          number: staff.measures.length + 1,
+          voices: [{ notes: [] }, { notes: [] }, { notes: [] }, { notes: [] }],
+        });
+      });
+    }
+  };
+
+  const hasVoiceOverflowFromMeasure = (
+    source: NonNullable<typeof composition>,
+    staffIndex: number,
+    voiceIndex: number,
+    fromMeasureIndex: number
+  ): boolean => {
+    const measures = source.staves[staffIndex]?.measures ?? [];
+    for (let mi = fromMeasureIndex; mi < measures.length; mi++) {
+      const voice = measures[mi]?.voices?.[voiceIndex];
+      if (!voice) continue;
+      const used = voice.notes.reduce((sum, el) => sum + durationToBeats(el.duration), 0);
+      if (used > getMeasureCapacityFromDraft(source, mi) + ENTRY_EPSILON) return true;
+    }
+    return false;
+  };
+
+  const reflowVoiceRightFromMeasure = (
+    staffIndex: number,
+    voiceIndex: number,
+    fromMeasureIndex: number,
+    force = false
+  ) => {
+    const latest = useScoreStore.getState().composition;
+    if (!latest) return;
+    if (!force && !hasVoiceOverflowFromMeasure(latest, staffIndex, voiceIndex, fromMeasureIndex)) return;
+
+    const draft = cloneComposition(latest);
+    const sourceMeasures = draft.staves[staffIndex]?.measures ?? [];
+    const elements: MusicElement[] = [];
+    for (let mi = fromMeasureIndex; mi < sourceMeasures.length; mi++) {
+      const voice = sourceMeasures[mi]?.voices?.[voiceIndex];
+      if (!voice) continue;
+      elements.push(...voice.notes.map((el) => ({ ...el } as MusicElement)));
+      voice.notes = [];
+    }
+
+    let currentMeasure = fromMeasureIndex;
+    for (const element of elements) {
+      let remaining = Math.max(0, durationToBeats(element.duration));
+      while (remaining > ENTRY_EPSILON) {
+        ensureMeasureExistsInDraft(draft, currentMeasure);
+        const voice = draft.staves[staffIndex].measures[currentMeasure].voices[voiceIndex];
+        const used = voice.notes.reduce((sum, el) => sum + durationToBeats(el.duration), 0);
+        const capacity = getMeasureCapacityFromDraft(draft, currentMeasure);
+        if (used >= capacity - ENTRY_EPSILON) {
+          currentMeasure += 1;
+          continue;
+        }
+        const available = Math.max(0, capacity - used);
+        const chunkTarget = Math.min(remaining, available);
+        if (chunkTarget <= ENTRY_EPSILON) {
+          currentMeasure += 1;
+          continue;
+        }
+        const fallback = durationDefs[durationDefs.length - 1];
+        const chosen =
+          durationDefs.find((def) => def.beats <= chunkTarget + ENTRY_EPSILON) ??
+          durationDefs.reduce((best, candidate) =>
+            Math.abs(candidate.beats - chunkTarget) < Math.abs(best.beats - chunkTarget) ? candidate : best
+          , fallback);
+        const segmentBeats = Math.min(chosen.beats, chunkTarget);
+        const remainsAfterSegment = remaining - segmentBeats > ENTRY_EPSILON;
+
+        if ('pitch' in element) {
+          const noteSegment: Note = {
+            ...element,
+            duration: chosen.duration,
+            tie: remainsAfterSegment ? true : element.tie,
+          };
+          voice.notes.push(noteSegment);
+        } else {
+          const restSegment: Rest = {
+            ...element,
+            duration: chosen.duration,
+          };
+          voice.notes.push(restSegment);
+        }
+
+        remaining -= segmentBeats;
+        if (voice.notes.reduce((sum, el) => sum + durationToBeats(el.duration), 0) >= capacity - ENTRY_EPSILON) {
+          currentMeasure += 1;
+        }
+      }
+    }
+
+    setComposition(draft);
+  };
+
+  const deleteAndReflow = (ref: { staffIndex: number; measureIndex: number; voiceIndex: number; noteIndex: number }) => {
+    removeNote(ref.staffIndex, ref.measureIndex, ref.voiceIndex, ref.noteIndex);
+    reflowVoiceRightFromMeasure(ref.staffIndex, ref.voiceIndex, ref.measureIndex, true);
+    setSelectedNote(null);
+  };
+
 
   // ── Helper: resolve staff + measure from SVG coords ─────────────────────
   const resolveStaffMeasure = (
@@ -628,11 +888,7 @@ export const ScoreEditor = ({
       // Long press fires: delete
       const ref = longPressNoteRef.current;
       if (ref) {
-        setSelectedNote(ref);
-        // Give setState a tick to propagate, then delete
-        setTimeout(() => {
-          useScoreStore.getState().deleteSelectedNote();
-        }, 0);
+        deleteAndReflow(ref);
       }
       cancelLongPress();
       dragStateRef.current = null;
@@ -774,8 +1030,7 @@ export const ScoreEditor = ({
     if (ds) {
       if (ds.hasMoved && ds.offStaff) {
         // ── Drag off-staff → delete ──────────────────────────────────────
-        setSelectedNote(ds.noteRef);
-        setTimeout(() => { useScoreStore.getState().deleteSelectedNote(); }, 0);
+        deleteAndReflow(ds.noteRef);
         return;
       }
 
@@ -847,6 +1102,7 @@ export const ScoreEditor = ({
     if (selectedRestDuration) {
       const rest: Rest = { duration: selectedRestDuration };
       addNote(staffIndex, measureIndex, selectedVoiceIndex, rest, insertIndex);
+      reflowVoiceRightFromMeasure(staffIndex, selectedVoiceIndex, measureIndex);
       // Clear rest selection after adding (user can click again to add more)
       setSelectedRestDuration(null);
     } else {
@@ -869,6 +1125,7 @@ export const ScoreEditor = ({
       // The accidental will be applied during playback/rendering
       const note: Note = { pitch: actualPitch, duration: selectedDuration };
       addNote(staffIndex, measureIndex, selectedVoiceIndex, note, insertIndex);
+      reflowVoiceRightFromMeasure(staffIndex, selectedVoiceIndex, measureIndex);
       
       // Preview the note sound using the actual pitch (with accidentals applied)
       previewNote(actualPitch, staffIndex);
@@ -1017,12 +1274,12 @@ export const ScoreEditor = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNote && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        deleteSelectedNote();
+        deleteAndReflow(selectedNote);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNote, deleteSelectedNote]);
+  }, [selectedNote, removeNote, setComposition]);
 
   // ── Derived drag visuals ─────────────────────────────────────────────────
   const isDragging   = dragState?.hasMoved ?? false;
@@ -1109,6 +1366,36 @@ export const ScoreEditor = ({
   // Auto-scroll to keep the currently playing note centred horizontally.
   // We throttle by measure: only scroll once each time the playback moves to a
   // new measure, so we don't fight 60-fps note updates cancelling the scroll.
+  const scrollToSvgX = (targetSvgX: number, behavior: ScrollBehavior = 'smooth') => {
+    const container = scrollContainerRef.current;
+    const svgEl = containerRef.current?.querySelector('svg') as SVGSVGElement | null;
+    if (!container || !svgEl) return;
+    const ctm = svgEl.getScreenCTM();
+    if (!ctm) return;
+
+    const pt = svgEl.createSVGPoint();
+    pt.x = targetSvgX;
+    pt.y = 0;
+    const screenX = pt.matrixTransform(ctm).x;
+    const containerRect = container.getBoundingClientRect();
+    const noteXInContent = screenX - containerRect.left + container.scrollLeft;
+    const desiredScrollLeft = noteXInContent - container.clientWidth / 2;
+    container.scrollTo({
+      left: Math.max(0, desiredScrollLeft),
+      behavior,
+    });
+  };
+
+  const scrollToMeasureCenter = (measureIndex: number, behavior: ScrollBehavior = 'smooth') => {
+    if (!composition) return;
+    const layout = getMeasureLayout(composition);
+    if (layout.length === 0) return;
+    const safeIndex = Math.max(0, Math.min(measureIndex, layout.length - 1));
+    const measure = layout[safeIndex];
+    if (!measure) return;
+    scrollToSvgX(measure.x + measure.width * 0.5, behavior);
+  };
+
   useEffect(() => {
     if (playbackState !== 'playing' || !scrollContainerRef.current || !rendererRef.current) return;
     if (playingNotes.size === 0) return;
@@ -1145,32 +1432,7 @@ export const ScoreEditor = ({
 
     if (found === 0) return;
     const targetSvgX = totalX / found;
-
-    // ── 3. Convert SVG-space X → scroll-container scroll position ────────────
-    const container = scrollContainerRef.current;
-    const svgEl = containerRef.current?.querySelector('svg') as SVGSVGElement | null;
-    if (!svgEl) return;
-
-    const ctm = svgEl.getScreenCTM();
-    if (!ctm) return;
-
-    // Transform the SVG point to screen coordinates
-    const pt = svgEl.createSVGPoint();
-    pt.x = targetSvgX;
-    pt.y = 0;
-    const screenX = pt.matrixTransform(ctm).x;
-
-    // Convert screen X → position within the scrollable content
-    const containerRect = container.getBoundingClientRect();
-    const noteXInContent = screenX - containerRect.left + container.scrollLeft;
-
-    // Scroll so the note is centred horizontally in the viewport
-    const desiredScrollLeft = noteXInContent - container.clientWidth / 2;
-
-    container.scrollTo({
-      left: Math.max(0, desiredScrollLeft),
-      behavior: 'smooth',
-    });
+    scrollToSvgX(targetSvgX, 'smooth');
   }, [playingNotes, playbackState]);  // no 'composition' dep — we only need note positions
 
   // Reset the auto-scroll measure tracker when playback stops
@@ -1179,6 +1441,22 @@ export const ScoreEditor = ({
       lastAutoScrollMeasureRef.current = -1;
     }
   }, [playbackState]);
+
+  useEffect(() => {
+    const onMidiFollowMeasure = (event: Event) => {
+      const custom = event as CustomEvent<{ measureIndex?: unknown }>;
+      const maybeIndex = custom?.detail?.measureIndex;
+      if (typeof maybeIndex !== 'number' || !Number.isFinite(maybeIndex)) return;
+      const targetMeasure = Math.max(0, Math.floor(maybeIndex));
+      if (targetMeasure === lastMidiFollowMeasureRef.current) return;
+      lastMidiFollowMeasureRef.current = targetMeasure;
+      window.requestAnimationFrame(() => scrollToMeasureCenter(targetMeasure, 'smooth'));
+    };
+    window.addEventListener('stavium:midi-follow-measure', onMidiFollowMeasure as EventListener);
+    return () => {
+      window.removeEventListener('stavium:midi-follow-measure', onMidiFollowMeasure as EventListener);
+    };
+  }, [composition]);
 
   return (
     <div 

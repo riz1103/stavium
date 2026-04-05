@@ -16,6 +16,18 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'View Mode Live Score Updates',
+    date: 'Apr 2026',
+    details:
+      'View mode now includes a "Live score updates" toggle in the editor header. It is off by default to reduce network/background traffic, and can be turned on when you want the score to follow incoming co-edit changes in real time while staying read-only.',
+  },
+  {
+    title: 'MIDI Input + Virtual Piano (Phase 3)',
+    date: 'Apr 2026',
+    details:
+      'The playback bar now includes a MIDI Input panel with Step Input and Real-time modes, quantization options (Off, 1/4, 1/8, 1/16, 1/8T), and Start/Stop Recording controls. A built-in virtual piano is available for note entry when no physical MIDI keyboard is connected, and in View mode the keyboard remains playable for preview-only audition (no score changes).',
+  },
+  {
     title: 'Advanced Notation Package (v1)',
     date: 'Apr 2026',
     details:
@@ -91,8 +103,36 @@ const WHATS_NEW_ITEMS = [
 
 const FAQ_ITEMS = [
   {
+    q: 'How do I enter notes from a MIDI keyboard or virtual piano?',
+    a: 'Use the MIDI Input panel in the bottom playback bar (standard notation mode). Select Step Input, then play notes from a connected MIDI device or the virtual piano. The virtual piano is shown as a real piano-style keyboard (white and black keys) that you can click/tap directly. Notes sustain while a key is held (useful for organ/sustaining sounds), and repeated strikes of the same pitch show a quick retrigger accent so separate attacks are visible. Use the Keyboard buttons (Simple, Extended, Ultra (88-key)) to switch range up to full A0-C8. Use Full screen piano for larger playing view. In Simple mode, Octave jump buttons shift the visible one-octave window (for example C4-C5 to C5-C6); in Extended/Ultra they center the scroll view around the selected C octave. Computer keyboard input works across all keyboard views; in Simple view the visible octave auto-shifts when needed so mapped notes remain visible. You can also toggle "Show playback on keyboard" to light up keys during score playback. Optional Computer keyboard input lets you play from your laptop/PC keyboard using a US-layout default map; you can turn it on/off, open "Edit key map" to launch a fullscreen 88-key visual rebinding modal, and mappings are saved locally on your device. In Step mode, turning on Computer keyboard input auto-switches Chord grouping to Off by default for immediate single-note entry (you can still manually change it). On touch screens, long-press/context-menu gesture defaults are suppressed inside the virtual keyboard area while allowing multi-finger piano presses. In View mode, the keyboard controls remain enabled for preview-only playing, but they do not write notes to the composition, and the panel shows a "Preview only - no score input" hint badge. On mobile, the MIDI panel starts collapsed by default to preserve score area; tap Show to expand it.',
+  },
+  {
+    q: 'Can Step Input derive duration from key hold time?',
+    a: 'Yes. In MIDI Input > Step Input, enable "Adaptive hold-to-duration". With that toggle on, a short provisional note appears as soon as you press a key, then its displayed duration updates while you keep holding it. On release, Stavium finalizes duration using the current measure timing context (effective tempo plus time signature). If your hold crosses a barline, the result is split across measures with ties so timing is preserved instead of forcing one oversized note into a single measure. Quantize still applies to stabilize durations. If you press multiple keys nearly at the same moment, Stavium groups that onset and places notes across available voice lanes so chord-like entries are preserved instead of forced into a single-note stream. Use Chord grouping (Off, Tight, Normal, Loose) to adjust grouping sensitivity in Step or Real-time mode.',
+  },
+  {
+    q: 'How do I record real-time MIDI and quantize it?',
+    a: 'In the MIDI Input panel, switch to Real-time mode, choose a Quantize value (Off, 1/4, 1/8, 1/16, or 1/8T), then click Start Recording. The panel prepares audio/instruments first, then runs a short 2-second arming countdown before capture starts. A live REC timer is shown while recording. Notes appear on the score in real time as provisional captures: each new press starts as a short value and grows while held, and if held across a barline the live preview extends into following measures with ties. Silence is also previewed during recording as duration-adaptive rests that use remaining measure capacity and roll into following measures (including full-measure rests). Simultaneous or near-simultaneous multi-key onsets are grouped and distributed across available voice lanes (up to four lanes) to preserve chord-like attacks, and you can tune grouping sensitivity with Chord grouping (Off, Tight, Normal, Loose). With Quantize Off, Stavium still applies a tiny legato gap tolerance to avoid accidental micro-rests between near-contiguous human key presses. You can Pause Recording, then Resume Recording with another short countdown so re-entry timing is easier. While recording, the score view auto-follows the active measure so your current capture area stays visible. Optionally enable Record click (Real-time mode only) to hear a click track during active recording (not during arming). Play your phrase on a physical MIDI keyboard or the virtual piano, then click Stop Recording to commit notes into the score.',
+  },
+  {
+    q: 'Can recording create a pickup (anacrusis) automatically?',
+    a: 'Yes. In Real-time mode, enable "Auto pickup (from first onset)". If recording starts in measure 1 and your first note begins after the start of the bar, Stavium can convert that take into a pickup-style start by trimming leading silence and treating the first onset as anacrusis entry.',
+  },
+  {
     q: 'How do I add repeats, endings, D.S./D.C., segno, or coda signs?',
-    a: 'Select a measure, then use either Measure Properties or Note Expression > Advanced Notation. Toggle Repeat Start/Repeat End, enter an ending label (like 1. or 2.), and choose a navigation mark (D.S., D.C., D.S. al Coda, D.C. al Coda, To Coda, or Fine). You can also toggle Segno and Coda symbols.',
+    a: 'Select a measure, then use either the "Measure Props" button in the Structure row (shows the current measure like M3/M4) or Note Expression > Advanced Notation. Toggle Repeat Start/Repeat End, enter an ending label (like 1. or 2.), and choose a navigation mark (D.S., D.C., D.S. al Coda, D.C. al Coda, To Coda, or Fine). You can also toggle Segno and Coda symbols.',
+  },
+  {
+    q: 'How do I change key, time, tempo, or clef in the middle of a composition?',
+    a: 'Select the measure where the change should begin, then click "Measure Props" in the Structure row. Set Key Signature, Time Signature, Tempo, or Clef there. These are measure-level overrides and apply from that measure onward until another change is added later.',
+  },
+  {
+    q: 'What happens if I place a note/rest longer than remaining beats in a measure?',
+    a: 'When adding notes or rests manually, Stavium preserves total duration by splitting overflow across following measure(s). This also reflows notes to the right when needed so measure limits remain valid. Notes are tied across split segments, rests are split as needed, and new measures are created automatically when required.',
+  },
+  {
+    q: 'When deleting notes, does the right side reflow too?',
+    a: 'Yes. Manual deletes now trigger right-side reflow from the edited measure so overflow/underflow is redistributed across following measures consistently with manual insert behavior.',
   },
   {
     q: 'How do I add grace notes, tremolo, ottava, or pedal lines?',
@@ -144,7 +184,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How does real-time co-editing work in the editor?',
-    a: 'On shared/public scores, Stavium now shows who is currently in the score, along with live cursor/selection highlights on the page. Edits sync per measure so simultaneous work in different measures merges safely, and same-measure conflicts fall back to latest measure patch.',
+    a: 'On shared/public scores, Stavium shows who is currently in the score, along with live cursor/selection highlights on the page. Edits sync per measure so simultaneous work in different measures merges safely, and same-measure conflicts fall back to latest measure patch. In View mode, live score syncing can be turned on with the "Live score updates" toggle in the header (off by default). That toggle is intentionally not persisted and resets to Off when you load a composition. When a saved composition opens, Stavium also does a one-time check and can show a "Being edited" badge in the header; this badge is a snapshot from load time (not a continuous live poll).',
   },
   {
     q: 'How do I discard unsaved live collaboration changes?',
@@ -446,6 +486,12 @@ export const HelpPage = () => {
               <div>
                 <h2 className="text-2xl font-bold text-sv-text mb-4">Editor Features</h2>
                 <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">MIDI Input + Virtual Piano</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      In the bottom playback bar, use the MIDI Input panel for keyboard-based entry. Step Input supports both fixed duration (from Notes toolbar) and Adaptive hold-to-duration with a live-growing provisional note while the key is held; long holds that cross a barline are committed as tied segments across measures. Real-time mode captures performed timing with quantization options before writing notes into the score. During MIDI entry, the score viewport auto-follows the active measure so you can keep recording/entering without manually scrolling. The virtual piano supports Simple, Extended, and Ultra (88-key) views, plus Full screen mode and octave jump shortcuts, and can optionally highlight keys during playback. In View mode, virtual piano controls stay enabled for audition only and do not alter notation.
+                    </p>
+                  </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Advanced Notation Package</h3>
                     <p className="text-sv-text-muted text-sm">

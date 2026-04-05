@@ -2025,13 +2025,17 @@ export class VexFlowRenderer {
     // Triplet and dotted modifiers are represented in our duration enum.
     const { baseDuration, isDotted } = this.getDurationInfo(note.duration);
     const duration = durationToVexFlow(baseDuration);
+    const isWholeDuration = baseDuration === 'whole';
 
     try {
       const staveNote = new StaveNote({ clef, keys: [key], duration });
+      const PROVISIONAL_COLOR = '#0ea5e9';
 
       // In multi-voice measures, force opposing stems so lanes read as separate voices.
-      const stemDir = forcedStemDir ?? this.getStemDirection(note.pitch, clef);
-      staveNote.setStemDirection(stemDir);
+      if (!isWholeDuration) {
+        const stemDir = forcedStemDir ?? this.getStemDirection(note.pitch, clef);
+        staveNote.setStemDirection(stemDir);
+      }
       // In 3-4 voice situations, notes can visually collapse into one notehead.
       // A tiny lane-specific x-shift keeps simultaneous voices distinguishable.
       if (typeof forcedXShift === 'number' && Number.isFinite(forcedXShift) && forcedXShift !== 0) {
@@ -2043,9 +2047,18 @@ export class VexFlowRenderer {
       }
       if (notationSystem === 'gregorian-chant') {
         // Chant uses stemless puncta instead of modern oval heads with stems/flags.
-        staveNote.setStemStyle({ strokeStyle: 'transparent', fillStyle: 'transparent' });
-        staveNote.setFlagStyle({ strokeStyle: 'transparent', fillStyle: 'transparent' });
+        if (!isWholeDuration) {
+          staveNote.setStemStyle({ strokeStyle: 'transparent', fillStyle: 'transparent' });
+          staveNote.setFlagStyle({ strokeStyle: 'transparent', fillStyle: 'transparent' });
+        }
         staveNote.setKeyStyle(0, { strokeStyle: 'transparent', fillStyle: 'transparent' });
+      } else if (note.provisional) {
+        // Live-capture preview note styling so recording feedback is visually distinct.
+        staveNote.setKeyStyle(0, { strokeStyle: PROVISIONAL_COLOR, fillStyle: PROVISIONAL_COLOR });
+        if (!isWholeDuration) {
+          staveNote.setStemStyle({ strokeStyle: PROVISIONAL_COLOR, fillStyle: PROVISIONAL_COLOR });
+          staveNote.setFlagStyle({ strokeStyle: PROVISIONAL_COLOR, fillStyle: PROVISIONAL_COLOR });
+        }
       }
 
       // Add augmentation dot if the duration is dotted

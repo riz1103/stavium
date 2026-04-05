@@ -278,6 +278,12 @@ html, body {
   cursor: pointer;
 }
 
+/* Ensure native dropdown options stay readable in dark theme. */
+.sv-select option {
+  background-color: var(--sv-elevated);
+  color: var(--sv-text);
+}
+
 /* Range slider */
 input[type="range"] {
   -webkit-appearance: none;

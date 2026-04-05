@@ -120,23 +120,27 @@ export const MeasurePropertiesPanel = () => {
 
   return (
     <>
-      <button
-        ref={btnRef}
-        onClick={() => setOpen((v) => !v)}
-        title="Measure-level overrides"
-        className={`sv-btn text-xs ${
-          open
-            ? 'bg-sv-cyan text-sv-bg border border-sv-cyan shadow-glow-sm'
-            : 'sv-btn-ghost'
-        }`}
-      >
-        <span>🎼</span>
-        <span>{measureLabel}</span>
-        {hasAny && (
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"
-                title="Has overrides" />
-        )}
-      </button>
+      <div className="sv-toolbar">
+        <span className="sv-toolbar-label">Measure</span>
+        <button
+          ref={btnRef}
+          onClick={() => setOpen((v) => !v)}
+          title={`Measure Properties (${measureLabel})`}
+          className={`${
+            open
+              ? 'sv-btn-active text-xs'
+              : 'sv-btn-ghost text-xs'
+          } flex items-center gap-1.5`}
+        >
+          <span aria-hidden>🎼</span>
+          <span>Measure Props</span>
+          <span className="text-[10px] text-sv-text-dim">{measureLabel}</span>
+          {hasAny && (
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"
+                  title="Has overrides" />
+          )}
+        </button>
+      </div>
 
       {open && pos && ReactDOM.createPortal(
         <div

@@ -66,6 +66,17 @@ interface ScheduledNote {
   endTime: number;   // AudioContext time (seconds)
 }
 
+interface HighlightStartEvent {
+  time: number;
+  id: number;
+  ref: PlayingNoteRef;
+}
+
+interface HighlightEndEvent {
+  time: number;
+  id: number;
+}
+
 /** A pending audio event that will be materialized into an AudioBufferSourceNode
  *  just-in-time (within a lookahead window) rather than all at once. */
 interface PendingAudioEvent {
@@ -341,6 +352,12 @@ export class ToneScheduler {
   private preloadAllPromise: Promise<void> | null = null;
   /** Animation frame ID for highlighting updates */
   private highlightAnimationFrame: number | null = null;
+  /** Incremental highlight timeline (faster than full-frame rescans). */
+  private highlightStarts: HighlightStartEvent[] = [];
+  private highlightEnds: HighlightEndEvent[] = [];
+  private highlightStartCursor = 0;
+  private highlightEndCursor = 0;
+  private activeHighlights: Map<number, PlayingNoteRef> = new Map();
   /** AudioContext start time (when playback began) */
   private playbackStartTime: number = 0;
   /** The AudioContext time when all notes will have finished */
@@ -356,10 +373,18 @@ export class ToneScheduler {
   private pendingClickCursor: number = 0;
   /** How far ahead (seconds) of AudioContext.currentTime we materialize nodes. */
   private static readonly LOOKAHEAD_SEC = 3.0;
+  /** Small visual lead to compensate render/store latency. */
+  private static readonly HIGHLIGHT_LEAD_SEC = 0.02;
   /** Lightweight synth used for count-in + metronome clicks. */
   private metronomeSynth: Tone.Synth | null = null;
   /** Optional completion callback used by UI for looping. */
   private onPlaybackComplete: (() => void) | null = null;
+  /** Live hold-preview notes keyed by opaque id. */
+  private heldPreviewNotes: Map<
+    string,
+    | { kind: 'fallback'; synth: Tone.PolySynth; pitch: string }
+    | { kind: 'soundfont'; stop: (when?: number) => void }
+  > = new Map();
 
   // ── AudioContext ──────────────────────────────────────────────────────────
   /** Share Tone.js's underlying AudioContext so timing is in sync */
@@ -656,6 +681,101 @@ export class ToneScheduler {
     } catch (err) {
       console.warn('Failed to preview note:', err);
     }
+  }
+
+  /**
+   * Start a held preview note and keep sounding until stopHeldPreview() is called.
+   * Used by virtual/step MIDI input so sustained instruments (e.g. organ) behave naturally.
+   */
+  async startHeldPreview(
+    pitch: string,
+    instrument: string,
+    keySignature: string
+  ): Promise<string | null> {
+    try {
+      await Tone.start();
+      const ac = this.getAC();
+      if (ac.state === 'suspended') await ac.resume();
+
+      const actualPitch = applyKeySignature(pitch, keySignature);
+      const midi = pitchToMidi(actualPitch);
+      const now = ac.currentTime + 0.005;
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      // Prefer real instrument timbre for held previews. Fall back to synth only if soundfont isn't available.
+      let sfPlayer: SoundfontPlayer | null | undefined = this.sfPlayers.get(instrument);
+      if (!sfPlayer) {
+        sfPlayer = await this.loadSoundfont(instrument);
+      }
+      if (sfPlayer) {
+        const shouldLoop = !LOOP_DISABLED.has(instrument);
+        const startedNode = sfPlayer.start(
+          String(midi) as unknown as Parameters<SoundfontPlayer['start']>[0],
+          now,
+          {
+            gain: 1,
+            loop: shouldLoop,
+            // Large max duration; caller will stop on key-up.
+            duration: 24,
+          } as any
+        ) as unknown as { stop?: (when?: number) => void };
+        const stop = (when?: number) => {
+          try {
+            if (startedNode?.stop) {
+              startedNode.stop(when);
+            } else {
+              sfPlayer?.stop(when);
+            }
+          } catch {
+            // best effort
+          }
+        };
+        this.heldPreviewNotes.set(id, { kind: 'soundfont', stop });
+        return id;
+      }
+
+      const synth = this.getFallbackSynth(instrument);
+      synth.triggerAttack(actualPitch, now);
+      this.heldPreviewNotes.set(id, { kind: 'fallback', synth, pitch: actualPitch });
+      return id;
+    } catch (err) {
+      console.warn('Failed to start held preview note:', err);
+      return null;
+    }
+  }
+
+  /** Stop a previously started held preview note. */
+  stopHeldPreview(id: string | null | undefined): void {
+    if (!id) return;
+    const active = this.heldPreviewNotes.get(id);
+    if (!active) return;
+    try {
+      if (active.kind === 'soundfont') {
+        active.stop();
+      } else {
+        active.synth.triggerRelease(active.pitch);
+      }
+    } catch {
+      // best-effort release for preview notes
+    } finally {
+      this.heldPreviewNotes.delete(id);
+    }
+  }
+
+  /** Stop all currently held preview notes. */
+  stopAllHeldPreviews(): void {
+    this.heldPreviewNotes.forEach((entry) => {
+      try {
+        if (entry.kind === 'soundfont') {
+          entry.stop();
+        } else {
+          entry.synth.triggerRelease(entry.pitch);
+        }
+      } catch {
+        // best-effort release for preview notes
+      }
+    });
+    this.heldPreviewNotes.clear();
   }
 
   // ── Playback ──────────────────────────────────────────────────────────────
@@ -1351,6 +1471,9 @@ export class ToneScheduler {
       ? Math.max(...this.scheduledNotes.map((n) => n.endTime))
       : now;
 
+    // Build incremental highlight timeline once per playback run.
+    this.buildHighlightTimeline();
+
     // Materialize the first batch of audio nodes before starting highlights
     this.drainPendingAudio();
 
@@ -1419,6 +1542,30 @@ export class ToneScheduler {
   }
 
   // ── Highlight updates ──────────────────────────────────────────────────────
+  private buildHighlightTimeline(): void {
+    this.highlightStarts = [];
+    this.highlightEnds = [];
+    this.highlightStartCursor = 0;
+    this.highlightEndCursor = 0;
+    this.activeHighlights.clear();
+    for (let i = 0; i < this.scheduledNotes.length; i++) {
+      const scheduled = this.scheduledNotes[i];
+      if (!Number.isFinite(scheduled.startTime) || !Number.isFinite(scheduled.endTime)) continue;
+      const safeEnd = Math.max(scheduled.endTime, scheduled.startTime + 0.001);
+      this.highlightStarts.push({
+        time: scheduled.startTime,
+        id: i,
+        ref: scheduled.ref,
+      });
+      this.highlightEnds.push({
+        time: safeEnd,
+        id: i,
+      });
+    }
+    this.highlightStarts.sort((a, b) => a.time - b.time);
+    this.highlightEnds.sort((a, b) => a.time - b.time);
+  }
+
   private startHighlightUpdates(): void {
     const ac = this.getAC();
     
@@ -1433,6 +1580,7 @@ export class ToneScheduler {
       this.drainPendingAudio();
 
       const currentTime = ac.currentTime;
+      const visualTime = currentTime + ToneScheduler.HIGHLIGHT_LEAD_SEC;
 
       // Auto-stop when all notes have finished playing (add 0.2s buffer for last note release)
       if (this.scheduledNotes.length > 0 && currentTime > this.playbackEndTime + 0.2) {
@@ -1445,16 +1593,32 @@ export class ToneScheduler {
         return;
       }
 
-      const playing: PlayingNoteRef[] = [];
+      let changed = false;
 
-      for (const scheduled of this.scheduledNotes) {
-        // Note is playing if current time is between start and end
-        if (currentTime >= scheduled.startTime && currentTime < scheduled.endTime) {
-          playing.push(scheduled.ref);
+      while (
+        this.highlightStartCursor < this.highlightStarts.length &&
+        this.highlightStarts[this.highlightStartCursor].time <= visualTime
+      ) {
+        const started = this.highlightStarts[this.highlightStartCursor];
+        this.highlightStartCursor++;
+        this.activeHighlights.set(started.id, started.ref);
+        changed = true;
+      }
+
+      while (
+        this.highlightEndCursor < this.highlightEnds.length &&
+        this.highlightEnds[this.highlightEndCursor].time <= visualTime
+      ) {
+        const ended = this.highlightEnds[this.highlightEndCursor];
+        this.highlightEndCursor++;
+        if (this.activeHighlights.delete(ended.id)) {
+          changed = true;
         }
       }
 
-      usePlaybackStore.getState().setPlayingNotes(playing);
+      if (changed) {
+        usePlaybackStore.getState().setPlayingNotes(Array.from(this.activeHighlights.values()));
+      }
       this.highlightAnimationFrame = requestAnimationFrame(updateHighlights);
     };
 
@@ -1496,6 +1660,7 @@ export class ToneScheduler {
 
   stop(): void {
     this.isPlaying = false;
+    this.stopAllHeldPreviews();
     this.stopHighlightUpdates();
     // Clear JIT pending queue so no more audio nodes will be created
     this.pendingAudio = [];
@@ -1518,6 +1683,11 @@ export class ToneScheduler {
     Tone.getTransport().stop();
     Tone.getTransport().cancel();
     this.scheduledNotes = [];
+    this.highlightStarts = [];
+    this.highlightEnds = [];
+    this.highlightStartCursor = 0;
+    this.highlightEndCursor = 0;
+    this.activeHighlights.clear();
     this.playbackEndTime = 0;
   }
 
