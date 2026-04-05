@@ -1,5 +1,5 @@
 import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental, Dot, Articulation, StaveTie, Beam, Stem, Tuplet, RendererBackends } from 'vexflow';
-import { Clef, Composition, GregorianChantDivision, GregorianChantSymbol, Measure, Note, Rest, NoteDuration } from '../../types/music';
+import { Clef, Composition, GregorianChantDivision, GregorianChantSymbol, Measure, Note, Rest, NoteDuration, NavigationMark, OttavaType } from '../../types/music';
 import { parsePitch, pitchToVexFlowKey, pitchToMidi, keySignatureToVexFlow, shouldShowAccidental, findMeasureAccidental, getKeySignatureAccidentals } from '../../utils/noteUtils';
 import { durationToBeats, durationToVexFlow } from '../../utils/durationUtils';
 import { PlayingNoteRef } from '../../app/store/playbackStore';
@@ -671,6 +671,265 @@ export class VexFlowRenderer {
     });
   }
 
+  private getNoteFromPosition(composition: Composition, pos: RenderedNotePosition): Note | null {
+    const element = composition.staves[pos.staffIndex]?.measures[pos.measureIndex]?.voices[pos.voiceIndex]?.notes[pos.noteDataIndex];
+    return element && 'pitch' in element ? (element as Note) : null;
+  }
+
+  private drawMeasureAdvancedMarks(
+    svgEl: SVGElement,
+    measure: Measure,
+    measureX: number,
+    measureWidth: number,
+    staffY: number,
+    showTextMarks: boolean
+  ): void {
+    const topY = staffY + STAFF_LINE_OFFSET - 34;
+    const drawRepeatDots = (x: number) => {
+      const dotA = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dotA.setAttribute('cx', String(x));
+      dotA.setAttribute('cy', String(staffY + STAFF_LINE_OFFSET + 15));
+      dotA.setAttribute('r', '1.6');
+      dotA.setAttribute('fill', '#000');
+      const dotB = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dotB.setAttribute('cx', String(x));
+      dotB.setAttribute('cy', String(staffY + STAFF_LINE_OFFSET + 25));
+      dotB.setAttribute('r', '1.6');
+      dotB.setAttribute('fill', '#000');
+      svgEl.appendChild(dotA);
+      svgEl.appendChild(dotB);
+    };
+    const drawRepeatBars = (x: number, isStart: boolean) => {
+      const heavy = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      const thin = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      const top = staffY + STAFF_LINE_OFFSET;
+      const bottom = top + 40;
+      heavy.setAttribute('x1', String(x));
+      heavy.setAttribute('x2', String(x));
+      heavy.setAttribute('y1', String(top));
+      heavy.setAttribute('y2', String(bottom));
+      heavy.setAttribute('stroke', '#000');
+      heavy.setAttribute('stroke-width', '2.4');
+      thin.setAttribute('x1', String(isStart ? x + 4 : x - 4));
+      thin.setAttribute('x2', String(isStart ? x + 4 : x - 4));
+      thin.setAttribute('y1', String(top));
+      thin.setAttribute('y2', String(bottom));
+      thin.setAttribute('stroke', '#000');
+      thin.setAttribute('stroke-width', '1');
+      svgEl.appendChild(heavy);
+      svgEl.appendChild(thin);
+      drawRepeatDots(isStart ? x + 8 : x - 8);
+    };
+
+    if (measure.repeatStart) drawRepeatBars(measureX + 3, true);
+    if (measure.repeatEnd) drawRepeatBars(measureX + measureWidth - 3, false);
+
+    if (showTextMarks && measure.ending) {
+      const y = topY - 2;
+      const x1 = measureX + 7;
+      const x2 = measureX + measureWidth - 7;
+      const bracket = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      bracket.setAttribute('d', `M ${x1} ${y + 12} L ${x1} ${y} L ${x2} ${y}`);
+      bracket.setAttribute('stroke', '#111');
+      bracket.setAttribute('stroke-width', '1.2');
+      bracket.setAttribute('fill', 'none');
+      svgEl.appendChild(bracket);
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', String(x1 + 2));
+      txt.setAttribute('y', String(y - 2));
+      txt.setAttribute('font-family', 'Arial, sans-serif');
+      txt.setAttribute('font-size', '10');
+      txt.setAttribute('font-weight', '700');
+      txt.setAttribute('fill', '#111');
+      txt.textContent = measure.ending;
+      svgEl.appendChild(txt);
+    }
+
+    if (showTextMarks && measure.segno) {
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', String(measureX + 10));
+      txt.setAttribute('y', String(topY));
+      txt.setAttribute('font-family', 'serif');
+      txt.setAttribute('font-size', '14');
+      txt.setAttribute('fill', '#111');
+      txt.textContent = '𝄋';
+      svgEl.appendChild(txt);
+    }
+    if (showTextMarks && measure.coda) {
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', String(measureX + measureWidth - 16));
+      txt.setAttribute('y', String(topY));
+      txt.setAttribute('font-family', 'serif');
+      txt.setAttribute('font-size', '14');
+      txt.setAttribute('fill', '#111');
+      txt.textContent = '𝄌';
+      svgEl.appendChild(txt);
+    }
+    if (showTextMarks && measure.navigation) {
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', String(measureX + measureWidth / 2));
+      txt.setAttribute('y', String(topY - 10));
+      txt.setAttribute('font-family', 'Arial, sans-serif');
+      txt.setAttribute('font-size', '10');
+      txt.setAttribute('font-style', 'italic');
+      txt.setAttribute('fill', '#111');
+      txt.setAttribute('text-anchor', 'middle');
+      txt.textContent = measure.navigation as NavigationMark;
+      svgEl.appendChild(txt);
+    }
+  }
+
+  private drawAdvancedNoteOverlays(composition: Composition, positions: RenderedNotePosition[]): void {
+    const svgEl = this.getSvgElement();
+    if (!svgEl || positions.length === 0) return;
+
+    const sorted = [...positions].sort((a, b) =>
+      a.staffIndex - b.staffIndex ||
+      a.voiceIndex - b.voiceIndex ||
+      a.measureIndex - b.measureIndex ||
+      a.noteDataIndex - b.noteDataIndex
+    );
+
+    type ActiveOttava = { type: OttavaType; start: RenderedNotePosition };
+    type ActivePedal = { start: RenderedNotePosition };
+
+    const ottavaByLane = new Map<string, ActiveOttava>();
+    const pedalByLane = new Map<string, ActivePedal>();
+
+    const closeOttava = (laneKey: string, endPos: RenderedNotePosition) => {
+      const active = ottavaByLane.get(laneKey);
+      if (!active) return;
+      const up = active.type === '8va' || active.type === '15ma';
+      const y = up ? Math.min(active.start.y, endPos.y) - 30 : Math.max(active.start.y, endPos.y) + 30;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', String(active.start.x + 16));
+      line.setAttribute('x2', String(endPos.x + 8));
+      line.setAttribute('y1', String(y));
+      line.setAttribute('y2', String(y));
+      line.setAttribute('stroke', '#111');
+      line.setAttribute('stroke-width', '1');
+      line.setAttribute('stroke-dasharray', '6 3');
+      svgEl.appendChild(line);
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', String(active.start.x));
+      txt.setAttribute('y', String(y - (up ? 2 : -12)));
+      txt.setAttribute('font-family', 'Arial, sans-serif');
+      txt.setAttribute('font-size', '10');
+      txt.setAttribute('font-style', 'italic');
+      txt.setAttribute('fill', '#111');
+      txt.textContent = active.type;
+      svgEl.appendChild(txt);
+      ottavaByLane.delete(laneKey);
+    };
+
+    const closePedal = (laneKey: string, endPos: RenderedNotePosition) => {
+      const active = pedalByLane.get(laneKey);
+      if (!active) return;
+      const y = Math.max(active.start.y, endPos.y) + 36;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      line.setAttribute(
+        'd',
+        `M ${active.start.x + 16} ${y} L ${endPos.x + 6} ${y} L ${endPos.x + 6} ${y - 8}`
+      );
+      line.setAttribute('stroke', '#111');
+      line.setAttribute('stroke-width', '1.2');
+      line.setAttribute('fill', 'none');
+      svgEl.appendChild(line);
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', String(active.start.x - 2));
+      txt.setAttribute('y', String(y + 3));
+      txt.setAttribute('font-family', 'Arial, sans-serif');
+      txt.setAttribute('font-size', '11');
+      txt.setAttribute('font-style', 'italic');
+      txt.setAttribute('fill', '#111');
+      txt.textContent = 'Ped.';
+      svgEl.appendChild(txt);
+      pedalByLane.delete(laneKey);
+    };
+
+    sorted.forEach((pos) => {
+      const note = this.getNoteFromPosition(composition, pos);
+      if (!note) return;
+      const laneKey = `${pos.staffIndex}:${pos.voiceIndex}`;
+
+      if (note.grace) {
+        const graceHead = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+        graceHead.setAttribute('cx', String(pos.x - 11));
+        graceHead.setAttribute('cy', String(pos.y - 4));
+        graceHead.setAttribute('rx', '3.6');
+        graceHead.setAttribute('ry', '2.5');
+        graceHead.setAttribute('fill', '#111');
+        svgEl.appendChild(graceHead);
+        const graceStem = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        graceStem.setAttribute('x1', String(pos.x - 8));
+        graceStem.setAttribute('x2', String(pos.x - 8));
+        graceStem.setAttribute('y1', String(pos.y - 4));
+        graceStem.setAttribute('y2', String(pos.y - 16));
+        graceStem.setAttribute('stroke', '#111');
+        graceStem.setAttribute('stroke-width', '1');
+        svgEl.appendChild(graceStem);
+        if (note.grace === 'acciaccatura') {
+          const slash = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          slash.setAttribute('x1', String(pos.x - 14));
+          slash.setAttribute('x2', String(pos.x - 6));
+          slash.setAttribute('y1', String(pos.y - 9));
+          slash.setAttribute('y2', String(pos.y - 16));
+          slash.setAttribute('stroke', '#111');
+          slash.setAttribute('stroke-width', '1');
+          svgEl.appendChild(slash);
+        }
+      }
+
+      if (note.tremolo && note.tremolo > 0) {
+        const slashCount = Math.max(1, Math.min(4, note.tremolo));
+        for (let i = 0; i < slashCount; i++) {
+          const dy = -10 + i * 4.5;
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', String(pos.x - 3));
+          line.setAttribute('x2', String(pos.x + 6));
+          line.setAttribute('y1', String(pos.y + dy));
+          line.setAttribute('y2', String(pos.y + dy - 4));
+          line.setAttribute('stroke', '#111');
+          line.setAttribute('stroke-width', '1.4');
+          svgEl.appendChild(line);
+        }
+      }
+
+      if (note.ottavaStart) {
+        ottavaByLane.set(laneKey, { type: note.ottavaStart, start: pos });
+      }
+      if (note.ottavaEnd) {
+        closeOttava(laneKey, pos);
+      }
+
+      if (note.pedalStart) {
+        pedalByLane.set(laneKey, { start: pos });
+      }
+      if (note.pedalEnd) {
+        closePedal(laneKey, pos);
+      }
+    });
+
+    ottavaByLane.forEach((active, laneKey) => {
+      const [staffIdxStr, voiceIdxStr] = laneKey.split(':');
+      const staffIdx = Number(staffIdxStr);
+      const voiceIdx = Number(voiceIdxStr);
+      const tail = [...sorted]
+        .reverse()
+        .find((p) => p.staffIndex === staffIdx && p.voiceIndex === voiceIdx);
+      if (tail) closeOttava(laneKey, tail);
+    });
+    pedalByLane.forEach((active, laneKey) => {
+      const [staffIdxStr, voiceIdxStr] = laneKey.split(':');
+      const staffIdx = Number(staffIdxStr);
+      const voiceIdx = Number(voiceIdxStr);
+      const tail = [...sorted]
+        .reverse()
+        .find((p) => p.staffIndex === staffIdx && p.voiceIndex === voiceIdx);
+      if (tail) closePedal(laneKey, tail);
+    });
+  }
+
   render(
     composition: Composition, 
     playingNotes?: Set<string>,
@@ -888,6 +1147,10 @@ export class VexFlowRenderer {
         }
 
         measureStave.setContext(this.context).draw();
+        if (!isGregorianChant) {
+          const svgEl = this.getSvgElement();
+          if (svgEl) this.drawMeasureAdvancedMarks(svgEl, measure, mx, mw, y, visibleRowIndex === 0);
+        }
         if (isGregorianChant && measureIndex > 0) {
           const prevClef = effectiveClef(staff.measures, measureIndex - 1, staff.clef);
           if (effClef !== prevClef) {
@@ -1600,6 +1863,8 @@ export class VexFlowRenderer {
 
     // ── Draw hairpins (< and >) after note positions are captured ───────────
     this.drawHairpins(composition);
+    // ── Draw advanced note overlays (grace/tremolo/ottava/pedal) ────────────
+    this.drawAdvancedNoteOverlays(composition, this.notePositions);
 
     // ── Draw selected note highlight (after all notes are rendered) ──────────
     if (selectedNote) {
@@ -2044,6 +2309,7 @@ export class VexFlowRenderer {
       tickable: any;
       noteEl: Note;
     }>>();
+    const printNotePositions: RenderedNotePosition[] = [];
 
     for (let sysIdx = 0; sysIdx < numSystems; sysIdx++) {
       const sysStartM = systems[sysIdx].start;
@@ -2117,6 +2383,9 @@ export class VexFlowRenderer {
           const measureStave = new Stave(measX, staveY, measWidth);
           (measureStave as any).setNumLines?.(staffLineCount);
           measureStave.setContext(this.context).draw();
+          if (!isGregorianChant && svgEl) {
+            this.drawMeasureAdvancedMarks(svgEl, measure, measX, measWidth, staveY, visibleRowIdx === 0);
+          }
           if (isGregorianChant && svgEl) {
             const staffTop = staveY + STAFF_LINE_OFFSET;
             const staffBottom = staffTop + staffLineSpan;
@@ -2374,6 +2643,24 @@ export class VexFlowRenderer {
                     const noteEl = el as Note;
                     sysSlurData.push({ tickable: tickables[t], noteEl });
                     staffSlurData.push({ sysIdx, tickable: tickables[t], noteEl });
+                    try {
+                      const x = tickables[t].getAbsoluteX();
+                      const ys: number[] = tickables[t].getYs?.() ?? [];
+                      const y = ys.length > 0 ? ys[0] : 0;
+                      if (x && y) {
+                        printNotePositions.push({
+                          staffIndex: staffIdx,
+                          measureIndex: mIdx,
+                          voiceIndex: 0,
+                          noteIndex: t,
+                          noteDataIndex: dataIdx,
+                          x,
+                          y,
+                        });
+                      }
+                    } catch {
+                      // Skip overlay position if note coordinates are unavailable.
+                    }
                   }
                 }
               }
@@ -2593,6 +2880,8 @@ export class VexFlowRenderer {
         }
       });
     }
+
+    this.drawAdvancedNoteOverlays(composition, printNotePositions);
 
     return svgEl;
   }

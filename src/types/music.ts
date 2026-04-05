@@ -41,6 +41,15 @@ export type Pitch = string; // e.g., "C4", "E#5", "Bb3"
 /** Controls which side a slur/tie arc curves toward. */
 export type SlurDirection = 'auto' | 'above' | 'below';
 export type HairpinDirection = 'crescendo' | 'decrescendo';
+export type GraceType = 'acciaccatura' | 'appoggiatura';
+export type OttavaType = '8va' | '8vb' | '15ma' | '15mb';
+export type NavigationMark =
+  | 'D.C.'
+  | 'D.C. al Coda'
+  | 'D.S.'
+  | 'D.S. al Coda'
+  | 'To Coda'
+  | 'Fine';
 
 export interface Note {
   pitch: Pitch;
@@ -66,6 +75,18 @@ export interface Note {
   chantSymbol?: GregorianChantSymbol;
   /** Optional chant ornament mark for the note. */
   chantOrnament?: GregorianChantOrnament;
+  /** Grace-note style rendered before this note. */
+  grace?: GraceType;
+  /** Number of tremolo slashes rendered on the stem (1-4). */
+  tremolo?: 1 | 2 | 3 | 4;
+  /** Start ottava line/text (8va, 8vb, 15ma, 15mb) at this note. */
+  ottavaStart?: OttavaType;
+  /** End currently active ottava line at this note. */
+  ottavaEnd?: boolean;
+  /** Start a sustain pedal line at this note. */
+  pedalStart?: boolean;
+  /** End the currently active sustain pedal line at this note. */
+  pedalEnd?: boolean;
 }
 
 export interface Rest {
@@ -105,6 +126,17 @@ export interface Measure {
   chords?: ChordSymbol[];
   /** Gregorian chant division marker drawn at the end of this measure. */
   chantDivision?: GregorianChantDivision;
+  /** Repeat bracket/barline controls for this measure. */
+  repeatStart?: boolean;
+  repeatEnd?: boolean;
+  /** Volta ending label shown above this measure (for example "1." or "2."). */
+  ending?: string;
+  /** Navigation/roadmap annotation shown above this measure (D.S./D.C./To Coda/Fine). */
+  navigation?: NavigationMark;
+  /** Draw segno symbol above this measure. */
+  segno?: boolean;
+  /** Draw coda symbol above this measure. */
+  coda?: boolean;
 }
 
 export interface Staff {

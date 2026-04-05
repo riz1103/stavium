@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { useScoreStore } from '../../app/store/scoreStore';
-import { Clef, GregorianChantDivision } from '../../types/music';
+import { Clef, GregorianChantDivision, NavigationMark } from '../../types/music';
 import { effectiveTimeSig, effectiveKeySig, effectiveTempo, effectiveClef } from '../../music/renderer/vexflowRenderer';
 
 const TIME_SIGNATURES = ['2/2', '2/4', '3/8', '3/4', '4/4', '5/4', '5/8', '6/4', '6/8', '7/4', '7/8', '9/8', '12/8', '12/16'];
@@ -38,6 +38,7 @@ const CHANT_DIVISIONS: { value: GregorianChantDivision; label: string }[] = [
   { value: 'major', label: 'Divisio maior' },
   { value: 'finalis', label: 'Finalis' },
 ];
+const NAVIGATION_MARKS: NavigationMark[] = ['D.C.', 'D.C. al Coda', 'D.S.', 'D.S. al Coda', 'To Coda', 'Fine'];
 
 const PANEL_WIDTH = 280;
 const PANEL_MARGIN = 8;
@@ -101,7 +102,14 @@ export const MeasurePropertiesPanel = () => {
   const hasClef = !!staffMeasures[mIdx]?.clef;
   const chantDivision = (staffMeasures[mIdx]?.chantDivision ?? 'none') as GregorianChantDivision;
   const hasDivision = chantDivision !== 'none';
-  const hasAny  = hasClef || hasDivision || (!isGregorianChant && (hasTs || hasKs || hasTmp));
+  const hasRepeatStart = !!staffMeasures[mIdx]?.repeatStart;
+  const hasRepeatEnd = !!staffMeasures[mIdx]?.repeatEnd;
+  const ending = staffMeasures[mIdx]?.ending ?? '';
+  const navigation = staffMeasures[mIdx]?.navigation;
+  const hasSegno = !!staffMeasures[mIdx]?.segno;
+  const hasCoda = !!staffMeasures[mIdx]?.coda;
+  const hasAnyAdvanced = hasRepeatStart || hasRepeatEnd || !!ending || !!navigation || hasSegno || hasCoda;
+  const hasAny  = hasClef || hasDivision || hasAnyAdvanced || (!isGregorianChant && (hasTs || hasKs || hasTmp));
 
   const measureLabel = mIdx === 0 && composition.anacrusis
     ? 'Pickup'
@@ -254,12 +262,101 @@ export const MeasurePropertiesPanel = () => {
               </div>
             )}
 
+            {!isGregorianChant && (
+              <div className="mb-3 border-t border-sv-border pt-3">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-sv-text-muted">Repeats / Endings / Navigation</label>
+                  {hasAnyAdvanced && (
+                    <button
+                      className="text-xs text-rose-400 hover:underline"
+                      onClick={() =>
+                        apply({
+                          repeatStart: null,
+                          repeatEnd: null,
+                          ending: null,
+                          navigation: null,
+                          segno: null,
+                          coda: null,
+                        })
+                      }
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2 mb-2">
+                  <button
+                    className={hasRepeatStart ? 'sv-btn-active text-xs' : 'sv-btn-ghost text-xs'}
+                    onClick={() => apply({ repeatStart: !hasRepeatStart })}
+                  >
+                    Repeat Start
+                  </button>
+                  <button
+                    className={hasRepeatEnd ? 'sv-btn-active text-xs' : 'sv-btn-ghost text-xs'}
+                    onClick={() => apply({ repeatEnd: !hasRepeatEnd })}
+                  >
+                    Repeat End
+                  </button>
+                  <button
+                    className={hasSegno ? 'sv-btn-active text-xs' : 'sv-btn-ghost text-xs'}
+                    onClick={() => apply({ segno: !hasSegno })}
+                  >
+                    Segno
+                  </button>
+                  <button
+                    className={hasCoda ? 'sv-btn-active text-xs' : 'sv-btn-ghost text-xs'}
+                    onClick={() => apply({ coda: !hasCoda })}
+                  >
+                    Coda
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={ending}
+                    placeholder="Ending (1., 2.)"
+                    onChange={(e) => apply({ ending: e.target.value.trim() ? e.target.value : null })}
+                    className="sv-input flex-1 text-xs"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    className="sv-select flex-1 text-xs"
+                    value={navigation ?? ''}
+                    onChange={(e) => apply({ navigation: (e.target.value || null) as NavigationMark | null })}
+                  >
+                    <option value="">Navigation mark...</option>
+                    {NAVIGATION_MARKS.map((mark) => (
+                      <option key={mark} value={mark}>
+                        {mark}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
             {hasAny && (
               <button
                 className="w-full text-xs text-rose-400 border border-rose-500/30 rounded-lg py-1.5 hover:bg-rose-500/10 transition-colors"
                 onClick={() => apply(isGregorianChant
                   ? { clef: null, chantDivision: null }
-                  : { timeSignature: null, keySignature: null, tempo: null, clef: null, chantDivision: null })}
+                  : {
+                    timeSignature: null,
+                    keySignature: null,
+                    tempo: null,
+                    clef: null,
+                    chantDivision: null,
+                    repeatStart: null,
+                    repeatEnd: null,
+                    ending: null,
+                    navigation: null,
+                    segno: null,
+                    coda: null,
+                  })}
               >
                 Clear all overrides
               </button>

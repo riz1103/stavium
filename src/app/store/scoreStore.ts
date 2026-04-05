@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol, NotationSystem, GregorianChantDivision, GregorianChantSpacingDensity, GregorianChantInterpretation, EngravingMeasureSpacingPreset, EngravingCollisionCleanupLevel } from '../../types/music';
+import { Clef, Composition, Staff, Measure, Voice, Note, Pitch, NoteDuration, MusicElement, PrivacyLevel, SlurDirection, ChordSymbol, NotationSystem, GregorianChantDivision, GregorianChantSpacingDensity, GregorianChantInterpretation, EngravingMeasureSpacingPreset, EngravingCollisionCleanupLevel, NavigationMark } from '../../types/music';
 
 export type RevisionTrigger = 'manual-save' | 'export-midi' | 'export-pdf';
 
@@ -75,7 +75,19 @@ interface ScoreState {
    */
   updateMeasureProperties: (
     measureIndex: number,
-    props: { timeSignature?: string | null; keySignature?: string | null; tempo?: number | null; clef?: Clef | null; chantDivision?: GregorianChantDivision | null },
+    props: {
+      timeSignature?: string | null;
+      keySignature?: string | null;
+      tempo?: number | null;
+      clef?: Clef | null;
+      chantDivision?: GregorianChantDivision | null;
+      repeatStart?: boolean | null;
+      repeatEnd?: boolean | null;
+      ending?: string | null;
+      navigation?: NavigationMark | null;
+      segno?: boolean | null;
+      coda?: boolean | null;
+    },
     staffIndex?: number
   ) => void;
   updateTempo: (tempo: number) => void;
@@ -803,6 +815,12 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         tempo: measure.tempo,
         clef: measure.clef,
         chantDivision: measure.chantDivision,
+        repeatStart: measure.repeatStart,
+        repeatEnd: measure.repeatEnd,
+        ending: measure.ending,
+        navigation: measure.navigation,
+        segno: measure.segno,
+        coda: measure.coda,
       };
       copiedMeasures.push(copiedMeasure);
     }
@@ -839,6 +857,12 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
       tempo: copiedMeasure.tempo,
       clef: copiedMeasure.clef,
       chantDivision: copiedMeasure.chantDivision,
+      repeatStart: copiedMeasure.repeatStart,
+      repeatEnd: copiedMeasure.repeatEnd,
+      ending: copiedMeasure.ending,
+      navigation: copiedMeasure.navigation,
+      segno: copiedMeasure.segno,
+      coda: copiedMeasure.coda,
     }));
 
     // Insert all measures at the target position
@@ -1047,6 +1071,16 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
         if ('chantDivision' in props && (staffIndex === undefined || si === staffIndex)) {
           updated.chantDivision = props.chantDivision ?? undefined;
         }
+        // Advanced navigation/repeat markers are score-level (keep staves aligned)
+        if ('repeatStart' in props) updated.repeatStart = props.repeatStart ?? undefined;
+        if ('repeatEnd' in props) updated.repeatEnd = props.repeatEnd ?? undefined;
+        if ('ending' in props) {
+          const endingText = typeof props.ending === 'string' ? props.ending.trim() : '';
+          updated.ending = endingText || undefined;
+        }
+        if ('navigation' in props) updated.navigation = props.navigation ?? undefined;
+        if ('segno' in props) updated.segno = props.segno ?? undefined;
+        if ('coda' in props) updated.coda = props.coda ?? undefined;
         return updated;
       }),
     }));

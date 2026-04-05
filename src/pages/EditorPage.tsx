@@ -21,6 +21,7 @@ import { ArticulationToolbar } from '../components/toolbar/ArticulationToolbar';
 import { DynamicToolbar } from '../components/toolbar/DynamicToolbar';
 import { HairpinToolbar } from '../components/toolbar/HairpinToolbar';
 import { LyricsToolbar } from '../components/toolbar/LyricsToolbar';
+import { AdvancedNotationToolbar } from '../components/toolbar/AdvancedNotationToolbar';
 import { GregorianChantToolbar } from '../components/toolbar/GregorianChantToolbar';
 import { UndoRedoToolbar } from '../components/toolbar/UndoRedoToolbar';
 import { ExportToolbar } from '../components/toolbar/ExportToolbar';
@@ -1007,6 +1008,8 @@ export const EditorPage = () => {
                   <div className="hidden 2xl:block"><Sep /></div>
                   <HairpinToolbar />
                   <div className="hidden 2xl:block"><Sep /></div>
+                  <AdvancedNotationToolbar />
+                  <div className="hidden 2xl:block"><Sep /></div>
                 </>
               )}
               <LyricsToolbar />
@@ -1077,6 +1080,7 @@ export const EditorPage = () => {
                 <ArticulationToolbar />
                 <DynamicToolbar />
                 <HairpinToolbar />
+                <AdvancedNotationToolbar />
               </>
             )}
             <LyricsToolbar />

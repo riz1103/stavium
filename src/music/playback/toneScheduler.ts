@@ -1,7 +1,7 @@
 import * as Tone from 'tone';
 import Soundfont from 'soundfont-player';
 import { Chord } from 'tonal';
-import { Composition, Note, NoteDuration } from '../../types/music';
+import { Composition, Measure, Note, NoteDuration, OttavaType } from '../../types/music';
 import { durationToBeats, beatsToSeconds } from '../../utils/durationUtils';
 import { pitchToMidi, applyKeySignature, applyKeySignatureAndMeasureAccidentals } from '../../utils/noteUtils';
 import { usePlaybackStore, PlayingNoteRef } from '../../app/store/playbackStore';
@@ -140,6 +140,121 @@ const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 const noteRefKey = (staffIndex: number, voiceIndex: number, measureIndex: number, noteIndex: number): string =>
   `${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`;
+
+const parseEndingPasses = (ending?: string): number[] => {
+  if (!ending) return [];
+  const nums = ending.match(/\d+/g)?.map((n) => Number(n)).filter((n) => Number.isFinite(n)) ?? [];
+  return Array.from(new Set(nums)).sort((a, b) => a - b);
+};
+
+const ottavaSemitoneShift = (ottava?: OttavaType): number => {
+  if (!ottava) return 0;
+  if (ottava === '8va') return 12;
+  if (ottava === '8vb') return -12;
+  if (ottava === '15ma') return 24;
+  if (ottava === '15mb') return -24;
+  return 0;
+};
+
+const buildPlaybackMeasureOrder = (
+  measures: Measure[],
+  startIdx: number,
+  endIdx: number
+): number[] => {
+  if (measures.length === 0 || startIdx > endIdx) return [];
+  const segnoCandidates = measures
+    .map((m, i) => (m.segno ? i : -1))
+    .filter((i) => i >= startIdx && i <= endIdx);
+  const codaCandidates = measures
+    .map((m, i) => (m.coda ? i : -1))
+    .filter((i) => i >= startIdx && i <= endIdx);
+  const segnoIdx = segnoCandidates.length > 0 ? segnoCandidates[0] : null;
+  const firstCodaIdx = codaCandidates.length > 0 ? codaCandidates[0] : null;
+
+  const order: number[] = [];
+  const repeatPassByStart = new Map<number, number>();
+  const repeatStartStack: number[] = [];
+  const daExecuted = new Set<number>();
+  const fineArmedByJump = new Set<number>();
+  let alCodaArmed = false;
+  let codaJumpDone = false;
+  let pointer = startIdx;
+  let safety = 0;
+  const maxSteps = Math.max((endIdx - startIdx + 1) * 10, 64);
+
+  while (pointer >= startIdx && pointer <= endIdx && safety < maxSteps) {
+    safety++;
+    const measure = measures[pointer];
+    if (!measure) {
+      pointer++;
+      continue;
+    }
+
+    // Track active repeat scope.
+    if (measure.repeatStart) {
+      if (repeatStartStack.length === 0 || repeatStartStack[repeatStartStack.length - 1] !== pointer) {
+        repeatStartStack.push(pointer);
+      }
+      if (!repeatPassByStart.has(pointer)) repeatPassByStart.set(pointer, 1);
+    }
+    const activeRepeatStart = repeatStartStack.length > 0 ? repeatStartStack[repeatStartStack.length - 1] : null;
+    const activePass = activeRepeatStart !== null ? (repeatPassByStart.get(activeRepeatStart) ?? 1) : 1;
+
+    const endingPasses = parseEndingPasses(measure.ending);
+    const shouldPlayMeasure = endingPasses.length === 0 || endingPasses.includes(activePass);
+    if (shouldPlayMeasure) order.push(pointer);
+
+    const nav = measure.navigation;
+    if (nav === 'Fine' && fineArmedByJump.size > 0) break;
+
+    if ((nav === 'D.C.' || nav === 'D.C. al Coda') && !daExecuted.has(pointer)) {
+      daExecuted.add(pointer);
+      fineArmedByJump.add(pointer);
+      alCodaArmed = nav === 'D.C. al Coda';
+      pointer = startIdx;
+      continue;
+    }
+    if ((nav === 'D.S.' || nav === 'D.S. al Coda') && !daExecuted.has(pointer) && segnoIdx !== null) {
+      daExecuted.add(pointer);
+      fineArmedByJump.add(pointer);
+      alCodaArmed = nav === 'D.S. al Coda';
+      pointer = segnoIdx;
+      continue;
+    }
+    if (nav === 'To Coda' && alCodaArmed && !codaJumpDone && firstCodaIdx !== null) {
+      codaJumpDone = true;
+      // Prefer the next coda sign after the jump point; fall back to first coda.
+      const nextCoda = codaCandidates.find((idx) => idx > pointer) ?? firstCodaIdx;
+      pointer = nextCoda;
+      continue;
+    }
+
+    if (measure.repeatEnd && activeRepeatStart !== null) {
+      const pass = repeatPassByStart.get(activeRepeatStart) ?? 1;
+      // Determine expected pass count from ending labels inside this repeat span.
+      // No endings means normal two-pass repeat.
+      let maxEndingPass = 1;
+      for (let i = activeRepeatStart; i <= pointer; i++) {
+        const parsed = parseEndingPasses(measures[i]?.ending);
+        if (parsed.length > 0) {
+          maxEndingPass = Math.max(maxEndingPass, parsed[parsed.length - 1]);
+        }
+      }
+      const expectedPasses = Math.max(2, maxEndingPass);
+      if (pass < expectedPasses) {
+        repeatPassByStart.set(activeRepeatStart, pass + 1);
+        pointer = activeRepeatStart;
+        continue;
+      }
+      repeatStartStack.pop();
+      repeatPassByStart.delete(activeRepeatStart);
+    }
+
+    pointer++;
+  }
+
+  return order.length > 0 ? order : Array.from({ length: endIdx - startIdx + 1 }, (_, i) => startIdx + i);
+};
 
 const buildHairpinGainMap = (
   composition: Composition
@@ -679,10 +794,13 @@ export class ToneScheduler {
 
     const startIdxGlobal = normalizedStart ?? 0;
     const endIdxGlobal = normalizedEnd ?? Math.max(0, maxMeasures - 1);
+    const playbackMeasureOrder = buildPlaybackMeasureOrder(refMeasures, startIdxGlobal, endIdxGlobal);
+    const occurrenceCount = playbackMeasureOrder.length;
     const isCountInActive = !isGregorianChant && countInEnabled;
     const metronomeActive = !isGregorianChant && metronomeEnabled;
-    const firstTempo = effTempo(startIdxGlobal);
-    const firstTimeSig = effTimeSig(startIdxGlobal);
+    const firstMeasureIdx = playbackMeasureOrder[0] ?? startIdxGlobal;
+    const firstTempo = effTempo(firstMeasureIdx);
+    const firstTimeSig = effTimeSig(firstMeasureIdx);
     const [firstBeatsPerMeasure] = firstTimeSig.split('/').map(Number);
     const bars = Math.max(1, Math.min(2, Math.floor(countInBars)));
     const countInBeats = isCountInActive ? Math.max(1, firstBeatsPerMeasure || 4) * bars : 0;
@@ -703,12 +821,13 @@ export class ToneScheduler {
 
     if (metronomeActive) {
       let metronomeMeasureStartSec = 0;
-      for (let measureIndex = startIdxGlobal; measureIndex <= endIdxGlobal; measureIndex++) {
+      for (let occIdx = 0; occIdx < occurrenceCount; occIdx++) {
+        const measureIndex = playbackMeasureOrder[occIdx];
         const timeSig = effTimeSig(measureIndex);
         const tempoAtMeasure = effTempo(measureIndex);
         const [beatsPerMeasure] = timeSig.split('/').map(Number);
         const thisMeasureBeats =
-          startIdxGlobal === 0 && composition.anacrusis && measureIndex === 0
+          composition.anacrusis && measureIndex === 0
             ? pickupBeats
             : beatsPerMeasure;
         for (let beat = 0; beat < thisMeasureBeats; beat++) {
@@ -723,64 +842,52 @@ export class ToneScheduler {
       }
     }
 
-    // ── Pre-compute cross-measure tie data ────────────────────────────────────
-    // When the last note of a measure has tie=true, its duration must be extended
-    // by the duration of the matching note at the start of the next measure (and so
-    // on for chains spanning more than two measures).  The continuation notes must
-    // be silenced (not scheduled as separate attacks).
-    //
-    // Key format: `${staffIdx}:${voiceIdx}:${measureIdx}:${noteIdx}`
-    const crossTieExtra = new Map<string, number>(); // origin note → extra seconds to add
-    const crossTieSkip  = new Set<string>();         // continuation notes → silent
+    // ── Pre-compute cross-measure ties following playback order ───────────────
+    // Key format includes occurrence index so repeats/navigation are respected:
+    // `${staffIdx}:${voiceIdx}:${occIdx}:${noteIdx}`
+    const crossTieExtra = new Map<string, number>(); // origin note occurrence → extra seconds
+    const crossTieSkip = new Set<string>();          // continuation note occurrences → silent
+    const findLastNoteIndex = (voice: { notes: any[] } | undefined): number => {
+      if (!voice?.notes?.length) return -1;
+      for (let i = voice.notes.length - 1; i >= 0; i--) if ('pitch' in voice.notes[i]) return i;
+      return -1;
+    };
+    const findFirstNoteIndex = (voice: { notes: any[] } | undefined): number => {
+      if (!voice?.notes?.length) return -1;
+      for (let i = 0; i < voice.notes.length; i++) if ('pitch' in voice.notes[i]) return i;
+      return -1;
+    };
 
     composition.staves.forEach((staff, sIdx) => {
       const numVoices = staff.measures.reduce((mx, m) => Math.max(mx, m.voices.length), 0);
       for (let vIdx = 0; vIdx < numVoices; vIdx++) {
-        for (let mIdx = 0; mIdx < staff.measures.length - 1; mIdx++) {
-          const voice = staff.measures[mIdx]?.voices[vIdx];
-          if (!voice?.notes.length) continue;
-
-          // Find the last NOTE (not rest) in this measure
-          let lastNIdx = -1;
-          for (let n = voice.notes.length - 1; n >= 0; n--) {
-            if ('pitch' in voice.notes[n]) { lastNIdx = n; break; }
-          }
+        for (let occIdx = 0; occIdx < occurrenceCount - 1; occIdx++) {
+          const measureIndex = playbackMeasureOrder[occIdx];
+          const voice = staff.measures[measureIndex]?.voices[vIdx];
+          const lastNIdx = findLastNoteIndex(voice);
           if (lastNIdx < 0) continue;
-
-          const lastEl = voice.notes[lastNIdx];
-          if (!('pitch' in lastEl) || !(lastEl as Note).tie) continue;
+          const lastEl = voice?.notes[lastNIdx];
+          if (!lastEl || !('pitch' in lastEl) || !(lastEl as Note).tie) continue;
           const lastNote = lastEl as Note;
 
-          // Walk forward into subsequent measures to follow the chain
-          const originKey = `${sIdx}:${vIdx}:${mIdx}:${lastNIdx}`;
-          let nextMIdx = mIdx + 1;
+          const originKey = `${sIdx}:${vIdx}:${occIdx}:${lastNIdx}`;
+          let nextOcc = occIdx + 1;
 
-          while (nextMIdx < staff.measures.length) {
-            const nextVoice = staff.measures[nextMIdx]?.voices[vIdx];
-            if (!nextVoice?.notes.length) break;
-
-            // Find first NOTE (not rest) in the next measure
-            let firstNIdx = -1;
-            for (let n = 0; n < nextVoice.notes.length; n++) {
-              if ('pitch' in nextVoice.notes[n]) { firstNIdx = n; break; }
-            }
+          while (nextOcc < occurrenceCount) {
+            const nextMeasureIndex = playbackMeasureOrder[nextOcc];
+            const nextVoice = staff.measures[nextMeasureIndex]?.voices[vIdx];
+            const firstNIdx = findFirstNoteIndex(nextVoice);
             if (firstNIdx < 0) break;
+            const firstEl = nextVoice?.notes[firstNIdx];
+            if (!firstEl || !('pitch' in firstEl) || (firstEl as Note).pitch !== lastNote.pitch) break;
 
-            const firstEl = nextVoice.notes[firstNIdx] as Note;
-            if (firstEl.pitch !== lastNote.pitch) break; // different pitch → not a tie
-
-            // Accumulate this note's duration into the chain origin
-            const extraSec = getElementDurationSec(firstEl, effTempo(nextMIdx));
+            const extraSec = getElementDurationSec(firstEl as Note, effTempo(nextMeasureIndex));
             crossTieExtra.set(originKey, (crossTieExtra.get(originKey) ?? 0) + extraSec);
+            crossTieSkip.add(`${sIdx}:${vIdx}:${nextOcc}:${firstNIdx}`);
 
-            // Mark as silent (will not be scheduled as a new attack)
-            crossTieSkip.add(`${sIdx}:${vIdx}:${nextMIdx}:${firstNIdx}`);
-
-            // Continue chain only if this continuation note itself ties across
-            // to the NEXT measure (i.e. it is the last note of its measure AND tie=true)
-            const hasMoreNotesAfter = nextVoice.notes.slice(firstNIdx + 1).some(el => 'pitch' in el);
-            if (firstEl.tie && !hasMoreNotesAfter) {
-              nextMIdx++;
+            const hasMoreNotesAfter = nextVoice!.notes.slice(firstNIdx + 1).some((el) => 'pitch' in el);
+            if ((firstEl as Note).tie && !hasMoreNotesAfter) {
+              nextOcc++;
             } else {
               break;
             }
@@ -823,14 +930,44 @@ export class ToneScheduler {
       // Range playback should start immediately from the selected measure,
       // not from the full-piece absolute timeline.
       let currentMeasureStart = 0; // in seconds, relative to playback start
-      
-      // Determine measure range to play
-      const startIdx = normalizedStart ?? 0;
-      const endIdx = normalizedEnd ?? (staff.measures.length - 1);
+      const activeOttavaByVoice = new Map<number, number>();
+      const activePedalByVoice = new Map<number, boolean>();
+      const findPedalReleaseOffsetSec = (
+        voiceIndex: number,
+        fromOccurrence: number,
+        fromNoteIndex: number
+      ): number | null => {
+        let offsetSec = 0;
+        for (let occ = fromOccurrence; occ < occurrenceCount; occ++) {
+          const scanMeasureIdx = playbackMeasureOrder[occ];
+          const scanMeasure = staff.measures[scanMeasureIdx];
+          const scanVoice = scanMeasure?.voices[voiceIndex];
+          if (!scanVoice) continue;
+          const scanTempo = effTempo(scanMeasureIdx);
+          const startAt = occ === fromOccurrence ? fromNoteIndex : 0;
+          for (let ni = startAt; ni < scanVoice.notes.length; ni++) {
+            const scanEl = scanVoice.notes[ni];
+            const elDur = getElementDurationSec(scanEl as any, scanTempo);
+            if ('pitch' in scanEl && (scanEl as Note).pedalEnd) {
+              return offsetSec + elDur;
+            }
+            offsetSec += elDur;
+          }
+        }
+        return null;
+      };
 
-      staff.measures.forEach((measure, measureIndex) => {
-        // Skip measures outside the playback range
-        if (measureIndex < startIdx || measureIndex > endIdx) return;
+      for (let occIdx = 0; occIdx < occurrenceCount; occIdx++) {
+        const measureIndex = playbackMeasureOrder[occIdx];
+        const measure = staff.measures[measureIndex];
+        if (!measure) {
+          const fallbackTempo = effTempo(measureIndex);
+          const fallbackTimeSig = effTimeSig(measureIndex);
+          const [fallbackBpm] = fallbackTimeSig.split('/').map(Number);
+          const fallbackBeats = composition.anacrusis && measureIndex === 0 ? pickupBeats : fallbackBpm;
+          currentMeasureStart += beatsToSeconds(fallbackBeats, fallbackTempo);
+          continue;
+        }
         // Effective values at this measure
         const currentTimeSig = effTimeSig(measureIndex);
         const currentKeySig  = effKeySig(measureIndex);
@@ -842,7 +979,7 @@ export class ToneScheduler {
         // Gregorian chant is free rhythm: measure length follows actual note content.
         const thisMeasureBeats = isGregorianChant
           ? Number.POSITIVE_INFINITY
-          : ((startIdx === 0 && composition.anacrusis && measureIndex === 0) ? pickupBeats : effBPM);
+          : (composition.anacrusis && measureIndex === 0 ? pickupBeats : effBPM);
         const chantMeasureDurationSec = isGregorianChant
           ? Math.max(
               ...measure.voices.map((voice) =>
@@ -869,6 +1006,8 @@ export class ToneScheduler {
           // Voice lanes are parallel timelines: each lane starts at beat 0.
           let measureTime = 0; // Time within this voice lane (in beats)
           let tiedNotesToSkip = 0; // Count of tied notes to skip (within-measure chains)
+          let activeOttavaShift = activeOttavaByVoice.get(voiceIndex) ?? 0;
+          let pedalDown = activePedalByVoice.get(voiceIndex) ?? false;
           const laneSoloed = playbackStore.isVoiceSoloed(staffIndex, voiceIndex);
           const laneExplicitMuted = playbackStore.isVoiceMuted(staffIndex, voiceIndex);
           const laneMuted =
@@ -895,8 +1034,9 @@ export class ToneScheduler {
             }
 
             // Skip AUDIO for cross-measure tie continuations, but still highlight them.
-            const flatKey = `${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`;
-            if (crossTieSkip.has(flatKey)) {
+            const tieOccKey = `${staffIndex}:${voiceIndex}:${occIdx}:${noteIndex}`;
+            const refKey = `${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`;
+            if (crossTieSkip.has(tieOccKey)) {
               const beats = getElementPlaybackBeats(element as any);
               if ('pitch' in element) {
                 const skipNoteTime = measureStartTime + beatsToSeconds(measureTime, currentTempo);
@@ -926,6 +1066,12 @@ export class ToneScheduler {
 
             if ('pitch' in element) {
               const note = element as Note;
+              if (note.ottavaStart) {
+                activeOttavaShift = ottavaSemitoneShift(note.ottavaStart);
+              }
+              if (note.pedalStart) {
+                pedalDown = true;
+              }
               
               // Check if this note is tied to the next note (explicitly set)
               const nextNote = noteIndex < voice.notes.length - 1 ? voice.notes[noteIndex + 1] : null;
@@ -944,7 +1090,7 @@ export class ToneScheduler {
               let totalDurationSec = durationSec;
 
               // Add any cross-measure tie extension pre-computed above
-              const crossExtra = crossTieExtra.get(`${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`) ?? 0;
+              const crossExtra = crossTieExtra.get(tieOccKey) ?? 0;
               totalDurationSec += crossExtra;
 
               if (isTied) {
@@ -975,7 +1121,7 @@ export class ToneScheduler {
                 noteIndex,
                 note.accidental // Pass the note's explicit accidental field
               );
-              const midi = pitchToMidi(actualPitch);
+              const midi = pitchToMidi(actualPitch) + activeOttavaShift;
               
               const startTime = now + noteTime;
               
@@ -992,7 +1138,7 @@ export class ToneScheduler {
               this.scheduledNotes.push({ ref: noteRef, startTime, endTime: startTime + durationSec });
               
               // Expression: make dynamics and articulations audible in playback.
-              const hairpinGain = expressivePlayback ? hairpinGainMap.get(flatKey) : undefined;
+              const hairpinGain = expressivePlayback ? hairpinGainMap.get(refKey) : undefined;
               const dynamicGain = expressivePlayback
                 ? (hairpinGain ?? dynamicScalar(note.dynamic))
                 : 1;
@@ -1001,7 +1147,26 @@ export class ToneScheduler {
               const articulationGain = expressivePlayback ? articulationGainMultiplier(note.articulation) : 1;
               const slurDur = isSlurred ? 1.05 : 1;
               const durationMultiplier = articulationDur * slurDur;
-              const playDuration = Math.max(0.05, totalDurationSec * durationMultiplier);
+              const pedalMultiplier = pedalDown ? 1.6 : 1;
+              let playDuration = Math.max(0.05, totalDurationSec * durationMultiplier * pedalMultiplier);
+              let renderedStartTime = startTime;
+
+              // Grace notes steal time from the main note onset.
+              if (note.grace) {
+                const graceFraction = note.grace === 'appoggiatura' ? 0.4 : 0.18;
+                const graceDuration = Math.max(0.035, Math.min(playDuration * graceFraction, 0.18));
+                renderedStartTime += graceDuration;
+                playDuration = Math.max(0.05, playDuration - graceDuration);
+              }
+              // Sustain notes to the pedal release point when pedal is down.
+              if (pedalDown) {
+                const pedalReleaseOffset = findPedalReleaseOffsetSec(voiceIndex, occIdx, noteIndex);
+                if (pedalReleaseOffset !== null) {
+                  playDuration = Math.max(playDuration, pedalReleaseOffset);
+                } else {
+                  playDuration = Math.max(playDuration, totalDurationSec * 1.9);
+                }
+              }
               const laneGain = laneMuted ? 0 : gain;
               const noteGain = Math.max(0, Math.min(1.5, laneGain * dynamicMultiplier * articulationGain));
               const velocity = Math.max(0.08, Math.min(1, noteGain));
@@ -1012,27 +1177,88 @@ export class ToneScheduler {
                 const loopStartVal = LOOP_START[effectiveInstrument] ?? 0.08;
                 const freq = 440 * Math.pow(2, (midi - 69) / 12);
 
-                this.pendingAudio.push({
-                  type: sfPlayer ? 'sf' : 'fallback',
-                  midi,
-                  freq,
-                  startTime,
-                  playDuration,
-                  gain: noteGain,
-                  velocity,
-                  instrument: effectiveInstrument,
-                  shouldLoop,
-                  loopStart: loopStartVal,
-                  staffIndex,
-                  transportTime: noteTime,
-                });
+                if (note.grace) {
+                  const graceFraction = note.grace === 'appoggiatura' ? 0.4 : 0.18;
+                  const graceDuration = Math.max(0.035, Math.min(playDuration * graceFraction, 0.14));
+                  this.pendingAudio.push({
+                    type: sfPlayer ? 'sf' : 'fallback',
+                    midi,
+                    freq,
+                    startTime,
+                    playDuration: graceDuration,
+                    gain: Math.max(0.04, noteGain * 0.92),
+                    velocity: Math.max(0.05, velocity * 0.88),
+                    instrument: effectiveInstrument,
+                    shouldLoop: false,
+                    loopStart: loopStartVal,
+                    staffIndex,
+                    transportTime: noteTime,
+                  });
+                }
+
+                // Single-note tremolo retriggers (approximation).
+                const tremoloSlashes = note.tremolo ?? 0;
+                // Single-note tremolo subdivision mapping:
+                // 1 slash = 8ths, 2 = 16ths, 3 = 32nds, 4 = 64ths.
+                const tremoloStepBeats = tremoloSlashes > 0 ? 1 / Math.pow(2, tremoloSlashes) : 0;
+                const tremoloStepSec = tremoloStepBeats > 0 ? beatsToSeconds(tremoloStepBeats, currentTempo) : 0;
+                const canTremoloRetrigger = tremoloSlashes > 0 && tremoloStepSec > 0.025 && playDuration >= tremoloStepSec * 1.25;
+
+                if (canTremoloRetrigger) {
+                  const hitDur = Math.max(0.03, Math.min(tremoloStepSec * 0.75, 0.12));
+                  let t = 0;
+                  let hits = 0;
+                  while (t < playDuration - 0.005 && hits < 64) {
+                    this.pendingAudio.push({
+                      type: sfPlayer ? 'sf' : 'fallback',
+                      midi,
+                      freq,
+                      startTime: renderedStartTime + t,
+                      playDuration: Math.min(hitDur, playDuration - t),
+                      gain: Math.max(0.04, noteGain * 0.9),
+                      velocity: Math.max(0.05, velocity * 0.9),
+                      instrument: effectiveInstrument,
+                      shouldLoop: false,
+                      loopStart: loopStartVal,
+                      staffIndex,
+                      transportTime: noteTime + t,
+                    });
+                    t += tremoloStepSec;
+                    hits++;
+                  }
+                } else {
+                  this.pendingAudio.push({
+                    type: sfPlayer ? 'sf' : 'fallback',
+                    midi,
+                    freq,
+                    startTime: renderedStartTime,
+                    playDuration,
+                    gain: noteGain,
+                    velocity,
+                    instrument: effectiveInstrument,
+                    shouldLoop,
+                    loopStart: loopStartVal,
+                    staffIndex,
+                    transportTime: noteTime,
+                  });
+                }
 
                 if (!sfPlayer) hasFallbackNotes = true;
+              }
+
+              if (note.ottavaEnd) {
+                activeOttavaShift = 0;
+              }
+              if (note.pedalEnd) {
+                pedalDown = false;
               }
             }
 
             measureTime += beats;
           });
+
+          activeOttavaByVoice.set(voiceIndex, activeOttavaShift);
+          activePedalByVoice.set(voiceIndex, pedalDown);
         });
 
         // ── Play chord symbols if enabled ──────────────────────────────────────
@@ -1090,7 +1316,7 @@ export class ToneScheduler {
 
         // Advance to next measure start time (pickup measure may be shorter)
         currentMeasureStart += measureDurationSec;
-      });
+      }
     });
 
     // Sort pending audio by start time for efficient JIT draining

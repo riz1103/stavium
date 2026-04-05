@@ -100,6 +100,25 @@ To scan or import from PDF or scanned images:
 - Pickup measure (measure 0) does not support manual System/Page break toggles.
 - Use these controls before PDF export to improve print layout quality.
 
+## Advanced notation package (v1)
+- In Note Expression (standard notation), use "Advanced Notation" for:
+  - Grace note style: None / Acciaccatura / Appoggiatura
+  - Tremolo slash count on selected note stem
+  - Ottava controls: start (8va / 8vb / 15ma / 15mb) and Ottava End
+  - Pedal controls: Ped. (start) and ✶ (end)
+- In Measure Properties (standard notation), under "Repeats / Endings / Navigation":
+  - Toggle Repeat Start / Repeat End
+  - Toggle Segno / Coda
+  - Enter ending text (e.g. "1." or "2.")
+  - Select navigation mark: D.C., D.C. al Coda, D.S., D.S. al Coda, To Coda, Fine
+- The same measure-level controls are also available in Note Expression via Advanced Notation.
+- Playback interpretation (current behavior):
+  - Repeats/endings and D.S./D.C./To Coda/Fine are followed during playback sequencing
+  - Ottava markings transpose sounding pitch while active
+  - Grace-note styles add a short pre-note before the principal note
+  - Tremolo slash counts retrigger short repeated attacks across the note span
+  - Pedal start/end increases sustain while pedal is active
+
 ## Adding notes
 1. Select a duration in the Notes toolbar (whole, half, quarter, eighth, sixteenth, 32nd)
 2. Optional: click "Dot" for dotted values, and use the Tuplet selector for tuplets (3:2, 5:4, 6:4, 7:4)

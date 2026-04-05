@@ -16,6 +16,12 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'Advanced Notation Package (v1)',
+    date: 'Apr 2026',
+    details:
+      'Added advanced notation controls in Note Expression and Measure Properties: repeat start/end barlines, ending labels (1./2.), D.S./D.C./To Coda/Fine navigation marks, segno/coda symbols, plus grace-note style, stem tremolo slashes, ottava lines (8va/8vb/15ma/15mb), and pedal start/end lines. Playback now interprets these markings (including roadmap jumps, ottava pitch shifts, grace timing, tremolo retriggers, and pedal sustain effect).',
+  },
+  {
     title: 'Engraving Controls (v1)',
     date: 'Apr 2026',
     details:
@@ -84,6 +90,18 @@ const WHATS_NEW_ITEMS = [
 ];
 
 const FAQ_ITEMS = [
+  {
+    q: 'How do I add repeats, endings, D.S./D.C., segno, or coda signs?',
+    a: 'Select a measure, then use either Measure Properties or Note Expression > Advanced Notation. Toggle Repeat Start/Repeat End, enter an ending label (like 1. or 2.), and choose a navigation mark (D.S., D.C., D.S. al Coda, D.C. al Coda, To Coda, or Fine). You can also toggle Segno and Coda symbols.',
+  },
+  {
+    q: 'How do I add grace notes, tremolo, ottava, or pedal lines?',
+    a: 'Select a note, then in Note Expression use Advanced Notation. Choose grace style (acciaccatura or appoggiatura), set tremolo slash count, set Ottava start (8va/8vb/15ma/15mb) and Ottava End, and use Ped. / ✶ for pedal start/end.',
+  },
+  {
+    q: 'Do repeats, D.S./D.C./coda, grace notes, tremolo, ottava, and pedal affect playback?',
+    a: 'Yes. Playback now follows repeat/endings and D.S./D.C./To Coda/Fine navigation flow, applies ottava transposition while active, renders grace-note timing before the principal note, simulates single-note tremolo by retriggering attacks, and extends sustain while pedal is active.',
+  },
   {
     q: 'How do I control measure spacing, system breaks, and page breaks for export?',
     a: 'In the editor, open Score Settings. Use Spacing to choose Compact, Balanced, or Spacious. Select a measure, then in Breaks click System or Page to toggle a manual break at that measure. If the pickup bar is selected, break toggles target the next full measure automatically. Use Clear to remove all manual breaks. Manual break points also appear on the score as small SYS/PAGE badges at the target barline, and clicking a badge removes that specific break quickly.',
@@ -377,7 +395,8 @@ export const HelpPage = () => {
                     <h4 className="font-semibold text-emerald-400 mb-2">Fully Supported</h4>
                     <p className="text-sv-text-muted text-sm">
                       Notes/rests (whole to 32nd), dotted values, tuplets (3:2, 5:4, 6:4, 7:4), key/time signatures, anacrusis, clef changes,
-                      accidentals (including double-sharp and double-flat), ties, slurs, articulations, dynamics, lyrics, chord symbols, multi-staff scores.
+                      accidentals (including double-sharp and double-flat), ties, slurs, articulations, dynamics, lyrics, chord symbols, grace-note styles,
+                      tremolo slashes, ottava lines, pedal lines, repeats/endings, and D.S./D.C./coda navigation marks.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
@@ -427,6 +446,12 @@ export const HelpPage = () => {
               <div>
                 <h2 className="text-2xl font-bold text-sv-text mb-4">Editor Features</h2>
                 <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Advanced Notation Package</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      In Note Expression, open Advanced Notation for grace styles, tremolo slashes, ottava start/end, and pedal start/end. In Measure Properties, set repeat starts/ends, ending labels (1./2.), and navigation signs including D.S., D.C., To Coda, Fine, Segno, and Coda.
+                    </p>
+                  </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Engraving Controls (v1)</h3>
                     <p className="text-sv-text-muted text-sm">
