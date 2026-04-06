@@ -4,9 +4,10 @@
  * Help chat uses Google Gemini separately (VITE_GEMINI_API_KEY).
  */
 
-import { Chord, Key } from 'tonal';
+import { Key } from 'tonal';
 import { Composition, ChordSymbol, Staff, MusicElement, Note } from '../types/music';
 import { pitchToMidi, midiToPitch } from '../utils/noteUtils';
+import { getChordData } from '../utils/chordSymbolUtils';
 import { buildSatbStavesMelodyFirst } from '../music/theory/satbVoicing';
 import { ArrangementCandidate } from './arrangementService';
 import { chatCompletionText, isMusicAiConfigured } from './musicAiClient';
@@ -94,7 +95,7 @@ const getDiatonicTriads = (keyRoot: string): string[] => {
 
 /** Score a chord name against a set of melody pitch classes. */
 const scoreChordAgainstMelody = (chordName: string, melodyPCs: Set<string>): number => {
-  const chordData = Chord.get(chordName);
+  const chordData = getChordData(chordName);
   const notes = chordData.notes ?? [];
   if (notes.length === 0 || melodyPCs.size === 0) return 0;
   let common = 0;
@@ -149,7 +150,7 @@ const HARMONIC_VARIANTS: HarmonicVariant[] = [
 
 /** Get secondary dominant for a target chord, e.g. V7/V for G → D7. */
 const getSecondaryDominant = (targetChordName: string): string | null => {
-  const chord = Chord.get(targetChordName);
+  const chord = getChordData(targetChordName);
   if (!chord.tonic) return null;
   // Secondary dominant = major 3rd interval up from tonic = dominant 7th chord
   // We raise the tonic by a P5 to get its own dominant

@@ -3,9 +3,10 @@
  * with simple voice-leading. Replaces the old "one block chord per measure" model.
  */
 
-import { Chord, Note as TonalNote } from 'tonal';
+import { Note as TonalNote } from 'tonal';
 import type { ChordSymbol, Measure, MusicElement, Note, Staff } from '../../types/music';
 import { durationToBeats } from '../../utils/durationUtils';
+import { getChordData } from '../../utils/chordSymbolUtils';
 import { midiToPitch, pitchToMidi } from '../../utils/noteUtils';
 
 const BASS = [40, 60] as const;
@@ -28,7 +29,7 @@ interface FourVoices {
 }
 
 const chordPitchClasses = (symbol: string): Set<number> => {
-  const data = Chord.get(symbol);
+  const data = getChordData(symbol);
   const set = new Set<number>();
   for (const name of data.notes ?? []) {
     const midi = TonalNote.midi(`${name}4`);
@@ -44,7 +45,7 @@ const isChordToneMidi = (midi: number, symbol: string): boolean => {
 
 /** All MIDI values in [lo, hi] that belong to this chord. */
 const chordToneMidisInRange = (symbol: string, lo: number, hi: number): number[] => {
-  const data = Chord.get(symbol);
+  const data = getChordData(symbol);
   if (!data.notes?.length) return [];
   const out: number[] = [];
   for (const name of data.notes) {
@@ -82,7 +83,7 @@ const voiceInnerParts = (
   profile: SatbHarmonyProfile
 ): FourVoices => {
   const rootPc = (() => {
-    const t = Chord.get(symbol).tonic;
+    const t = getChordData(symbol).tonic;
     if (!t) return null;
     const m = TonalNote.midi(`${t}3`);
     return m != null ? ((m % 12) + 12) % 12 : null;

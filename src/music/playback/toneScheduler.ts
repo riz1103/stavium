@@ -1,9 +1,9 @@
 import * as Tone from 'tone';
 import Soundfont from 'soundfont-player';
-import { Chord } from 'tonal';
 import { Composition, Measure, Note, NoteDuration, OttavaType } from '../../types/music';
 import { durationToBeats, beatsToSeconds } from '../../utils/durationUtils';
 import { pitchToMidi, applyKeySignature, applyKeySignatureAndMeasureAccidentals } from '../../utils/noteUtils';
+import { getChordData } from '../../utils/chordSymbolUtils';
 import { usePlaybackStore, PlayingNoteRef } from '../../app/store/playbackStore';
 
 /**
@@ -1498,7 +1498,7 @@ export class ToneScheduler {
           measure.chords.forEach((chordSymbol) => {
             try {
               // Parse chord symbol using Tonal.js
-              const chord = Chord.get(chordSymbol.symbol);
+              const chord = getChordData(chordSymbol.symbol);
               if (chord && chord.notes && chord.notes.length > 0) {
                 // Timeline offset from playback start (seconds), same basis as `noteTime` for pitched notes.
                 // Use this measure's tempo so chord changes align with local tempo marks.

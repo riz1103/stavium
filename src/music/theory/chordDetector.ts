@@ -1,6 +1,7 @@
 import { Note as TonalNote, Chord } from 'tonal';
 import { Note, Pitch } from '../../types/music';
 import { pitchToMidi, midiToPitch } from '../../utils/noteUtils';
+import { getChordData } from '../../utils/chordSymbolUtils';
 
 export interface DetectedChord {
   name: string;
@@ -32,7 +33,7 @@ export const detectChord = (notes: Note[]): DetectedChord | null => {
 
   if (chordName && chordName.length > 0) {
     const detected = chordName[0];
-    const chord = Chord.get(detected);
+    const chord = getChordData(detected);
 
     return {
       name: detected,
