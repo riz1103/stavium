@@ -17,6 +17,9 @@ export type TourWaitFor =
   | 'change-selected-note-pitch'
   | 'playback-started';
 
+/** Tour card position for steps where the default placement would cover the score */
+export type TourTooltipDock = 'auto' | 'top';
+
 export type EditorTourStep = {
   id: string;
   title: string;
@@ -26,7 +29,13 @@ export type EditorTourStep = {
   /** Matches `[data-tour-id="…"]` — omit for centered-only steps */
   targetId?: string;
   expandSections?: string[];
+  /** Section ids (`notes` | `structure` | `score` | `expression`) to collapse (maximize score area) */
+  collapseSections?: string[];
+  /** On mobile, hide the bottom tool drawer so the staff stays visible */
+  collapseMobileToolbar?: boolean;
   expandMobileTab?: EditorTourMobileTab;
+  /** `top` = dock card under tour banner so it does not block score click/drag */
+  tooltipDock?: TourTooltipDock;
   /** Defaults to read-only (Next anytime). Set for try-it-yourself steps. */
   waitFor?: TourWaitFor;
 };
@@ -75,8 +84,9 @@ export const EDITOR_TOUR_STEPS: EditorTourStep[] = [
       'With quarter selected, click an empty spot in the second measure on the top staff (Soprano) to add one new note.',
     taskHint: 'Click inside measure 2 on the upper staff. Your new note appears and Continue unlocks.',
     targetId: 'tour-score-canvas',
-    expandSections: ['notes'],
-    expandMobileTab: 'notes',
+    collapseSections: ['notes', 'structure', 'score', 'expression'],
+    collapseMobileToolbar: true,
+    tooltipDock: 'top',
     waitFor: 'place-note-measure-2',
   },
   {
@@ -86,8 +96,9 @@ export const EDITOR_TOUR_STEPS: EditorTourStep[] = [
       'Notes are edited directly on the staff. Drag the note you just placed straight up or down to change its pitch.',
     taskHint: 'Drag until the pitch changes (letter name moves). Continue unlocks after the pitch updates.',
     targetId: 'tour-score-canvas',
-    expandSections: ['notes'],
-    expandMobileTab: 'notes',
+    collapseSections: ['notes', 'structure', 'score', 'expression'],
+    collapseMobileToolbar: true,
+    tooltipDock: 'top',
     waitFor: 'change-selected-note-pitch',
   },
   {
@@ -95,6 +106,7 @@ export const EDITOR_TOUR_STEPS: EditorTourStep[] = [
     title: 'Help',
     body: 'Documentation, FAQs, and the AI assistant live here when you need them later.',
     targetId: 'tour-header-help',
+    expandSections: ['notes', 'structure', 'score', 'expression'],
     waitFor: 'manual',
   },
   {

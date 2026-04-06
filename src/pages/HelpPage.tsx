@@ -19,7 +19,7 @@ const WHATS_NEW_ITEMS = [
     title: 'Guided editor tour',
     date: 'Apr 2026',
     details:
-      'The Dashboard adds a "Guided tour" button that opens a safe demo editor at /editor/tour. You get a spotlight walkthrough plus hands-on steps: select quarter duration, place a note in measure 2, drag to change pitch, and press Play — Continue stays locked until each action succeeds. On small screens the tour opens the Notes tab and highlights the visible toolbar controls (not hidden desktop rows). Save and cloud sync stay off. Step copy lives in src/tour/editorTourSteps.ts.',
+      'The Dashboard adds a "Guided tour" button that opens a safe demo editor at /editor/tour. You get a spotlight walkthrough plus hands-on steps: select quarter duration, place a note in measure 2, drag to change pitch, and press Play — Continue stays locked until each action succeeds. Add-note and drag-pitch steps collapse extra toolbars and dock the hint at the top so the staff stays usable. On small screens the tour highlights visible controls and can hide the bottom tool drawer for those steps. Save and cloud sync stay off. Step copy lives in src/tour/editorTourSteps.ts.',
   },
   {
     title: 'Editor layout on small screens',
@@ -121,14 +121,18 @@ const WHATS_NEW_ITEMS = [
     title: 'Toolbar Density + Responsive Rows',
     date: 'Apr 2026',
     details:
-      'Desktop toolbars now wrap better at narrower widths, with a Compact/Comfortable density toggle in Score Settings.',
+      'Desktop toolbars now wrap better at narrower widths, with a Compact/Comfortable density toggle in Score Settings. Only one collapsible section stays open at a time so the score is not pushed off-screen.',
   },
 ];
 
 const FAQ_ITEMS = [
   {
     q: 'What is Guided tour and does it save my work?',
-    a: 'From the Dashboard, click "Guided tour" to open a demo editor with a sample score. Some steps are hands-on: you must complete the action (for example pick quarter duration, add a note in measure 2, drag to change pitch, or start playback) before Continue unlocks. Tour mode runs entirely in your browser: Save is disabled and your changes are not stored in your library. Use "New Composition" for a real score. Developers update src/tour/editorTourSteps.ts and data-tour-id anchors when the UI changes.',
+    a: 'From the Dashboard, click "Guided tour" to open a demo editor with a sample score. Some steps are hands-on: you must complete the action (for example pick quarter duration, add a note in measure 2, drag to change pitch, or start playback) before Continue unlocks. For the add-note and drag-pitch steps, toolbar sections collapse and the tour hint moves to the top so the staff stays visible and draggable. Tour mode runs entirely in your browser: Save is disabled and your changes are not stored in your library. Use "New Composition" for a real score. Developers update src/tour/editorTourSteps.ts and data-tour-id anchors when the UI changes.',
+  },
+  {
+    q: 'Why do other desktop toolbar sections close when I open one?',
+    a: 'On medium and larger screens, the editor uses collapsible rows for Notes & Rests, Structure, Score Settings, and Note Expression. Only one of those rows stays expanded at a time so the music stays on screen. Click a section header to expand it (others close automatically) or to collapse the one that is open. Section open/closed choices are saved in this browser. Phone layouts use bottom tabs instead.',
   },
   {
     q: 'How do I reharmonize my melody with new chords?',

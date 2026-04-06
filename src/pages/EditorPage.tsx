@@ -87,6 +87,9 @@ const defaultFirstScoreProgress: FirstScoreProgress = {
   savedScore: false,
 };
 
+/** Section ids for collapsible desktop toolbars — expanding one collapses the others so the score stays visible. */
+const DESKTOP_TOOLBAR_SECTION_IDS = ['notes', 'structure', 'score', 'expression'] as const;
+
 const measureKey = (staffIndex: number, measureIndex: number) => `${staffIndex}:${measureIndex}`;
 const hashMeasure = (measure: Measure | undefined): string => JSON.stringify(measure ?? null);
 
@@ -140,10 +143,20 @@ export const EditorPage = () => {
     } catch { return new Set(); }
   });
   const toggleRow = (id: string) => {
-    setCollapsedRows(prev => {
+    setCollapsedRows((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      try { localStorage.setItem('stavium_toolbar_sections', JSON.stringify([...next])); } catch { /* ignore localStorage failures */ }
+      const isCollapsed = next.has(id);
+      if (isCollapsed) {
+        next.delete(id);
+        for (const sid of DESKTOP_TOOLBAR_SECTION_IDS) {
+          if (sid !== id) next.add(sid);
+        }
+      } else {
+        next.add(id);
+      }
+      try {
+        localStorage.setItem('stavium_toolbar_sections', JSON.stringify([...next]));
+      } catch { /* ignore localStorage failures */ }
       return next;
     });
   };
@@ -950,9 +963,24 @@ export const EditorPage = () => {
         return next;
       });
     }
+    if (meta.collapseSections?.length) {
+      setCollapsedRows((prev) => {
+        const next = new Set(prev);
+        for (const sectionId of meta.collapseSections!) {
+          next.add(sectionId);
+        }
+        try {
+          localStorage.setItem('stavium_toolbar_sections', JSON.stringify([...next]));
+        } catch { /* ignore localStorage failures */ }
+        return next;
+      });
+    }
     if (meta.expandMobileTab) {
       setMobileTab(meta.expandMobileTab);
       setToolbarOpen(true);
+    }
+    if (meta.collapseMobileToolbar) {
+      setToolbarOpen(false);
     }
   }, []);
 
@@ -963,6 +991,8 @@ export const EditorPage = () => {
     flushSync(() => {
       handleTourStepMeta({
         expandSections: step.expandSections,
+        collapseSections: step.collapseSections,
+        collapseMobileToolbar: step.collapseMobileToolbar,
         expandMobileTab: step.expandMobileTab,
       });
     });

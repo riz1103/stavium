@@ -5,6 +5,8 @@ import type { EditorTourMobileTab, EditorTourStep } from '../../tour/editorTourS
 export type EditorTourStepMeta = {
   expandSections?: string[];
   expandMobileTab?: EditorTourMobileTab;
+  collapseSections?: string[];
+  collapseMobileToolbar?: boolean;
 };
 
 type Props = {
@@ -70,6 +72,15 @@ export const EditorTourOverlay = ({
     setHole({ top, left, width, height });
 
     const ttWidth = Math.min(360, window.innerWidth - 24);
+    if (step.tooltipDock === 'top') {
+      const banner = document.querySelector<HTMLElement>('[data-tour-id="tour-banner"]');
+      let ttTop = 12;
+      if (banner) {
+        ttTop = banner.getBoundingClientRect().bottom + 8;
+      }
+      setTooltipPos({ top: ttTop, left: 12, width: ttWidth });
+      return;
+    }
     let ttLeft = left;
     if (ttLeft + ttWidth > window.innerWidth - 12) {
       ttLeft = Math.max(12, window.innerWidth - 12 - ttWidth);

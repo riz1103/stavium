@@ -36,6 +36,7 @@ To scan or import from PDF or scanned images:
 - From the Dashboard (Compositions), use the "Guided tour" button to open ${'/editor/tour'}.
 - Tour mode shows a spotlight walkthrough (Next / Back / Exit tour) over a built-in demo score. Several steps are hands-on: the user must perform the action (e.g. select quarter duration, place a note in the second measure, drag to change pitch, press Play) before Continue unlocks; read-only steps use Next anytime.
 - On phone-sized viewports, hands-on steps that need the Notes toolbar automatically switch to the Notes bottom tab and expand the tool panel; the spotlight highlights the on-screen control (not a hidden desktop-only copy).
+- For "add a note" and "drag pitch" steps, desktop toolbar sections collapse and the mobile tool drawer closes so the staff stays large; the tour card docks under the tour banner so it does not cover the score while you click or drag.
 - Save is disabled; no composition is written to the user's library or Firestore.
 - Exit tour (or finishing the last step) returns to the Dashboard and clears the demo score from the editor store.
 - Tour copy, wait conditions, and highlighted regions are defined in src/tour/editorTourSteps.ts; spotlight anchors use data-tour-id attributes on the editor. Update those when UI labels or layout change.
@@ -44,7 +45,7 @@ To scan or import from PDF or scanned images:
 - Top header: Back button, Score Info (ℹ️), Help (?), title, Edit/View toggle, Undo/Redo, Save
 - On narrow/mobile viewports the header wraps: title is full-width; mobile Edit and the toolbar (hamburger) sit on a row; "Discard Unsaved Changes" and "Save" are on the next row (short label "Discard" on small screens). On medium+ screens Discard/Save align to the right with the full Discard label.
 - The main score canvas keeps a minimum height on small screens so the staff does not shrink below roughly one-third of the viewport; playback controls use slightly tighter padding on mobile.
-- Toolbar sections (collapsible): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected)
+- Toolbar sections (collapsible, medium screens and up): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected). Expanding one section automatically collapses the others so the score stays visible on screen.
 - Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars) and a MIDI Input panel
 - On phone-sized viewports, the Notes / Expression / Structure / Score tab strip stays at the bottom of the editor; the active tab’s tool rows scroll above it when the panel is open.
 
