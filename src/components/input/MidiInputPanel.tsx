@@ -5,7 +5,7 @@ import { usePlaybackStore } from '../../app/store/playbackStore';
 import { sharedScheduler } from '../../music/playback/toneScheduler';
 import { Composition, Note, NoteDuration, Rest } from '../../types/music';
 import { durationToBeats } from '../../utils/durationUtils';
-import { applyKeySignatureAndMeasureAccidentals, midiToPitch, pitchToMidi } from '../../utils/noteUtils';
+import { applyKeySignatureAndMeasureAccidentals, midiToPitch, midiToPitchForKeySignature, pitchToMidi } from '../../utils/noteUtils';
 
 type CaptureMode = 'step' | 'realtime';
 type QuantizationId = 'off' | 'quarter' | 'eighth' | 'sixteenth' | 'triplet-eighth';
@@ -283,7 +283,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
   const [midiSupported, setMidiSupported] = useState<boolean>(typeof navigator !== 'undefined' && 'requestMIDIAccess' in navigator);
   const [midiInputs, setMidiInputs] = useState<Array<{ id: string; name: string }>>([]);
   const [statusText, setStatusText] = useState<string>('No MIDI device detected');
-  const [lastCapturedPitch, setLastCapturedPitch] = useState<string | null>(null);
+  const [lastCapturedMidi, setLastCapturedMidi] = useState<number | null>(null);
   const [activeVirtualNotes, setActiveVirtualNotes] = useState<Set<number>>(new Set());
   const [showPlaybackOnKeyboard, setShowPlaybackOnKeyboard] = useState(true);
   const [adaptiveHoldLabels, setAdaptiveHoldLabels] = useState<string[]>([]);
@@ -297,6 +297,15 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
       })
     );
   };
+  const notationPitchFromMidi = (midi: number): string =>
+    midiToPitchForKeySignature(clampMidi(midi), composition?.keySignature ?? 'C');
+  const lastCapturedPitchLabel = useMemo(() => {
+    if (lastCapturedMidi === null) return null;
+    const safeMidi = clampMidi(lastCapturedMidi);
+    const notation = notationPitchFromMidi(safeMidi);
+    const raw = midiToPitch(safeMidi);
+    return notation === raw ? notation : `${notation} (${raw})`;
+  }, [lastCapturedMidi, composition?.keySignature]);
 
   const triggerKeyRetrigger = (midi: number) => {
     const safeMidi = clampMidi(midi);
@@ -1108,7 +1117,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
   };
 
   const appendNote = (cursor: CursorState, midi: number, beats: number): CursorState => {
-    const pitch = midiToPitch(clampMidi(midi));
+    const pitch = notationPitchFromMidi(midi);
     return appendDurationAsElements(cursor, beats, (duration, hasMoreSegments) => ({
       pitch,
       duration,
@@ -1201,7 +1210,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
   ): { nextCursor: CursorState; segments: ProvisionalSegmentRef[] } => {
     let remaining = Math.max(0, totalBeats);
     let current = { ...cursor };
-    const pitch = midiToPitch(clampMidi(midi));
+    const pitch = notationPitchFromMidi(midi);
     const segments: ProvisionalSegmentRef[] = [];
 
     while (remaining > EPSILON) {
@@ -1361,7 +1370,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
     beats: number,
     provisional = false
   ): CursorState => {
-    const pitch = midiToPitch(clampMidi(midi));
+    const pitch = notationPitchFromMidi(midi);
     return appendDurationToDraft(draft, cursor, beats, (duration, hasMoreSegments) => ({
       pitch,
       duration,
@@ -1533,7 +1542,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
     cursor = applyTimelineToLiveAcrossVoices(cursor, filtered, normalizedTotalBeats);
     const lastEvent = filtered[filtered.length - 1];
     if (lastEvent) {
-      setLastCapturedPitch(midiToPitch(clampMidi(lastEvent.midi)));
+      setLastCapturedMidi(clampMidi(lastEvent.midi));
     }
 
     stepCursorRef.current = cursor;
@@ -1746,7 +1755,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
     const safeMidi = clampMidi(midi);
     const durationBeats = durationToBeats(selectedDuration);
     const nextCursor = appendNote(cursor, safeMidi, durationBeats);
-    setLastCapturedPitch(midiToPitch(safeMidi));
+    setLastCapturedMidi(safeMidi);
     return nextCursor;
   };
 
@@ -1763,7 +1772,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
       ensureMeasureExists(workingCursor.staffIndex, workingCursor.measureIndex);
     }
     const safeMidi = clampMidi(midi);
-    const pitch = midiToPitch(safeMidi);
+    const pitch = notationPitchFromMidi(safeMidi);
     let insertedNoteIndex: number | null = null;
 
     updateCompositionTransient((draft) => {
@@ -1873,7 +1882,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
     }
 
     if (notes.length > 0) {
-      setLastCapturedPitch(midiToPitch(clampMidi(notes[notes.length - 1])));
+      setLastCapturedMidi(clampMidi(notes[notes.length - 1]));
     }
     stepCursorRef.current = baseNextCursor;
     setSelectedStaffIndex(baseNextCursor.staffIndex);
@@ -1908,7 +1917,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
       nextCursor = { ...nextCursor, measureIndex: nextCursor.measureIndex + 1, beatInMeasure: 0 };
     }
     stepCursorRef.current = nextCursor;
-    setLastCapturedPitch(midiToPitch(clampMidi(midi)));
+    setLastCapturedMidi(clampMidi(midi));
     setSelectedStaffIndex(nextCursor.staffIndex);
     setSelectedMeasureIndex(nextCursor.measureIndex);
     emitMidiFollowMeasure(nextCursor.staffIndex, nextCursor.measureIndex);
@@ -1945,7 +1954,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
 
     const nextCursor = appendNote(startCursor, safeMidi, normalizedBeats);
     stepCursorRef.current = nextCursor;
-    setLastCapturedPitch(midiToPitch(safeMidi));
+    setLastCapturedMidi(safeMidi);
     setSelectedStaffIndex(nextCursor.staffIndex);
     setSelectedMeasureIndex(nextCursor.measureIndex);
     emitMidiFollowMeasure(nextCursor.staffIndex, nextCursor.measureIndex);
@@ -1960,7 +1969,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
       realtimeActiveNotesRef.current.set(midi, { startedAtMs: performance.now(), velocity });
     }
     realtimeSilencePreviewRef.current = null;
-    setLastCapturedPitch(midiToPitch(clampMidi(midi)));
+    setLastCapturedMidi(clampMidi(midi));
     if (!provisionalRealtimeNotesRef.current.has(midi)) {
       const startCursor = realtimeStartCursorRef.current ?? ensureCursor();
       provisionalRealtimeNotesRef.current.set(midi, {
@@ -2009,7 +2018,8 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
       : (stepCursorRef.current ?? ensureCursor()).staffIndex;
     const instrument = composition.staves[staffIndex]?.instrument ?? 'piano';
     void sharedScheduler
-      .startHeldPreview(midiToPitch(safeMidi), instrument, composition.keySignature)
+      // Keyboard preview should reflect the exact pressed MIDI pitch, not key-signature spelling.
+      .startHeldPreview(midiToPitch(safeMidi), instrument, 'C')
       .then((id) => {
         if (id) {
           activePreviewIdsRef.current.set(midi, id);
@@ -2037,7 +2047,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
     }
     triggerKeyRetrigger(midi);
     startHeldPreviewForMidi(midi);
-    setLastCapturedPitch(midiToPitch(clampMidi(midi)));
+    setLastCapturedMidi(clampMidi(midi));
     if (isReadOnly) return;
     if (mode === 'step') {
       if (activeStepHeldNotesRef.current.has(midi)) return;
@@ -2134,7 +2144,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
           const heldMs = Math.max(1, now - hold.startedAtMs);
           const heldBeats = normalizeNotatableBeats(holdMsToQuarterBeats(heldMs, hold.startMeasureIndex));
           const duration = mapHoldBeatsToDuration(heldBeats);
-          return `${midiToPitch(clampMidi(midi))}: ${duration}`;
+          return `${notationPitchFromMidi(midi)}: ${duration}`;
         })
         .filter((label): label is string => Boolean(label));
       setAdaptiveHoldLabels(labels);
@@ -2638,7 +2648,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
         });
         triggerKeyRetrigger(mappedMidi);
         startHeldPreviewForMidi(mappedMidi);
-        setLastCapturedPitch(midiToPitch(clampMidi(mappedMidi)));
+        setLastCapturedMidi(clampMidi(mappedMidi));
         handleStepInputNoteOn(mappedMidi);
         return;
       }
@@ -3288,9 +3298,9 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
           </span>
         )}
         {!midiSupported && <span className="text-amber-300">Use virtual piano below.</span>}
-        {lastCapturedPitch && (
+        {lastCapturedPitchLabel && (
           <span className="px-2 py-0.5 rounded border border-sv-cyan/40 text-sv-cyan">
-            Last: {lastCapturedPitch}
+            Last: {lastCapturedPitchLabel}
           </span>
         )}
         {mode === 'step' && (

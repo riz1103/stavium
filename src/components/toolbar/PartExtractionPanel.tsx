@@ -263,6 +263,25 @@ export const PartExtractionPanel = ({ isReadOnly = false }: PartExtractionPanelP
         {linkedParts.length > 0 ? `${linkedParts.length} linked part scores` : 'No linked part scores yet'}
       </span>
       {!isReadOnly && (
+        <label
+          className="flex items-center gap-1.5 px-2 py-1 rounded border border-sv-border bg-sv-elevated text-[11px] text-sv-text-muted"
+          title="When enabled, Save also syncs existing linked part compositions from this full score."
+        >
+          <input
+            type="checkbox"
+            checked={composition.autoSyncLinkedPartsOnSave !== false}
+            onChange={(e) =>
+              setComposition({
+                ...composition,
+                autoSyncLinkedPartsOnSave: e.target.checked,
+              })
+            }
+            className="w-3.5 h-3.5"
+          />
+          <span>Auto-sync linked parts on Save</span>
+        </label>
+      )}
+      {!isReadOnly && (
         <button
           onClick={() => setTargetsOpen((open) => !open)}
           disabled={syncing}

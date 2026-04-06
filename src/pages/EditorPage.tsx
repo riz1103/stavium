@@ -814,8 +814,13 @@ export const EditorPage = () => {
       };
       setComposition(syncedComposition);
 
-      // Keep previously generated linked parts in sync whenever the full score is saved.
-      if (!syncedComposition.linkedPartSource && syncedComposition.id) {
+      // Keep previously generated linked parts in sync whenever the full score is saved,
+      // unless the user disables auto-sync for this score.
+      if (
+        !syncedComposition.linkedPartSource &&
+        syncedComposition.id &&
+        syncedComposition.autoSyncLinkedPartsOnSave !== false
+      ) {
         void syncLinkedPartsFromSource({
           sourceComposition: syncedComposition,
           sourceCompositionId: syncedComposition.id,

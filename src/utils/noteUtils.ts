@@ -50,6 +50,21 @@ export const midiToPitch = (midi: number): Pitch => {
 };
 
 /**
+ * Converts MIDI note number to pitch string with accidental spelling preference
+ * derived from the score key signature (flat keys -> flats, sharp keys -> sharps).
+ */
+export const midiToPitchForKeySignature = (midi: number, keySignature: string): Pitch => {
+  const octave = Math.floor(midi / 12) - 1;
+  const noteIndex = ((midi % 12) + 12) % 12;
+  const sharpNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const flatNames = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+  const { sharps, flats } = getKeySignatureAccidentals(keySignature);
+  const preferFlats = flats.size > sharps.size;
+  const noteName = preferFlats ? flatNames[noteIndex] : sharpNames[noteIndex];
+  return `${noteName}${octave}` as Pitch;
+};
+
+/**
  * Gets the frequency in Hz for a given pitch
  */
 export const pitchToFrequency = (pitch: Pitch): number => {

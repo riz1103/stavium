@@ -19,7 +19,7 @@ const WHATS_NEW_ITEMS = [
     title: 'AI Composition Assistant (Phase 3)',
     date: 'Apr 2026',
     details:
-      'The Structure toolbar now includes an "AI Compose" panel with three tools: Reharmonize (generates 3 alternative chord progressions from the melody, applied as chord symbols), SATB Voicing (keeps your melody on the soprano staff and harmonizes each note with A/T/B from chord symbols, with voice leading), and Countermelody (creates a new AI-generated melodic line in contrary or complementary motion). Each tool offers a style selector (Classical, Jazz, Pop, Modal) and generates 3 ranked candidates to preview and apply. AI Compose and "AI Arrange" use an OpenAI-compatible music API when VITE_MUSIC_AI_API_KEY is set (defaults to Groq free tier); otherwise smart heuristics are used. The Help "AI Assistant" chat still uses Google Gemini (VITE_GEMINI_API_KEY) only.',
+      'The Structure toolbar now includes an "AI Compose" panel with three tools: Reharmonize (generates 3 alternative chord progressions from the melody, applied as chord symbols), SATB Voicing (keeps your melody on the soprano staff and harmonizes each note with A/T/B from chord symbols, with voice leading), and Countermelody (creates a new AI-generated melodic line in contrary or complementary motion). SATB candidates now include built-in theory lint summaries for voice-range checks, parallel perfect warnings, and resolution suggestions. Each tool offers a style selector (Classical, Jazz, Pop, Modal) and generates 3 ranked candidates to preview and apply. AI Compose and "AI Arrange" use an OpenAI-compatible music API when VITE_MUSIC_AI_API_KEY is set (defaults to Groq free tier); otherwise smart heuristics are used. The Help "AI Assistant" chat still uses Google Gemini (VITE_GEMINI_API_KEY) only.',
   },
   {
     title: 'View Mode Live Score Updates',
@@ -49,7 +49,7 @@ const WHATS_NEW_ITEMS = [
     title: 'Linked Part Extraction (v1)',
     date: 'Apr 2026',
     details:
-      'From Structure, use Part Extraction to generate one linked score per staff (vocal/instrument parts) from a full score. Saving the full score now auto-syncs existing linked parts, and opening a linked part gives a "Refresh from source" action when you want the latest source edits.',
+      'From Structure, use Part Extraction to generate one linked score per staff (vocal/instrument parts) from a full score. Save can auto-sync existing linked parts, and you can toggle this behavior with "Auto-sync linked parts on Save" in the Part Extraction row. Opening a linked part gives a "Refresh from source" action when you want the latest source edits.',
   },
   {
     title: 'Multi-Voice Editing Lanes (V1-V4)',
@@ -120,7 +120,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do I generate SATB staves from chord symbols?',
-    a: 'In Structure > AI Compose, select the SATB Voicing tab. The soprano staff follows your melody (rhythm and contour); alto, tenor, and bass are filled with chord tones under each note using the staff chord symbols (or key-based chords if none are written). Click "Generate 3 ideas" for three texture presets (Smooth Voice Leading, Open Spacing, Mixed Texture), then "Apply SATB staves" to add the four choir staves. This replaces any previously AI-generated staves.',
+    a: 'In Structure > AI Compose, select the SATB Voicing tab. The soprano staff follows your melody (rhythm and contour); alto, tenor, and bass are filled with chord tones under each note using the staff chord symbols (or key-based chords if none are written). Click "Generate 3 ideas" for three texture presets (Smooth Voice Leading, Open Spacing, Mixed Texture). Each SATB card includes a theory lint line that reports voice-range checks, parallel perfect warnings, and resolution suggestions for that candidate. Then click "Apply SATB staves" to add the four choir staves. This replaces any previously AI-generated staves.',
   },
   {
     q: 'How do I add a countermelody to my score?',
@@ -132,7 +132,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do I enter notes from a MIDI keyboard or virtual piano?',
-    a: 'Use the MIDI Input panel in the bottom playback bar (standard notation mode). Select Step Input, then play notes from a connected MIDI device or the virtual piano. The virtual piano is shown as a real piano-style keyboard (white and black keys) that you can click/tap directly. Notes sustain while a key is held (useful for organ/sustaining sounds), and repeated strikes of the same pitch show a quick retrigger accent so separate attacks are visible. Use the Keyboard buttons (Simple, Extended, Ultra (88-key)) to switch range up to full A0-C8. Use Full screen piano for larger playing view. In Simple mode, Octave jump buttons shift the visible one-octave window (for example C4-C5 to C5-C6); in Extended/Ultra they center the scroll view around the selected C octave. Computer keyboard input works across all keyboard views; in Simple view the visible octave auto-shifts when needed so mapped notes remain visible. You can also toggle "Show playback on keyboard" to light up keys during score playback (including chord-symbol harmony when "Play Chords" is enabled). Parts you mute (staff or voice lane) or exclude with solo are omitted from keyboard highlights. Optional Computer keyboard input lets you play from your laptop/PC keyboard using a US-layout default map; you can turn it on/off, open "Edit key map" to launch a fullscreen 88-key visual rebinding modal, and mappings are saved locally on your device. In Step mode, turning on Computer keyboard input auto-switches Chord grouping to Off by default for immediate single-note entry (you can still manually change it). On touch screens, long-press/context-menu gesture defaults are suppressed inside the virtual keyboard area while allowing multi-finger piano presses. In View mode, the keyboard controls remain enabled for preview-only playing, but they do not write notes to the composition, and the panel shows a "Preview only - no score input" hint badge. On mobile, the MIDI panel starts collapsed by default to preserve score area; tap Show to expand it.',
+    a: 'Use the MIDI Input panel in the bottom playback bar (standard notation mode). Select Step Input, then play notes from a connected MIDI device or the virtual piano. The virtual piano is shown as a real piano-style keyboard (white and black keys) that you can click/tap directly. Notes sustain while a key is held (useful for organ/sustaining sounds), and repeated strikes of the same pitch show a quick retrigger accent so separate attacks are visible. Keyboard preview keeps the exact sounding pitch you pressed; when notes are written into notation, accidental spelling is key-aware (flat keys prefer spellings like Bb, sharp keys prefer A#). Use the Keyboard buttons (Simple, Extended, Ultra (88-key)) to switch range up to full A0-C8. Use Full screen piano for larger playing view. In Simple mode, Octave jump buttons shift the visible one-octave window (for example C4-C5 to C5-C6); in Extended/Ultra they center the scroll view around the selected C octave. Computer keyboard input works across all keyboard views; in Simple view the visible octave auto-shifts when needed so mapped notes remain visible. You can also toggle "Show playback on keyboard" to light up keys during score playback (including chord-symbol harmony when "Play Chords" is enabled). Parts you mute (staff or voice lane) or exclude with solo are omitted from keyboard highlights. Optional Computer keyboard input lets you play from your laptop/PC keyboard using a US-layout default map; you can turn it on/off, open "Edit key map" to launch a fullscreen 88-key visual rebinding modal, and mappings are saved locally on your device. In Step mode, turning on Computer keyboard input auto-switches Chord grouping to Off by default for immediate single-note entry (you can still manually change it). On touch screens, long-press/context-menu gesture defaults are suppressed inside the virtual keyboard area while allowing multi-finger piano presses. In View mode, the keyboard controls remain enabled for preview-only playing, but they do not write notes to the composition, and the panel shows a "Preview only - no score input" hint badge. On mobile, the MIDI panel starts collapsed by default to preserve score area; tap Show to expand it.',
   },
   {
     q: 'Can Step Input derive duration from key hold time?',
@@ -184,7 +184,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do linked parts stay updated after I edit the full score?',
-    a: 'When you save the full score, Stavium automatically syncs existing linked parts derived from that score. If you open a linked part directly, use "Refresh from source" in Part Extraction to pull the latest source changes on demand.',
+    a: 'In Part Extraction, use the "Auto-sync linked parts on Save" checkbox to control this behavior. When enabled, saving the full score syncs existing linked parts derived from that score. When disabled, Save updates only the full score and does not sync linked parts automatically. If you open a linked part directly, use "Refresh from source" in Part Extraction to pull latest source changes on demand.',
   },
   {
     q: 'Can I extract only one voice lane (V1-V4) into linked parts?',
@@ -521,7 +521,7 @@ export const HelpPage = () => {
                       <strong className="text-sv-text"> Reharmonize</strong> — generates 3 alternative chord progressions and writes them as chord symbols above the staff; choose Classical, Jazz, Pop, or Modal style.
                       <strong className="text-sv-text"> SATB Voicing</strong> — keeps your melody on the soprano staff and harmonizes each note with alto/tenor/bass from the chord symbols (or key-based chords if absent), with voice leading between chords.
                       <strong className="text-sv-text"> Countermelody</strong> — creates a new melodic line (Upper Counterpoint, Lower Response, or Inner Voice) in contrary or complementary motion to the melody.
-                      Each tool generates 3 candidates labelled AI or Fallback depending on whether the music API (VITE_MUSIC_AI_API_KEY, e.g. Groq) returned suggestions. Apply any candidate instantly; all changes are undoable.
+                      Each tool generates 3 candidates labelled AI or Fallback depending on whether the music API (VITE_MUSIC_AI_API_KEY, e.g. Groq) returned suggestions. SATB candidates include built-in theory lint summaries (voice range, parallel perfects, and resolution suggestions). Apply any candidate instantly; all changes are undoable.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
@@ -545,7 +545,7 @@ export const HelpPage = () => {
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Linked Part Extraction</h3>
                     <p className="text-sv-text-muted text-sm">
-                      Generate individual linked parts from a full score directly in Structure. Select single or multiple staves, then choose All voices or specific V1-V4 lanes per staff before syncing. Open linked parts from either Edit or View mode, and refresh from source when needed.
+                      Generate individual linked parts from a full score directly in Structure. Select single or multiple staves, then choose All voices or specific V1-V4 lanes per staff before syncing. Use "Auto-sync linked parts on Save" to decide whether manual Save should also sync parts. Open linked parts from either Edit or View mode, and refresh from source when needed.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">

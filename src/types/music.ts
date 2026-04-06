@@ -249,6 +249,8 @@ export interface Composition {
   engravingCollisionCleanup?: EngravingCollisionCleanupLevel;
   /** Present when this document is a linked derived part from a full score staff. */
   linkedPartSource?: LinkedPartSource;
+  /** When false, saving the full score skips auto-sync of previously generated linked parts. */
+  autoSyncLinkedPartsOnSave?: boolean;
 }
 
 export type Instrument = 

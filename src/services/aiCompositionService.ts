@@ -9,6 +9,7 @@ import { Composition, ChordSymbol, Staff, MusicElement, Note } from '../types/mu
 import { pitchToMidi, midiToPitch } from '../utils/noteUtils';
 import { getChordData } from '../utils/chordSymbolUtils';
 import { buildSatbStavesMelodyFirst } from '../music/theory/satbVoicing';
+import { summarizeSatbTheoryLint } from '../music/theory/satbLint';
 import { ArrangementCandidate } from './arrangementService';
 import { chatCompletionText, isMusicAiConfigured } from './musicAiClient';
 
@@ -340,13 +341,16 @@ const buildHeuristicSATBCandidates = (
   chordsByMeasure: ChordSymbol[][],
   keyFallback: string,
 ): ArrangementCandidate[] =>
-  SATB_PROFILES.map((profile, idx): ArrangementCandidate => ({
-    id: `satb-${idx + 1}`,
-    title: profile.title,
-    description: profile.description,
-    staves: buildSATBStaves(sourceStaff, chordsByMeasure, profile, keyFallback),
-    source: 'heuristic',
-  }));
+  SATB_PROFILES.map((profile, idx): ArrangementCandidate => {
+    const staves = buildSATBStaves(sourceStaff, chordsByMeasure, profile, keyFallback);
+    return {
+      id: `satb-${idx + 1}`,
+      title: profile.title,
+      description: `${profile.description} ${summarizeSatbTheoryLint(staves, keyFallback)}`,
+      staves,
+      source: 'heuristic',
+    };
+  });
 
 export async function generateSATBVoicing(
   composition: Composition,
@@ -415,11 +419,12 @@ Rules:
         openness: typeof c.openness === 'number' ? Math.max(0, Math.min(1, c.openness)) : 0.5,
         doubleRoot: c.doubleRoot ?? false,
       };
+      const staves = buildSATBStaves(staff, chordsByMeasure, profile, keyRoot);
       return {
         id: `ai-satb-${idx + 1}`,
         title: profile.title,
-        description: profile.description,
-        staves: buildSATBStaves(staff, chordsByMeasure, profile, keyRoot),
+        description: `${profile.description} ${summarizeSatbTheoryLint(staves, keyRoot)}`,
+        staves,
         source: 'ai',
       };
     });

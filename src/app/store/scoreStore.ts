@@ -155,6 +155,7 @@ const defaultComposition: Composition = {
   engravingPageBreaks: [],
   showMeasureNumbers: true,
   privacy: 'private',
+  autoSyncLinkedPartsOnSave: true,
   staves: [
     {
       clef: 'treble',

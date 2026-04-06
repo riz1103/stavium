@@ -91,6 +91,7 @@ To scan or import from PDF or scanned images:
 - On mobile-sized viewports, the MIDI panel starts collapsed by default to preserve staff visibility.
 - Users can toggle the panel with Show/Hide in the MIDI panel header.
 - MIDI input targets the currently selected Staff/Measure/Voice.
+- MIDI keyboard/virtual-piano input keeps sounding pitch exactly as pressed; when notes are written to the score, accidental spelling is key-aware (flat keys prefer Bb/Eb/Ab... labels, sharp keys prefer A#/C#/F#... labels).
 - In View mode (read-only), virtual piano controls still stay enabled for preview/audition:
   - users can play keys, switch Keyboard size (Simple/Extended/Ultra), use Octave jump, and open Full screen piano
   - this does not insert notes or modify the composition.
@@ -103,7 +104,8 @@ To scan or import from PDF or scanned images:
 - Under each selected staff, users can choose "All voices" or specific lanes (V1-V4).
 - Selecting specific lanes stores only those voice lanes in extracted linked parts.
 - Linked parts are intended for rehearsal/printing workflows (for example, individual SATB or instrument packets).
-- Saving the full score auto-syncs already generated linked parts.
+- In Part Extraction, "Auto-sync linked parts on Save" controls whether manual Save also syncs already generated linked parts.
+- If that checkbox is OFF, Save updates only the full score and does not update linked parts until the user clicks sync/refresh manually.
 - When opening a linked part directly, use "Refresh from source" in Part Extraction to pull latest source changes.
 - In View mode, users can still open existing linked parts (and open source from a linked part), but generate/sync/refresh actions require Edit mode.
 - Linked parts remain normal compositions for PDF/MIDI export.
@@ -153,6 +155,7 @@ To scan or import from PDF or scanned images:
 - Soprano follows the selected staff melody; alto, tenor, and bass are chord tones under each note (using chord symbols on the staff, or key-based chords if none are written).
 - Voice leading connects harmonies across the phrase; rests do not reset the voicing.
 - Click "Generate 3 ideas" → 3 voicing candidates: Smooth Voice Leading, Open Spacing, Mixed Texture.
+- Each SATB candidate description now includes a built-in theory lint summary with voice-range checks, parallel perfect warnings, and resolution suggestions.
 - Click "Apply SATB staves" to add or replace the 4 AI-generated staves in the score.
 - Applying replaces previously AI-generated staves (non-AI staves are preserved).
 
