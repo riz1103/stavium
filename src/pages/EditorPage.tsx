@@ -37,11 +37,12 @@ import { Measure } from '../types/music';
 import {
   CollaborationPresence,
   CompositionMeasurePatch,
+  PublishMeasurePatchParams,
   clearCompositionMeasurePatches,
   clearCompositionPresence,
   getCompositionEditingSnapshot,
   publishCompositionPresence,
-  publishMeasurePatch,
+  publishMeasurePatchBatch,
   subscribeToCompositionPresence,
   subscribeToMeasurePatches,
 } from '../services/collaborationService';
@@ -209,7 +210,9 @@ export const EditorPage = () => {
   const [editorsOnOpenCheckedAt, setEditorsOnOpenCheckedAt] = useState<string | null>(null);
   const lastMeasureHashesRef = useRef<Map<string, string>>(new Map());
   const measureUpdateTimesRef = useRef<Map<string, number>>(new Map());
-  const pendingPublishTimersRef = useRef<Map<string, number>>(new Map());
+  // Accumulates pending measure patches; flushed as a single writeBatch on the timer.
+  const pendingPatchBatchRef = useRef<Map<string, PublishMeasurePatchParams>>(new Map());
+  const batchFlushTimerRef = useRef<number | null>(null);
   const seenPatchIdsRef = useRef<Set<string>>(new Set());
   const lastPatchCountRef = useRef(0);
   const suppressPublishMeasureKeysRef = useRef<Set<string>>(new Set());
@@ -373,58 +376,78 @@ export const EditorPage = () => {
     lastMeasureHashesRef.current = nextHashes;
   };
 
-  const applyRemoteMeasurePatch = (patch: CompositionMeasurePatch): boolean => {
+  /**
+   * Apply a batch of remote measure patches in a single setComposition call.
+   * This avoids N re-renders when a remote reflow affects many measures at once.
+   * Returns the IDs of all patches that were processed (applied or skipped as stale).
+   */
+  const applyRemoteMeasurePatches = (patches: CompositionMeasurePatch[]): string[] => {
     const current = useScoreStore.getState().composition;
-    if (!current) return false;
+    if (!current || patches.length === 0) return [];
+
     const ensureMeasureShell = (number: number): Measure => ({
       number,
       voices: [{ notes: [] }, { notes: [] }, { notes: [] }, { notes: [] }],
     });
 
+    const staffTemplate = current.staves[0];
+    // Shallow-copy staves and their measure arrays so we can apply multiple
+    // patches without mutating the store state and without a full deep clone.
     const staves = current.staves.map((staff) => ({
       ...staff,
       measures: [...staff.measures],
     }));
-    const staffTemplate = staves[0];
-    while (staves.length <= patch.staffIndex) {
-      const nextIndex = staves.length;
-      staves.push({
-        clef: staffTemplate?.clef ?? 'treble',
-        instrument: staffTemplate?.instrument ?? 'piano',
-        name: `Staff ${nextIndex + 1}`,
-        measures: [],
-      });
-    }
-    const targetStaff = staves[patch.staffIndex];
-    while (targetStaff.measures.length <= patch.measureIndex) {
-      targetStaff.measures.push(ensureMeasureShell(targetStaff.measures.length + 1));
-    }
-    const targetMeasure = targetStaff.measures[patch.measureIndex];
 
-    const key = measureKey(patch.staffIndex, patch.measureIndex);
-    const currentHash = hashMeasure(targetMeasure);
-    if (currentHash === patch.nextHash) return true;
-    const remoteUpdatedAt = Math.max(patch.createdAtMs, patch.clientTimestamp || 0);
-    const lastAppliedAt = lastAppliedPatchAtRef.current.get(key) ?? 0;
-    if (remoteUpdatedAt < lastAppliedAt) return true;
+    const processed: string[] = [];
+    let anyApplied = false;
 
-    const nextComposition = {
-      ...current,
-      staves: staves.map((staff, staffIndex) => {
-        if (staffIndex !== patch.staffIndex) return staff;
-        return {
-          ...staff,
-          measures: staff.measures.map((measure, measureIndex) =>
-            measureIndex === patch.measureIndex ? patch.measure : measure
-          ),
-        };
-      }),
-    };
-    suppressPublishMeasureKeysRef.current.add(key);
-    measureUpdateTimesRef.current.set(key, remoteUpdatedAt);
-    lastAppliedPatchAtRef.current.set(key, remoteUpdatedAt);
-    setComposition(nextComposition);
-    return true;
+    for (const patch of patches) {
+      while (staves.length <= patch.staffIndex) {
+        const nextIndex = staves.length;
+        staves.push({
+          clef: staffTemplate?.clef ?? 'treble',
+          instrument: staffTemplate?.instrument ?? 'piano',
+          name: `Staff ${nextIndex + 1}`,
+          measures: [],
+        });
+      }
+      const targetStaff = staves[patch.staffIndex];
+      while (targetStaff.measures.length <= patch.measureIndex) {
+        targetStaff.measures.push(ensureMeasureShell(targetStaff.measures.length + 1));
+      }
+
+      const key = measureKey(patch.staffIndex, patch.measureIndex);
+      const currentHash = hashMeasure(targetStaff.measures[patch.measureIndex]);
+
+      // Already at the desired state — nothing to do.
+      if (currentHash === patch.nextHash) {
+        processed.push(patch.id);
+        continue;
+      }
+
+      const remoteUpdatedAt = Math.max(patch.createdAtMs, patch.clientTimestamp || 0);
+      const lastAppliedAt = lastAppliedPatchAtRef.current.get(key) ?? 0;
+
+      // Stale patch — a newer one was already applied.
+      if (remoteUpdatedAt < lastAppliedAt) {
+        processed.push(patch.id);
+        continue;
+      }
+
+      // Apply the measure in-place on the shallow-copied array.
+      targetStaff.measures[patch.measureIndex] = patch.measure;
+      suppressPublishMeasureKeysRef.current.add(key);
+      measureUpdateTimesRef.current.set(key, remoteUpdatedAt);
+      lastAppliedPatchAtRef.current.set(key, remoteUpdatedAt);
+      processed.push(patch.id);
+      anyApplied = true;
+    }
+
+    if (anyApplied) {
+      setComposition({ ...current, staves });
+    }
+
+    return processed;
   };
 
   const publishPresence = async (options?: { force?: boolean }) => {
@@ -474,8 +497,11 @@ export const EditorPage = () => {
         window.clearTimeout(cursorPublishTimerRef.current);
         cursorPublishTimerRef.current = null;
       }
-      pendingPublishTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-      pendingPublishTimersRef.current.clear();
+      if (batchFlushTimerRef.current) {
+        window.clearTimeout(batchFlushTimerRef.current);
+        batchFlushTimerRef.current = null;
+      }
+      pendingPatchBatchRef.current.clear();
     };
   }, []);
 
@@ -536,13 +562,11 @@ export const EditorPage = () => {
           })();
           return;
         }
-        patches.forEach((patch) => {
-          if (seenPatchIdsRef.current.has(patch.id)) return;
-          const handled = applyRemoteMeasurePatch(patch);
-          if (handled) {
-            seenPatchIdsRef.current.add(patch.id);
-          }
-        });
+        const newPatches = patches.filter((p) => !seenPatchIdsRef.current.has(p.id));
+        if (newPatches.length > 0) {
+          const processedIds = applyRemoteMeasurePatches(newPatches);
+          processedIds.forEach((id) => seenPatchIdsRef.current.add(id));
+        }
       },
       (error) => console.warn('Patch subscription error:', error)
     );
@@ -609,33 +633,46 @@ export const EditorPage = () => {
     if (changedMeasures.length === 0) return;
 
     const now = Date.now();
+    let hasNewChanges = false;
     changedMeasures.forEach((change) => {
       if (suppressPublishMeasureKeysRef.current.has(change.key)) {
         suppressPublishMeasureKeysRef.current.delete(change.key);
         return;
       }
       measureUpdateTimesRef.current.set(change.key, now);
-      const priorTimer = pendingPublishTimersRef.current.get(change.key);
-      if (priorTimer) window.clearTimeout(priorTimer);
-
-      const timer = window.setTimeout(() => {
-        void publishMeasurePatch({
-          compositionId: composition.id!,
-          actorUid: user.uid,
-          actorName: user.displayName,
-          staffIndex: change.staffIndex,
-          measureIndex: change.measureIndex,
-          measure: change.measure,
-          baseHash: change.baseHash,
-          nextHash: change.nextHash,
-          clientTimestamp: Date.now(),
-        }).catch((error) => {
-          console.warn('Measure patch publish failed:', error);
-        });
-        pendingPublishTimersRef.current.delete(change.key);
-      }, 180);
-      pendingPublishTimersRef.current.set(change.key, timer);
+      // Accumulate into the pending batch (later update overwrites earlier for same key)
+      pendingPatchBatchRef.current.set(change.key, {
+        compositionId: composition.id!,
+        actorUid: user.uid,
+        actorName: user.displayName,
+        staffIndex: change.staffIndex,
+        measureIndex: change.measureIndex,
+        measure: change.measure,
+        baseHash: change.baseHash,
+        nextHash: change.nextHash,
+        clientTimestamp: now,
+      });
+      hasNewChanges = true;
     });
+
+    if (hasNewChanges) {
+      // Reset the single flush timer so rapid edits coalesce into one writeBatch call.
+      // A 100 ms window keeps latency low for single-measure edits while ensuring
+      // that a reflow touching many measures is still sent as one round-trip.
+      if (batchFlushTimerRef.current) window.clearTimeout(batchFlushTimerRef.current);
+      batchFlushTimerRef.current = window.setTimeout(() => {
+        const batch = [...pendingPatchBatchRef.current.values()].map((p) => ({
+          ...p,
+          clientTimestamp: Date.now(),
+        }));
+        pendingPatchBatchRef.current.clear();
+        batchFlushTimerRef.current = null;
+        if (batch.length === 0) return;
+        void publishMeasurePatchBatch(batch).catch((error) => {
+          console.warn('Measure patch batch publish failed:', error);
+        });
+      }, 100);
+    }
   }, [composition, composition?.id, user?.uid, user?.displayName, isReadOnly]);
   
   const loadComposition = async (compositionId: string) => {
@@ -814,8 +851,12 @@ export const EditorPage = () => {
     try {
       setDiscardingLiveChanges(true);
       suppressNextDiscardToastRef.current = true;
-      await clearCompositionMeasurePatches(composition.id);
-      const restored = await getComposition(composition.id);
+      // Fetch the saved composition and delete all live patches in parallel
+      // so neither operation waits on the other.
+      const [restored] = await Promise.all([
+        getComposition(composition.id),
+        clearCompositionMeasurePatches(composition.id),
+      ]);
       if (restored) {
         skipNextPatchPublishRef.current = true;
         seenPatchIdsRef.current.clear();

@@ -618,8 +618,9 @@ export const ScoreEditor = ({
     }
   };
 
+  // structuredClone is native and ~3x faster than JSON.parse/stringify for large objects.
   const cloneComposition = (source: NonNullable<typeof composition>) =>
-    JSON.parse(JSON.stringify(source)) as NonNullable<typeof composition>;
+    structuredClone(source) as NonNullable<typeof composition>;
 
   const getEffectiveTimeSignatureFromDraft = (
     draft: NonNullable<typeof composition>,

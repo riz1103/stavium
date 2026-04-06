@@ -212,7 +212,7 @@ Click "Score Info" in the editor header → use the Sharing section to set Priva
 - Open a thread to reply asynchronously.
 - Use "Resolve thread" / "Unresolve thread" to manage review status.
 
-## Real-time co-editing (v1)
+## Real-time co-editing
 - For shared/public scores, the editor header can show who is currently active as "In score" badges.
 - The score canvas can show live collaborator cursor and selection highlights.
 - In View mode, there is a "Live score updates" toggle in the header:
@@ -224,6 +224,7 @@ Click "Score Info" in the editor header → use the Sharing section to set Priva
 - Co-editing merge behavior is per-measure:
   - edits in different measures merge safely
   - same-measure conflicts use latest incoming measure patch as fallback resolution.
+- Performance: when inserting a note triggers a reflow across many measures, all changed measures are sent to collaborators as one batched network write (a single Firestore writeBatch) instead of one round-trip per measure. Incoming reflow patches from remote peers are also applied in one score update instead of one re-render per measure. This keeps sync fast and the UI smooth even in long compositions.
 - To roll back unsaved live patches, use "Discard Unsaved Changes" in the editor header (Edit mode only).
 - Tooltip for that button: "Removes unsaved live co-edit changes and restores last saved version."
 - When one editor discards, collaborators in the same score see a toast that live changes were discarded and the score was restored.

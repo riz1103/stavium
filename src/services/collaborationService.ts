@@ -280,6 +280,36 @@ export const publishMeasurePatch = async (params: PublishMeasurePatchParams): Pr
   await addDoc(collection(db, PATCH_COLLECTION), payload);
 };
 
+/**
+ * Publish multiple measure patches atomically in a single Firestore writeBatch.
+ * This is dramatically more efficient than individual addDoc calls when reflow
+ * affects many measures simultaneously (one network round-trip vs. N).
+ */
+export const publishMeasurePatchBatch = async (params: PublishMeasurePatchParams[]): Promise<void> => {
+  if (params.length === 0) return;
+  if (params.length === 1) {
+    return publishMeasurePatch(params[0]);
+  }
+  const batch = writeBatch(db);
+  for (const p of params) {
+    const payload = removeUndefinedValues({
+      compositionId: p.compositionId,
+      actorUid: p.actorUid,
+      actorName: p.actorName ?? null,
+      staffIndex: p.staffIndex,
+      measureIndex: p.measureIndex,
+      measure: p.measure,
+      baseHash: p.baseHash,
+      nextHash: p.nextHash,
+      clientTimestamp: p.clientTimestamp,
+      createdAt: serverTimestamp(),
+    });
+    const ref = doc(collection(db, PATCH_COLLECTION));
+    batch.set(ref, payload);
+  }
+  await batch.commit();
+};
+
 export const subscribeToMeasurePatches = (
   compositionId: string,
   callback: (patches: CompositionMeasurePatch[], snapshotSize: number) => void,
@@ -317,9 +347,12 @@ export const clearCompositionMeasurePatches = async (compositionId: string): Pro
 
   const BATCH_LIMIT = 450;
   const refs = snapshot.docs.map((patchDoc) => doc(db, PATCH_COLLECTION, patchDoc.id));
+  // Fire all delete batches in parallel instead of sequentially.
+  const batchCommits: Promise<void>[] = [];
   for (let i = 0; i < refs.length; i += BATCH_LIMIT) {
     const batch = writeBatch(db);
     refs.slice(i, i + BATCH_LIMIT).forEach((ref) => batch.delete(ref));
-    await batch.commit();
+    batchCommits.push(batch.commit());
   }
+  await Promise.all(batchCommits);
 };

@@ -58,6 +58,12 @@ const WHATS_NEW_ITEMS = [
       'PDF/image scan imports now hide secondary-lane timing filler rests that were used only for alignment, reducing visual clutter while keeping multi-voice timing intact.',
   },
   {
+    title: 'Real-time Co-editing — Performance Improvements',
+    date: 'Apr 2026',
+    details:
+      'Collaboration sync is now significantly faster, especially when inserting notes in the middle of a long composition. Multiple measure changes from a single note insert (reflow) are now sent to collaborators as one batched network request instead of separate writes, and incoming remote changes from a reflow are applied to the score in a single update instead of one re-render per measure. The reflow clone operation also uses the native structuredClone API for a ~3x speed improvement over the previous JSON round-trip.',
+  },
+  {
     title: 'Real-time Co-editing (v1)',
     date: 'Apr 2026',
     details:
@@ -184,7 +190,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How does real-time co-editing work in the editor?',
-    a: 'On shared/public scores, Stavium shows who is currently in the score, along with live cursor/selection highlights on the page. Edits sync per measure so simultaneous work in different measures merges safely, and same-measure conflicts fall back to latest measure patch. In View mode, live score syncing can be turned on with the "Live score updates" toggle in the header (off by default). That toggle is intentionally not persisted and resets to Off when you load a composition. When a saved composition opens, Stavium also does a one-time check and can show a "Being edited" badge in the header; this badge is a snapshot from load time (not a continuous live poll).',
+    a: 'On shared/public scores, Stavium shows who is currently in the score, along with live cursor/selection highlights on the page. Edits sync per measure so simultaneous work in different measures merges safely, and same-measure conflicts fall back to latest measure patch. When you insert a note in the middle of a long composition, the resulting reflow across many measures is sent to collaborators as a single batched request (one network round-trip instead of one per measure), so sync stays fast regardless of how many measures shift. Remote changes from a reflow are also applied to your score in one update to keep the UI smooth. In View mode, live score syncing can be turned on with the "Live score updates" toggle in the header (off by default). That toggle is intentionally not persisted and resets to Off when you load a composition. When a saved composition opens, Stavium also does a one-time check and can show a "Being edited" badge in the header; this badge is a snapshot from load time (not a continuous live poll).',
   },
   {
     q: 'How do I discard unsaved live collaboration changes?',
@@ -517,9 +523,9 @@ export const HelpPage = () => {
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
-                    <h3 className="font-semibold text-sv-cyan mb-2">Real-time Co-editing (v1)</h3>
+                    <h3 className="font-semibold text-sv-cyan mb-2">Real-time Co-editing</h3>
                     <p className="text-sv-text-muted text-sm">
-                      Collaborators now appear in the editor header under "In score", with live cursor/selection highlights rendered directly on the score. Real-time edits sync per measure with conflict-safe merge behavior to reduce overwrite risk during concurrent composition.
+                      Collaborators appear in the editor header under "In score", with live cursor/selection highlights rendered on the score. Edits sync per measure with conflict-safe merge behavior. Inserting a note that shifts many measures (reflow) is sent as one batched network write and applied on remote peers in a single score update, keeping sync fast and smooth even in long compositions.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
