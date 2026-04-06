@@ -16,6 +16,18 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'Guided editor tour',
+    date: 'Apr 2026',
+    details:
+      'The Dashboard adds a "Guided tour" button that opens a safe demo editor at /editor/tour. You get a spotlight walkthrough plus hands-on steps: select quarter duration, place a note in measure 2, drag to change pitch, and press Play — Continue stays locked until each action succeeds. On small screens the tour opens the Notes tab and highlights the visible toolbar controls (not hidden desktop rows). Save and cloud sync stay off. Step copy lives in src/tour/editorTourSteps.ts.',
+  },
+  {
+    title: 'Editor layout on small screens',
+    date: 'Apr 2026',
+    details:
+      'On narrow viewports the header wraps: composition title uses a full row; Discard and Save sit on their own row (short "Discard" label). The score keeps a minimum height above the playback bar. The bottom tab strip (Notes, Expression, Structure, Score) stays visible at the bottom while tool content scrolls above it. Playback uses slightly tighter padding on mobile.',
+  },
+  {
     title: 'AI Composition Assistant (Phase 3)',
     date: 'Apr 2026',
     details:
@@ -115,6 +127,10 @@ const WHATS_NEW_ITEMS = [
 
 const FAQ_ITEMS = [
   {
+    q: 'What is Guided tour and does it save my work?',
+    a: 'From the Dashboard, click "Guided tour" to open a demo editor with a sample score. Some steps are hands-on: you must complete the action (for example pick quarter duration, add a note in measure 2, drag to change pitch, or start playback) before Continue unlocks. Tour mode runs entirely in your browser: Save is disabled and your changes are not stored in your library. Use "New Composition" for a real score. Developers update src/tour/editorTourSteps.ts and data-tour-id anchors when the UI changes.',
+  },
+  {
     q: 'How do I reharmonize my melody with new chords?',
     a: 'Open the Structure toolbar and find "AI Compose". Select the Reharmonize tab, choose a style (Classical, Jazz, Pop, or Modal), and click "Generate 3 ideas". Three chord-progression candidates appear — each with a title and description. Click "Apply chords" on any card to write those chord symbols above the staff. The chord symbols are then visible in the score and can be played back if "Play Chords" is enabled in the playback controls. You can tweak or remove individual chords afterwards using the Chord Editor in Note Expression.',
   },
@@ -132,7 +148,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do I enter notes from a MIDI keyboard or virtual piano?',
-    a: 'Use the MIDI Input panel in the bottom playback bar (standard notation mode). Select Step Input, then play notes from a connected MIDI device or the virtual piano. The virtual piano is shown as a real piano-style keyboard (white and black keys) that you can click/tap directly. Notes sustain while a key is held (useful for organ/sustaining sounds), and repeated strikes of the same pitch show a quick retrigger accent so separate attacks are visible. Keyboard preview keeps the exact sounding pitch you pressed; when notes are written into notation, accidental spelling is key-aware (flat keys prefer spellings like Bb, sharp keys prefer A#). Use the Keyboard buttons (Simple, Extended, Ultra (88-key)) to switch range up to full A0-C8. Use Full screen piano for larger playing view. In Simple mode, Octave jump buttons shift the visible one-octave window (for example C4-C5 to C5-C6); in Extended/Ultra they center the scroll view around the selected C octave. Computer keyboard input works across all keyboard views; in Simple view the visible octave auto-shifts when needed so mapped notes remain visible. You can also toggle "Show playback on keyboard" to light up keys during score playback (including chord-symbol harmony when "Play Chords" is enabled). Parts you mute (staff or voice lane) or exclude with solo are omitted from keyboard highlights. Optional Computer keyboard input lets you play from your laptop/PC keyboard using a US-layout default map; you can turn it on/off, open "Edit key map" to launch a fullscreen 88-key visual rebinding modal, and mappings are saved locally on your device. In Step mode, turning on Computer keyboard input auto-switches Chord grouping to Off by default for immediate single-note entry (you can still manually change it). On touch screens, long-press/context-menu gesture defaults are suppressed inside the virtual keyboard area while allowing multi-finger piano presses. In View mode, the keyboard controls remain enabled for preview-only playing, but they do not write notes to the composition, and the panel shows a "Preview only - no score input" hint badge. On mobile, the MIDI panel starts collapsed by default to preserve score area; tap Show to expand it.',
+    a: 'Use the MIDI Input panel in the bottom playback bar (standard notation mode). Select Step Input, then play notes from a connected MIDI device or the virtual piano. The virtual piano is shown as a real piano-style keyboard (white and black keys) that you can click/tap directly. Notes sustain while a key is held (useful for organ/sustaining sounds), and repeated strikes of the same pitch show a quick retrigger accent so separate attacks are visible. Keyboard preview keeps the exact sounding pitch you pressed; when notes are written into notation, accidental spelling is key-aware (flat keys prefer spellings like Bb, sharp keys prefer A#). Use the Keyboard buttons (Simple, Extended, Ultra (88-key)) to switch range up to full A0-C8. Use Full screen piano for larger playing view. In Simple mode, Octave jump buttons shift the visible one-octave window (for example C4-C5 to C5-C6); in Extended/Ultra they center the scroll view around the selected C octave. Computer keyboard input works across all keyboard views; in Simple view the visible octave auto-shifts when needed so mapped notes remain visible. You can also toggle "Show playback on keyboard" to light up keys during score playback (including chord-symbol harmony when "Play Chords" is enabled). Parts you mute (staff or voice lane) or exclude with solo are omitted from keyboard highlights. Optional Computer keyboard input lets you play from your laptop/PC keyboard using a US-layout default map; you can turn it on/off, open "Edit key map" to launch a fullscreen 88-key visual rebinding modal, and mappings are saved locally on your device. In Step mode, turning on Computer keyboard input auto-switches Chord grouping to Off by default for immediate single-note entry (you can still manually change it). On touch screens, long-press/context-menu gesture defaults are suppressed inside the virtual keyboard area while allowing multi-finger piano presses. In View mode, the keyboard controls remain enabled for preview-only playing, but they do not write notes to the composition, and the panel shows a "Preview only - no score input" hint badge. On mobile, the MIDI panel starts collapsed by default to preserve score area; tap Show to expand it. When expanded on a phone-sized screen, scroll inside the MIDI section for modes, options, and the virtual keyboard so the score and bottom editor tabs stay reachable.',
   },
   {
     q: 'Can Step Input derive duration from key hold time?',
@@ -493,6 +509,9 @@ export const HelpPage = () => {
                     <span className="font-medium text-sv-text">Sign in</span> — Use your Google account to sign in. No setup required.
                   </li>
                   <li>
+                    <span className="font-medium text-sv-text">Optional: Guided tour</span> — From the Dashboard, click "Guided tour" to explore the editor with a sample score (nothing is saved).
+                  </li>
+                  <li>
                     <span className="font-medium text-sv-text">Create or open</span> — From the Dashboard, click "New Composition" or open an existing one.
                   </li>
                   <li>
@@ -515,6 +534,12 @@ export const HelpPage = () => {
                 <h2 className="text-2xl font-bold text-sv-text mb-4">Editor Features</h2>
                 <div className="space-y-6">
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">Guided editor tour</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      Start from the Dashboard with the "Guided tour" button. You land on /editor/tour with a demo score. Interactive steps require real clicks and drags (quarter duration, placing a note, dragging pitch, pressing Play) before Continue unlocks. Save is disabled. Extend steps in src/tour/editorTourSteps.ts and matching data-tour-id attributes when the UI changes.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">AI Composition Assistant</h3>
                     <p className="text-sv-text-muted text-sm">
                       In the Structure toolbar, the "AI Compose" panel offers three tools working from the currently selected staff.
@@ -527,7 +552,7 @@ export const HelpPage = () => {
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">MIDI Input + Virtual Piano</h3>
                     <p className="text-sv-text-muted text-sm">
-                      In the bottom playback bar, use the MIDI Input panel for keyboard-based entry. Step Input supports both fixed duration (from Notes toolbar) and Adaptive hold-to-duration with a live-growing provisional note while the key is held; long holds that cross a barline are committed as tied segments across measures. Real-time mode captures performed timing with quantization options before writing notes into the score. During MIDI entry, the score viewport auto-follows the active measure so you can keep recording/entering without manually scrolling. The virtual piano supports Simple, Extended, and Ultra (88-key) views, plus Full screen mode and octave jump shortcuts, and can optionally highlight keys during playback. In View mode, virtual piano controls stay enabled for audition only and do not alter notation.
+                      In the bottom playback bar, use the MIDI Input panel for keyboard-based entry. Step Input supports both fixed duration (from Notes toolbar) and Adaptive hold-to-duration with a live-growing provisional note while the key is held; long holds that cross a barline are committed as tied segments across measures. Real-time mode captures performed timing with quantization options before writing notes into the score. During MIDI entry, the score viewport auto-follows the active measure so you can keep recording/entering without manually scrolling. The virtual piano supports Simple, Extended, and Ultra (88-key) views, plus Full screen mode and octave jump shortcuts, and can optionally highlight keys during playback. In View mode, virtual piano controls stay enabled for audition only and do not alter notation. On small screens, the expanded MIDI body scrolls inside a capped height so the score and bottom editor tabs stay reachable.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">

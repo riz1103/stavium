@@ -141,11 +141,13 @@ export const PlaybackControls = ({ isReadOnly = false }: { isReadOnly?: boolean 
   };
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2.5 flex-wrap">
+    <div className="flex items-center gap-1.5 px-2 py-1.5 md:gap-2 md:px-4 md:py-2.5 flex-wrap">
       {/* Transport controls */}
       <div className="flex items-center gap-1">
         {/* Play / Resume */}
         <button
+          type="button"
+          data-tour-id="tour-play-button"
           onClick={handlePlay}
           disabled={!hasNotes || isPlaying || isLoading}
           className={`flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-150

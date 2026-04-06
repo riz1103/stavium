@@ -114,6 +114,8 @@ export const NoteToolbar = () => {
         return (
           <button
             key={d.value}
+            type="button"
+            data-tour-id={d.value === 'quarter' ? 'tour-note-quarter' : undefined}
             onClick={() => handleSelectBase(d.value)}
             title={d.label}
             className={active ? 'sv-btn-active' : 'sv-btn-ghost'}

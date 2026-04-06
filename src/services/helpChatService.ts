@@ -32,10 +32,21 @@ To scan or import from PDF or scanned images:
 5. For scanned PDF/image imports, the selected scan voice split mode controls lane splitting behavior
 6. For scanned imports, secondary-lane filler rests used only for timing alignment are hidden for cleaner notation
 
+## Guided editor tour
+- From the Dashboard (Compositions), use the "Guided tour" button to open ${'/editor/tour'}.
+- Tour mode shows a spotlight walkthrough (Next / Back / Exit tour) over a built-in demo score. Several steps are hands-on: the user must perform the action (e.g. select quarter duration, place a note in the second measure, drag to change pitch, press Play) before Continue unlocks; read-only steps use Next anytime.
+- On phone-sized viewports, hands-on steps that need the Notes toolbar automatically switch to the Notes bottom tab and expand the tool panel; the spotlight highlights the on-screen control (not a hidden desktop-only copy).
+- Save is disabled; no composition is written to the user's library or Firestore.
+- Exit tour (or finishing the last step) returns to the Dashboard and clears the demo score from the editor store.
+- Tour copy, wait conditions, and highlighted regions are defined in src/tour/editorTourSteps.ts; spotlight anchors use data-tour-id attributes on the editor. Update those when UI labels or layout change.
+
 ## Editor layout
 - Top header: Back button, Score Info (ℹ️), Help (?), title, Edit/View toggle, Undo/Redo, Save
+- On narrow/mobile viewports the header wraps: title is full-width; mobile Edit and the toolbar (hamburger) sit on a row; "Discard Unsaved Changes" and "Save" are on the next row (short label "Discard" on small screens). On medium+ screens Discard/Save align to the right with the full Discard label.
+- The main score canvas keeps a minimum height on small screens so the staff does not shrink below roughly one-third of the viewport; playback controls use slightly tighter padding on mobile.
 - Toolbar sections (collapsible): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected)
 - Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars) and a MIDI Input panel
+- On phone-sized viewports, the Notes / Expression / Structure / Score tab strip stays at the bottom of the editor; the active tab’s tool rows scroll above it when the panel is open.
 
 ## MIDI keyboard input (Phase 3)
 - Use the "MIDI Input" panel in the bottom playback bar (standard notation mode).
@@ -90,6 +101,7 @@ To scan or import from PDF or scanned images:
   - In Step mode, enabling "Computer keyboard input" auto-switches Chord grouping to Off by default for immediate single-note entry; users can still manually change grouping afterward.
 - On mobile-sized viewports, the MIDI panel starts collapsed by default to preserve staff visibility.
 - Users can toggle the panel with Show/Hide in the MIDI panel header.
+- When expanded on a phone-sized screen, the MIDI body (modes, options, and virtual keyboard) scrolls inside a height cap so the score and bottom editor tabs stay reachable; scroll within the panel for the rest.
 - MIDI input targets the currently selected Staff/Measure/Voice.
 - MIDI keyboard/virtual-piano input keeps sounding pitch exactly as pressed; when notes are written to the score, accidental spelling is key-aware (flat keys prefer Bb/Eb/Ab... labels, sharp keys prefer A#/C#/F#... labels).
 - In View mode (read-only), virtual piano controls still stay enabled for preview/audition:

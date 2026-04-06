@@ -3112,8 +3112,14 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
           MIDI controls hidden to preserve score space. Tap Show to expand.
         </p>
       ) : (
-        <>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div
+          className={
+            isCompactViewport
+              ? 'mt-2 max-h-[min(38vh,360px)] min-h-0 w-full min-w-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]'
+              : 'mt-2 w-full min-w-0'
+          }
+        >
+          <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={() => setMode('step')}
           className={mode === 'step' ? 'sv-btn-active' : 'sv-btn-ghost'}
@@ -3369,7 +3375,7 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
             : ` · Uses selected toolbar duration (${selectedDuration}) · Chord grouping ${MIDI_CHORD_WINDOW_OPTIONS.find((opt) => opt.id === chordWindow)?.label ?? 'Normal'}`
           : ` · Quantization ${QUANTIZATION_OPTIONS.find((q) => q.id === quantization)?.label ?? 'Off'} · Chord grouping ${MIDI_CHORD_WINDOW_OPTIONS.find((opt) => opt.id === chordWindow)?.label ?? 'Normal'}`}
           </p>
-        </>
+        </div>
       )}
       {pianoFullscreen && (
         <div

@@ -25,6 +25,7 @@ function AnimatedRoutes({ user }: { user: User | null }) {
         <Route path="/"           element={user ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
         <Route path="/login"      element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
         <Route path="/dashboard"  element={user ? <Dashboard />  : <Navigate to="/" replace />} />
+        <Route path="/editor/tour" element={user ? <EditorPage /> : <Navigate to="/" replace />} />
         <Route path="/editor"     element={user ? <EditorPage />   : <Navigate to="/" replace />} />
         <Route path="/editor/:id" element={user ? <EditorPage />   : <Navigate to="/" replace />} />
         <Route path="/imports"    element={user ? <ImportsPage />  : <Navigate to="/" replace />} />

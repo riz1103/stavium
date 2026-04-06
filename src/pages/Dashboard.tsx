@@ -131,6 +131,7 @@ export const Dashboard = () => {
   };
 
   const handleCreateNew = () => navigate('/editor');
+  const handleGuidedTour = () => navigate('/editor/tour');
   const handleOpen = (compositionId: string) => navigate(`/editor/${compositionId}`);
 
   const handleImportClick = () => importInputRef.current?.click();
@@ -410,10 +411,10 @@ export const Dashboard = () => {
       {/* ── Main ───────────────────────────────────────────────────────────── */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-          {/* Page title + New button */}
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-semibold text-sv-text">Compositions</h2>
-            <div className="flex items-center gap-2">
+          {/* Page title + actions — stack on narrow screens so buttons wrap instead of clipping */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4 min-w-0">
+            <h2 className="text-xl sm:text-2xl font-semibold text-sv-text shrink-0">Compositions</h2>
+            <div className="grid grid-cols-2 gap-2 w-full min-w-0 sm:flex sm:flex-nowrap sm:w-auto sm:justify-end sm:gap-2">
               {/* Hidden file input — MIDI / MusicXML only (PDFs/images go to Imports page) */}
               <input
                 ref={importInputRef}
@@ -424,13 +425,14 @@ export const Dashboard = () => {
               />
               {/* OCR Imports page link */}
               <button
+                type="button"
                 onClick={() => navigate('/imports')}
-                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold
+                className="inline-flex min-h-[44px] justify-center items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold
                            border border-sv-cyan/40 text-sv-cyan bg-sv-cyan/5
                            hover:bg-sv-cyan/15 hover:border-sv-cyan/60
-                           transition-all cursor-pointer whitespace-nowrap"
+                           transition-all cursor-pointer sm:whitespace-nowrap"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                     d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
@@ -439,19 +441,20 @@ export const Dashboard = () => {
               </button>
               {/* Direct import for MIDI / MusicXML */}
               <button
+                type="button"
                 onClick={handleImportClick}
                 disabled={importing}
-                className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold
+                className={`inline-flex min-h-[44px] justify-center items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold
                            border border-sv-border text-sv-text-muted bg-sv-elevated
                            hover:bg-sv-panel hover:text-sv-text hover:border-sv-border-lt
-                           transition-all cursor-pointer whitespace-nowrap
+                           transition-all cursor-pointer sm:whitespace-nowrap
                            ${importing ? 'opacity-50 cursor-not-allowed' : ''}`}
                 title="Import MIDI or MusicXML file directly"
               >
                 {importing ? (
                   <span className="w-4 h-4 border-2 border-sv-text-dim/30 border-t-sv-text-dim rounded-full animate-spin" />
                 ) : (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                   </svg>
@@ -459,8 +462,23 @@ export const Dashboard = () => {
                 <span className="hidden sm:inline">{importing ? 'Importing…' : 'MIDI / XML'}</span>
                 <span className="sm:hidden">{importing ? '…' : 'MIDI'}</span>
               </button>
-              <button onClick={handleCreateNew} className="sv-btn-primary gap-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <button
+                type="button"
+                onClick={handleGuidedTour}
+                className="inline-flex min-h-[44px] justify-center items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold
+                           border border-violet-500/40 text-violet-300 bg-violet-500/10
+                           hover:bg-violet-500/20 hover:border-violet-400/60 transition-all sm:whitespace-nowrap"
+                title="Walk through the editor with a sample score (nothing is saved)"
+              >
+                <span className="hidden sm:inline">Guided tour</span>
+                <span className="sm:hidden">Tour</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateNew}
+                className="sv-btn-primary gap-2 inline-flex min-h-[44px] justify-center items-center px-3 py-2"
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                 </svg>
                 <span className="hidden sm:inline">New Composition</span>
@@ -469,17 +487,18 @@ export const Dashboard = () => {
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="flex items-center gap-1 mb-4 border-b border-sv-border">
+          {/* Tabs — scroll horizontally on very narrow screens so badges stay visible */}
+          <div className="flex items-center gap-1 mb-4 border-b border-sv-border overflow-x-auto pb-px -mx-1 px-1 sm:mx-0 sm:px-0 sm:overflow-visible">
             {([
               { id: 'mine'   as Tab, label: 'My Compositions', icon: '🎵', count: myCompositions.length },
               { id: 'shared' as Tab, label: 'Shared with me',  icon: '👥', count: sharedCompositions.length },
               { id: 'public' as Tab, label: 'Public',          icon: '🌐', count: publicCompositions.length },
             ]).map((tab) => (
               <button
+                type="button"
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                className={`flex shrink-0 items-center gap-2 px-3 sm:px-4 py-2.5 min-h-[44px] text-sm font-medium border-b-2 transition-colors -mb-px ${
                   activeTab === tab.id
                     ? 'border-sv-cyan text-sv-cyan'
                     : 'border-transparent text-sv-text-muted hover:text-sv-text'

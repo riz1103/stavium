@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { useParams, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { useUserStore } from '../app/store/userStore';
 import { RevisionTrigger, useScoreStore } from '../app/store/scoreStore';
 import { usePlaybackStore } from '../app/store/playbackStore';
@@ -53,6 +54,10 @@ import {
   saveFirstScoreOnboardingState,
 } from '../services/onboardingService';
 import { sharedScheduler } from '../music/playback/toneScheduler';
+import { EditorTourOverlay, type EditorTourStepMeta } from '../components/tour/EditorTourOverlay';
+import { EDITOR_TOUR_ROUTE, EDITOR_TOUR_STEPS } from '../tour/editorTourSteps';
+import { getTourMockComposition } from '../tour/tourMockComposition';
+import { useTourAdvanceSatisfied } from '../tour/useTourAdvanceSatisfied';
 
 /** Shared by back navigation and editor unmount — stops transport, soundfonts, and playback UI state. */
 const stopEditorPlayback = () => {
@@ -89,6 +94,8 @@ export const EditorPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const tourMatch = useMatch({ path: EDITOR_TOUR_ROUTE, end: true });
+  const isTourMode = tourMatch !== null;
   const user = useUserStore((state) => state.user);
   const composition = useScoreStore((state) => state.composition);
   const setComposition = useScoreStore((state) => state.setComposition);
@@ -98,6 +105,8 @@ export const EditorPage = () => {
   const setRevisionHistory = useScoreStore((state) => state.setRevisionHistory);
   const selectedNote = useScoreStore((state) => state.selectedNote);
   const setSelectedNote = useScoreStore((state) => state.setSelectedNote);
+  const setSelectedDuration = useScoreStore((state) => state.setSelectedDuration);
+  const setSelectedRestDuration = useScoreStore((state) => state.setSelectedRestDuration);
   const selectedStaffIndex = useScoreStore((state) => state.selectedStaffIndex);
   const selectedMeasureIndex = useScoreStore((state) => state.selectedMeasureIndex);
   const selectedVoiceIndex = useScoreStore((state) => state.selectedVoiceIndex);
@@ -175,6 +184,16 @@ export const EditorPage = () => {
 
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
+    if (isTourMode) {
+      clearRevisionHistory();
+      setComposition(getTourMockComposition());
+      setTitle('Guided tour (demo score)');
+      setIsReadOnly(false);
+      setSelectedDuration('half');
+      setSelectedRestDuration(null);
+      setLoading(false);
+      return;
+    }
     if (id) {
       if (skipNextIdLoadRef.current) {
         skipNextIdLoadRef.current = false;
@@ -200,7 +219,60 @@ export const EditorPage = () => {
         setLoading(false);
       }
     }
-  }, [id, user, navigate, resetComposition, clearRevisionHistory]);
+  }, [id, user, navigate, resetComposition, clearRevisionHistory, isTourMode, setComposition, setSelectedDuration, setSelectedRestDuration]);
+
+  const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [tourPitchBaseline, setTourPitchBaseline] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isTourMode) setTourStepIndex(0);
+  }, [isTourMode]);
+
+  const tourStep = EDITOR_TOUR_STEPS[tourStepIndex];
+  const tourAdvanceSatisfied = useTourAdvanceSatisfied(tourStep, isTourMode, tourPitchBaseline);
+
+  /** Hands-on drag step: focus the note in measure 2 and capture pitch baseline once per step */
+  useLayoutEffect(() => {
+    if (!isTourMode) {
+      setTourPitchBaseline(null);
+      return;
+    }
+    const step = EDITOR_TOUR_STEPS[tourStepIndex];
+    if (step?.waitFor !== 'change-selected-note-pitch') {
+      setTourPitchBaseline(null);
+      return;
+    }
+    const comp = useScoreStore.getState().composition;
+    if (!comp) {
+      setTourPitchBaseline(null);
+      return;
+    }
+    const notes = comp.staves[0]?.measures[1]?.voices[0]?.notes ?? [];
+    const idx = notes.findIndex((e) => 'pitch' in e);
+    if (idx < 0) {
+      setTourPitchBaseline(null);
+      return;
+    }
+    setSelectedNote({ staffIndex: 0, measureIndex: 1, voiceIndex: 0, noteIndex: idx });
+    const n = notes[idx];
+    setTourPitchBaseline('pitch' in n ? n.pitch : null);
+  }, [isTourMode, tourStepIndex, setSelectedNote]);
+
+  /** Expression overview: select a note so the toolbar row is visible */
+  useLayoutEffect(() => {
+    if (!isTourMode) return;
+    const step = EDITOR_TOUR_STEPS[tourStepIndex];
+    if (step?.id !== 'expression-read') return;
+    setSelectedNote({ staffIndex: 0, measureIndex: 0, voiceIndex: 0, noteIndex: 0 });
+  }, [isTourMode, tourStepIndex, setSelectedNote]);
+
+  /** Leaving tour route — discard mock score so it never leaks into a real editing session */
+  useEffect(() => {
+    if (!isTourMode) return;
+    return () => {
+      resetComposition();
+    };
+  }, [isTourMode, resetComposition]);
 
   const resetPlaybackTempo = usePlaybackStore((s) => s.setPlaybackTempo);
   const setPlaybackInstrument = usePlaybackStore((s) => s.setPlaybackInstrument);
@@ -299,6 +371,7 @@ export const EditorPage = () => {
   }, [user?.uid]);
 
   useEffect(() => {
+    if (isTourMode) return;
     if (!onboardingHydrated || !user?.uid) return;
     const payload: FirstScoreOnboardingState = {
       placedNote: firstScoreProgress.placedNote,
@@ -327,6 +400,7 @@ export const EditorPage = () => {
     firstScoreDone,
     checklistDismissed,
     toolbarTipsHidden,
+    isTourMode,
   ]);
 
   useEffect(() => {
@@ -362,8 +436,8 @@ export const EditorPage = () => {
     return () => window.clearTimeout(timer);
   }, [showFirstScoreCelebration]);
 
-  const showFirstScoreChecklist = onboardingHydrated && !firstScoreDone && !checklistDismissed && !isReadOnly;
-  const showToolbarTips = onboardingHydrated && !firstScoreDone && !toolbarTipsHidden;
+  const showFirstScoreChecklist = onboardingHydrated && !firstScoreDone && !checklistDismissed && !isReadOnly && !isTourMode;
+  const showToolbarTips = onboardingHydrated && !firstScoreDone && !toolbarTipsHidden && !isTourMode;
   const completedChecklistItems = [
     firstScoreProgress.placedNote,
     firstScoreProgress.playedBack,
@@ -744,6 +818,7 @@ export const EditorPage = () => {
   };
 
   const persistRevisionSnapshot = async (trigger: RevisionTrigger, sourceComposition?: typeof composition) => {
+    if (isTourMode) return;
     const target = sourceComposition ?? composition;
     if (!target) return;
 
@@ -789,6 +864,7 @@ export const EditorPage = () => {
   };
 
   const handleSave = async () => {
+    if (isTourMode) return;
     if (!user || !composition) return;
     try {
       setSaving(true);
@@ -853,6 +929,44 @@ export const EditorPage = () => {
       setSaving(false);
     }
   };
+
+  const handleTourExit = useCallback(() => {
+    stopEditorPlayback();
+    setTourStepIndex(0);
+    resetComposition();
+    navigate('/dashboard');
+  }, [navigate, resetComposition]);
+
+  const handleTourStepMeta = useCallback((meta: EditorTourStepMeta) => {
+    if (meta.expandSections?.length) {
+      setCollapsedRows((prev) => {
+        const next = new Set(prev);
+        for (const sectionId of meta.expandSections!) {
+          next.delete(sectionId);
+        }
+        try {
+          localStorage.setItem('stavium_toolbar_sections', JSON.stringify([...next]));
+        } catch { /* ignore localStorage failures */ }
+        return next;
+      });
+    }
+    if (meta.expandMobileTab) {
+      setMobileTab(meta.expandMobileTab);
+      setToolbarOpen(true);
+    }
+  }, []);
+
+  /** Apply tour layout (expanded sections + mobile tab) in the same commit as the step change so spotlight measures real targets. */
+  useLayoutEffect(() => {
+    if (!isTourMode) return;
+    const step = EDITOR_TOUR_STEPS[tourStepIndex];
+    flushSync(() => {
+      handleTourStepMeta({
+        expandSections: step.expandSections,
+        expandMobileTab: step.expandMobileTab,
+      });
+    });
+  }, [isTourMode, tourStepIndex, handleTourStepMeta]);
 
   const handleBack = () => {
     stopEditorPlayback();
@@ -1050,7 +1164,7 @@ export const EditorPage = () => {
       ) : (
         <>
           {/* ── Section 1: Notes & Rests ──────────────────────────────────── */}
-          <div className="sv-section-notes border-b border-sv-border">
+          <div className="sv-section-notes border-b border-sv-border" data-tour-id="tour-toolbar-notes">
             <SectionHeader id="notes" icon="♩" label={isGregorianChant ? 'Neumes' : 'Notes & Rests'} />
             {!collapsedRows.has('notes') && (
               <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
@@ -1067,7 +1181,7 @@ export const EditorPage = () => {
           </div>
 
           {/* ── Section 2: Structure ─────────────────────────────────────── */}
-          <div className="sv-section-structure border-b border-sv-border">
+          <div className="sv-section-structure border-b border-sv-border" data-tour-id="tour-toolbar-structure">
             <SectionHeader id="structure" icon="⊞" label="Structure" />
             {!collapsedRows.has('structure') && (
               <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
@@ -1096,7 +1210,10 @@ export const EditorPage = () => {
           </div>
 
           {/* ── Section 3: Score Settings ─────────────────────────────────── */}
-          <div className={`sv-section-score ${selectedNote && !collapsedRows.has('expression') ? 'border-b border-sv-border' : ''}`}>
+          <div
+            className={`sv-section-score ${selectedNote && !collapsedRows.has('expression') ? 'border-b border-sv-border' : ''}`}
+            data-tour-id="tour-toolbar-score"
+          >
             <SectionHeader id="score" icon="♫" label="Score Settings" />
             {!collapsedRows.has('score') && (
               <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
@@ -1123,7 +1240,7 @@ export const EditorPage = () => {
 
           {/* ── Section 4: Expression (context — only when note selected) ─── */}
           {selectedNote && (
-            <div className="sv-section-expression">
+            <div className="sv-section-expression" data-tour-id="tour-toolbar-expression">
               <SectionHeader id="expression" icon="✦" label="Note Expression" pulse />
               {!collapsedRows.has('expression') && (
             <div className="flex flex-wrap 2xl:flex-nowrap items-start gap-2 px-3 py-2">
@@ -1195,7 +1312,7 @@ export const EditorPage = () => {
 
   const mobileTabContent: Record<MobileTab, JSX.Element> = {
     notes: isReadOnly ? readOnlyNotice : (
-      <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+      <div className="flex flex-col gap-2 p-3">
         {showToolbarTips && <ToolbarTip text={notesTipText} />}
         <VoiceLaneToolbar />
         <NoteToolbar />
@@ -1203,7 +1320,7 @@ export const EditorPage = () => {
       </div>
     ),
     expression: isReadOnly ? readOnlyNotice : (
-      <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+      <div className="flex flex-col gap-2 p-3">
         {selectedNote ? (
           <>
             {showToolbarTips && <ToolbarTip text={expressionTipText} />}
@@ -1232,7 +1349,7 @@ export const EditorPage = () => {
       </div>
     ),
     structure: isReadOnly ? readOnlyNotice : (
-      <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+      <div className="flex flex-col gap-2 p-3">
         {showToolbarTips && <ToolbarTip text={structureTipText} />}
         <StaffControls />
         {!isGregorianChant && <MeasureControls />}
@@ -1248,7 +1365,7 @@ export const EditorPage = () => {
       </div>
     ),
     settings: (
-      <div className="flex flex-col gap-2 p-3 overflow-y-auto max-h-48">
+      <div className="flex flex-col gap-2 p-3">
         {showToolbarTips && <ToolbarTip text={scoreSettingsTipText} />}
         <CompositionControls isReadOnly={isReadOnly} />
         <div className="sv-toolbar">
@@ -1277,9 +1394,19 @@ export const EditorPage = () => {
 
   return (
     <div className={`h-screen flex flex-col bg-sv-bg overflow-hidden ${compactToolbar ? '' : 'toolbar-density-comfortable'}`}>
+      {isTourMode && (
+        <div
+          data-tour-id="tour-banner"
+          className="flex-shrink-0 px-3 py-2 border-b border-amber-500/35 bg-amber-500/10 text-center"
+        >
+          <p className="text-xs sm:text-sm text-amber-200 font-medium">
+            Tour mode — sample score only. Nothing you change here is saved to your account.
+          </p>
+        </div>
+      )}
 
       {/* ── Top Header ─────────────────────────────────────────────────────── */}
-      <header className="flex-shrink-0 bg-sv-card border-b border-sv-border px-3 py-2 flex items-center gap-2">
+      <header className="flex-shrink-0 bg-sv-card border-b border-sv-border px-2 py-2 sm:px-3 flex flex-wrap items-center gap-x-2 gap-y-2">
         {/* Back */}
         <button
           onClick={handleBack}
@@ -1297,6 +1424,8 @@ export const EditorPage = () => {
 
         {/* Score Info button */}
         <button
+          type="button"
+          data-tour-id="tour-header-help"
           onClick={() => navigate('/help')}
           className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-sv-border
                      bg-sv-elevated text-sv-text-muted hover:text-sv-text hover:border-sv-border-lt transition-colors text-xs font-medium"
@@ -1308,6 +1437,8 @@ export const EditorPage = () => {
           <span className="hidden sm:inline">Help</span>
         </button>
         <button
+          type="button"
+          data-tour-id="tour-header-score-info"
           ref={scoreInfoBtnRef}
           onClick={() => setScoreInfoOpen((v) => !v)}
           className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium
@@ -1419,16 +1550,18 @@ export const EditorPage = () => {
           </div>
         )}
 
-        {/* Title input */}
+        {/* Title input — full-width row on narrow screens so Save/Discard are not clipped */}
         <input
           type="text"
+          data-tour-id="tour-header-title"
           value={title}
           onChange={(e) => { if (!isReadOnly) setTitle(e.target.value); }}
           readOnly={isReadOnly}
-          className={`flex-1 min-w-0 px-3 py-1.5 bg-sv-elevated border border-sv-border rounded-lg
+          className={`min-w-0 px-3 py-1.5 bg-sv-elevated border border-sv-border rounded-lg
                      text-sv-text text-sm font-medium placeholder-sv-text-dim
                      focus:outline-none focus:border-sv-cyan/60 focus:ring-1 focus:ring-sv-cyan/20
-                     transition-colors ${isReadOnly ? 'cursor-default select-none' : ''}`}
+                     transition-colors ${isReadOnly ? 'cursor-default select-none' : ''}
+                     flex-[1_1_100%] md:flex-1 md:basis-auto`}
           placeholder="Composition Title"
         />
 
@@ -1467,6 +1600,74 @@ export const EditorPage = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
+
+        {/* Discard + Save — full-width row on mobile; md:order-last keeps at end on desktop */}
+        <div className="flex w-full flex-[1_1_100%] flex-wrap items-center justify-end gap-2 md:order-last md:ml-auto md:w-auto md:flex-[0_0_auto]">
+          <button
+            type="button"
+            onClick={handleDiscardLiveChanges}
+            disabled={discardingLiveChanges || !composition?.id || isReadOnly}
+            className={`flex items-center gap-1.5 px-2 py-1.5 sm:px-3 rounded-lg text-xs sm:text-sm font-medium border transition-all duration-200 ${
+              discardingLiveChanges
+                ? 'bg-sv-elevated border-sv-border text-sv-text-dim'
+                : 'bg-sv-elevated border-sv-border text-rose-400 hover:text-rose-300 hover:border-rose-500/50'
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            title={
+              !composition?.id
+                ? 'Save score first to enable discard'
+                : isReadOnly
+                ? 'Switch to Edit mode to discard unsaved changes'
+                : 'Removes unsaved live co-edit changes and restores last saved version.'
+            }
+          >
+            {discardingLiveChanges ? (
+              <>
+                <span className="md:hidden">…</span>
+                <span className="hidden md:inline">Discarding…</span>
+              </>
+            ) : (
+              <>
+                <span className="md:hidden">Discard</span>
+                <span className="hidden md:inline">Discard Unsaved Changes</span>
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            data-tour-id="tour-header-save"
+            onClick={handleSave}
+            disabled={saving || isReadOnly || isTourMode}
+            style={{ display: isReadOnly ? 'none' : undefined }}
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 py-1.5 sm:px-3 rounded-lg text-xs sm:text-sm font-medium
+                        transition-all duration-200 ${
+              saveSuccess
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                : 'bg-sv-cyan text-sv-bg border border-sv-cyan hover:bg-sv-cyan-dim shadow-glow-sm'
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            title={isTourMode ? 'Disabled during tour — sample score is not saved' : 'Save (Ctrl+S)'}
+          >
+            {saving ? (
+              <>
+                <span className="w-3 h-3 border-2 border-sv-bg border-t-transparent rounded-full animate-spin" />
+                <span>Saving…</span>
+              </>
+            ) : saveSuccess ? (
+              <>
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Saved!</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+                <span>Save</span>
+              </>
+            )}
+          </button>
+        </div>
 
         {/* Edit / View toggle (desktop) */}
         <button
@@ -1518,122 +1719,77 @@ export const EditorPage = () => {
             title="Redo (Ctrl+Y)"
           >↷</button>
         </div>
-
-        {/* Save (hidden in read-only mode) */}
-        <button
-          onClick={handleDiscardLiveChanges}
-          disabled={discardingLiveChanges || !composition?.id || isReadOnly}
-          className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all duration-200 ${
-            discardingLiveChanges
-              ? 'bg-sv-elevated border-sv-border text-sv-text-dim'
-              : 'bg-sv-elevated border-sv-border text-rose-400 hover:text-rose-300 hover:border-rose-500/50'
-          } disabled:opacity-50 disabled:cursor-not-allowed`}
-          title={
-            !composition?.id
-              ? 'Save score first to enable discard'
-              : isReadOnly
-              ? 'Switch to Edit mode to discard unsaved changes'
-              : 'Removes unsaved live co-edit changes and restores last saved version.'
-          }
-        >
-          {discardingLiveChanges ? 'Discarding…' : 'Discard Unsaved Changes'}
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={saving || isReadOnly}
-          style={{ display: isReadOnly ? 'none' : undefined }}
-          className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium
-                      transition-all duration-200 ${
-            saveSuccess
-              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-              : 'bg-sv-cyan text-sv-bg border border-sv-cyan hover:bg-sv-cyan-dim shadow-glow-sm'
-          } disabled:opacity-50 disabled:cursor-not-allowed`}
-          title="Save (Ctrl+S)"
-        >
-          {saving ? (
-            <>
-              <span className="w-3 h-3 border-2 border-sv-bg border-t-transparent rounded-full animate-spin" />
-              <span>Saving…</span>
-            </>
-          ) : saveSuccess ? (
-            <>
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-              </svg>
-              <span>Saved!</span>
-            </>
-          ) : (
-            <>
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-              </svg>
-              <span>Save</span>
-            </>
-          )}
-        </button>
       </header>
 
       {/* ── Desktop Toolbars ───────────────────────────────────────────────── */}
       {desktopToolbar}
 
-      {/* ── Score Canvas ──────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden bg-sv-bg">
-        <ScoreEditor
-          isReadOnly={isReadOnly}
-          remotePresence={remoteCollaborators}
-          onCursorActivity={handleCursorActivity}
-        />
-      </div>
+      {/* Mobile: score + playback + tool shell share one flex column so bottom tabs stay in view; md:contents keeps desktop layout unchanged */}
+      <div className="max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col max-md:overflow-hidden md:contents">
+        {/* ── Score Canvas ──────────────────────────────────────────────────── */}
+        <div
+          className="max-md:min-h-[18vh] max-md:flex-[3] overflow-hidden bg-sv-bg md:min-h-0 md:flex-1"
+          data-tour-id="tour-score-canvas"
+        >
+          <ScoreEditor
+            isReadOnly={isReadOnly}
+            remotePresence={remoteCollaborators}
+            onCursorActivity={handleCursorActivity}
+          />
+        </div>
 
-      {/* ── Playback bar (always visible) ─────────────────────────────────── */}
-      <div className="flex-shrink-0 border-t border-sv-border bg-sv-card">
-        <PlaybackControls isReadOnly={isReadOnly} />
-      </div>
+        {/* ── Playback bar (always visible) ─────────────────────────────────── */}
+        <div className="flex-shrink-0 border-t border-sv-border bg-sv-card" data-tour-id="tour-playback">
+          <PlaybackControls isReadOnly={isReadOnly} />
+        </div>
 
-      {/* ── Mobile: Tab bar + sliding tool panel ──────────────────────────── */}
-      <div className="md:hidden flex-shrink-0 border-t border-sv-border bg-sv-card">
-        {/* Tool panel (visible when toolbarOpen) */}
-        {toolbarOpen && (
-          <div className="border-b border-sv-border bg-sv-card tool-panel-enter">
-            {mobileTabContent[mobileTab]}
+        {/* ── Mobile: scrollable tool panel + docked tab bar ─────────────────── */}
+        <div className="md:hidden flex min-h-0 max-md:flex-[2] flex-col overflow-hidden border-t border-sv-border bg-sv-card">
+          {toolbarOpen && (
+            <div className="tool-panel-enter min-h-0 flex-1 overflow-y-auto overscroll-y-contain border-b border-sv-border bg-sv-card">
+              {mobileTabContent[mobileTab]}
+            </div>
+          )}
+          <div
+            className="mt-auto flex w-full shrink-0 border-t border-sv-border/90 bg-sv-card pb-[max(0.25rem,env(safe-area-inset-bottom,0px))] shadow-[0_-4px_16px_rgba(0,0,0,0.28)]"
+            data-tour-id="tour-mobile-tab-bar"
+          >
+            {TAB_CONFIG.map((tab) => {
+              const isActive = mobileTab === tab.id;
+              const hasNote = tab.id === 'expression' && !!selectedNote;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    if (mobileTab === tab.id) {
+                      setToolbarOpen((v) => !v);
+                    } else {
+                      setMobileTab(tab.id);
+                      setToolbarOpen(true);
+                    }
+                  }}
+                  className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2.5
+                            transition-colors relative min-h-[44px] ${
+                    isActive && toolbarOpen
+                      ? 'text-sv-cyan bg-sv-cyan-muted'
+                      : 'text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated'
+                  }`}
+                >
+                  {isActive && toolbarOpen && (
+                    <span className="absolute top-0 left-1/4 right-1/4 h-0.5 rounded-b bg-sv-cyan" />
+                  )}
+                  <span className="text-base leading-none">{tab.icon}</span>
+                  <span className="text-[10px] font-medium leading-none">{tab.label}</span>
+                  {hasNote && (
+                    <span
+                      className="absolute right-1/4 top-1.5 h-1.5 w-1.5 rounded-full bg-sv-cyan"
+                      style={{ boxShadow: '0 0 4px rgba(0,212,245,0.8)' }}
+                    />
+                  )}
+                </button>
+              );
+            })}
           </div>
-        )}
-
-        {/* Tab bar */}
-        <div className="flex">
-          {TAB_CONFIG.map((tab) => {
-            const isActive = mobileTab === tab.id;
-            const hasNote = tab.id === 'expression' && !!selectedNote;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  if (mobileTab === tab.id) {
-                    setToolbarOpen((v) => !v);
-                  } else {
-                    setMobileTab(tab.id);
-                    setToolbarOpen(true);
-                  }
-                }}
-                className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5
-                            transition-colors relative ${
-                  isActive && toolbarOpen
-                    ? 'text-sv-cyan bg-sv-cyan-muted'
-                    : 'text-sv-text-muted hover:text-sv-text hover:bg-sv-elevated'
-                }`}
-              >
-                {isActive && toolbarOpen && (
-                  <span className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-sv-cyan rounded-b" />
-                )}
-                <span className="text-base leading-none">{tab.icon}</span>
-                <span className="text-[10px] font-medium leading-none">{tab.label}</span>
-                {hasNote && (
-                  <span className="absolute top-1.5 right-1/4 w-1.5 h-1.5 rounded-full bg-sv-cyan"
-                        style={{ boxShadow: '0 0 4px rgba(0,212,245,0.8)' }} />
-                )}
-              </button>
-            );
-          })}
         </div>
       </div>
 
@@ -1650,6 +1806,16 @@ export const EditorPage = () => {
         <div className="fixed right-4 top-20 z-50 max-w-sm rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-sm text-amber-200 shadow-lg">
           {discardNotice}
         </div>
+      )}
+
+      {isTourMode && (
+        <EditorTourOverlay
+          steps={EDITOR_TOUR_STEPS}
+          stepIndex={tourStepIndex}
+          onStepIndexChange={setTourStepIndex}
+          advanceSatisfied={tourAdvanceSatisfied}
+          onExit={handleTourExit}
+        />
       )}
     </div>
   );
