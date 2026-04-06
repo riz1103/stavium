@@ -244,6 +244,10 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
   const selectedVoiceIndex = useScoreStore((s) => s.selectedVoiceIndex);
   const playingNotes = usePlaybackStore((s) => s.playingNotes);
   const playbackState = usePlaybackStore((s) => s.state);
+  const staffMutedPlayback = usePlaybackStore((s) => s.staffMuted);
+  const staffSoloedPlayback = usePlaybackStore((s) => s.staffSoloed);
+  const voiceMutedPlayback = usePlaybackStore((s) => s.voiceMuted);
+  const voiceSoloedPlayback = usePlaybackStore((s) => s.voiceSoloed);
   const addNote = useScoreStore((s) => s.addNote);
   const addMeasure = useScoreStore((s) => s.addMeasure);
   const setAnacrusis = useScoreStore((s) => s.setAnacrusis);
@@ -589,10 +593,18 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
     if (!showPlaybackOnKeyboard || playbackState !== 'playing' || !composition || playingNotes.size === 0) {
       return new Set<number>();
     }
+    const { isStaffEffectivelyMuted, isVoiceEffectivelyMuted } = usePlaybackStore.getState();
     const highlighted = new Set<number>();
     playingNotes.forEach((serialized) => {
       const [staffIndex, measureIndex, voiceIndex, noteIndex] = serialized.split(':').map(Number);
       if (![staffIndex, measureIndex, voiceIndex, noteIndex].every((n) => Number.isFinite(n))) return;
+      // Chord-symbol playback: scheduler stores MIDI in noteIndex (voiceIndex === -1).
+      if (voiceIndex === -1) {
+        if (isStaffEffectivelyMuted(staffIndex)) return;
+        highlighted.add(clampMidi(noteIndex));
+        return;
+      }
+      if (isStaffEffectivelyMuted(staffIndex) || isVoiceEffectivelyMuted(staffIndex, voiceIndex)) return;
       const measure = composition.staves[staffIndex]?.measures?.[measureIndex];
       const element = measure?.voices?.[voiceIndex]?.notes?.[noteIndex];
       if (!measure || !element || !('pitch' in element)) return;
@@ -607,7 +619,16 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
       highlighted.add(clampMidi(pitchToMidi(playedPitch)));
     });
     return highlighted;
-  }, [showPlaybackOnKeyboard, playbackState, composition, playingNotes]);
+  }, [
+    showPlaybackOnKeyboard,
+    playbackState,
+    composition,
+    playingNotes,
+    staffMutedPlayback,
+    staffSoloedPlayback,
+    voiceMutedPlayback,
+    voiceSoloedPlayback,
+  ]);
 
   useEffect(() => {
     if (!showPlaybackOnKeyboard || !composition) {
@@ -616,10 +637,17 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
     }
     const previous = previousPlayingNotesRef.current;
     const next = new Set<string>(playingNotes);
+    const { isStaffEffectivelyMuted, isVoiceEffectivelyMuted } = usePlaybackStore.getState();
     next.forEach((serialized) => {
       if (previous.has(serialized)) return;
       const [staffIndex, measureIndex, voiceIndex, noteIndex] = serialized.split(':').map(Number);
       if (![staffIndex, measureIndex, voiceIndex, noteIndex].every((n) => Number.isFinite(n))) return;
+      if (voiceIndex === -1) {
+        if (isStaffEffectivelyMuted(staffIndex)) return;
+        triggerKeyRetrigger(noteIndex);
+        return;
+      }
+      if (isStaffEffectivelyMuted(staffIndex) || isVoiceEffectivelyMuted(staffIndex, voiceIndex)) return;
       const measure = composition.staves[staffIndex]?.measures?.[measureIndex];
       const element = measure?.voices?.[voiceIndex]?.notes?.[noteIndex];
       if (!measure || !element || !('pitch' in element)) return;
@@ -634,7 +662,15 @@ export const MidiInputPanel = ({ isReadOnly = false }: { isReadOnly?: boolean })
       triggerKeyRetrigger(pitchToMidi(playedPitch));
     });
     previousPlayingNotesRef.current = next;
-  }, [showPlaybackOnKeyboard, composition, playingNotes]);
+  }, [
+    showPlaybackOnKeyboard,
+    composition,
+    playingNotes,
+    staffMutedPlayback,
+    staffSoloedPlayback,
+    voiceMutedPlayback,
+    voiceSoloedPlayback,
+  ]);
 
   const displayActiveVirtualNotes = useMemo(() => {
     if (playbackHighlightedMidi.size === 0) return activeVirtualNotes;

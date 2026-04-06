@@ -16,6 +16,12 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'AI Composition Assistant (Phase 3)',
+    date: 'Apr 2026',
+    details:
+      'The Structure toolbar now includes an "AI Compose" panel with three tools: Reharmonize (generates 3 alternative chord progressions from the melody, applied as chord symbols), SATB Voicing (keeps your melody on the soprano staff and harmonizes each note with A/T/B from chord symbols, with voice leading), and Countermelody (creates a new AI-generated melodic line in contrary or complementary motion). Each tool offers a style selector (Classical, Jazz, Pop, Modal) and generates 3 ranked candidates to preview and apply. AI Compose and "AI Arrange" use an OpenAI-compatible music API when VITE_MUSIC_AI_API_KEY is set (defaults to Groq free tier); otherwise smart heuristics are used. The Help "AI Assistant" chat still uses Google Gemini (VITE_GEMINI_API_KEY) only.',
+  },
+  {
     title: 'View Mode Live Score Updates',
     date: 'Apr 2026',
     details:
@@ -109,8 +115,24 @@ const WHATS_NEW_ITEMS = [
 
 const FAQ_ITEMS = [
   {
+    q: 'How do I reharmonize my melody with new chords?',
+    a: 'Open the Structure toolbar and find "AI Compose". Select the Reharmonize tab, choose a style (Classical, Jazz, Pop, or Modal), and click "Generate 3 ideas". Three chord-progression candidates appear — each with a title and description. Click "Apply chords" on any card to write those chord symbols above the staff. The chord symbols are then visible in the score and can be played back if "Play Chords" is enabled in the playback controls. You can tweak or remove individual chords afterwards using the Chord Editor in Note Expression.',
+  },
+  {
+    q: 'How do I generate SATB staves from chord symbols?',
+    a: 'In Structure > AI Compose, select the SATB Voicing tab. The soprano staff follows your melody (rhythm and contour); alto, tenor, and bass are filled with chord tones under each note using the staff chord symbols (or key-based chords if none are written). Click "Generate 3 ideas" for three texture presets (Smooth Voice Leading, Open Spacing, Mixed Texture), then "Apply SATB staves" to add the four choir staves. This replaces any previously AI-generated staves.',
+  },
+  {
+    q: 'How do I add a countermelody to my score?',
+    a: 'In Structure > AI Compose, select the Countermelody tab. Choose a style, then click "Generate 3 ideas". Three countermelody candidates are generated: Upper Counterpoint (high register, contrary motion), Lower Response (bass register, fills gaps), and Inner Voice (mid-range, smooth steps). Click "Add to score" on any card to append it as a new AI-generated staff. Multiple countermelodies can be added; each call appends rather than replacing.',
+  },
+  {
+    q: 'Which API keys do I need for Help chat vs AI Arrange / AI Compose?',
+    a: 'They are separate. The Help page "AI Assistant" tab uses Google Gemini: set VITE_GEMINI_API_KEY in your .env file. AI Arrange and AI Compose (Reharmonize, SATB Voicing, Countermelody) use an OpenAI-compatible Chat Completions API: set VITE_MUSIC_AI_API_KEY (the app defaults to Groq free tier at api.groq.com; get a key at console.groq.com). Optional: VITE_MUSIC_AI_BASE_URL and VITE_MUSIC_AI_MODEL if you use another provider (for example a local Ollama server). Without VITE_MUSIC_AI_API_KEY, those tools still work using on-device heuristic suggestions labelled Fallback.',
+  },
+  {
     q: 'How do I enter notes from a MIDI keyboard or virtual piano?',
-    a: 'Use the MIDI Input panel in the bottom playback bar (standard notation mode). Select Step Input, then play notes from a connected MIDI device or the virtual piano. The virtual piano is shown as a real piano-style keyboard (white and black keys) that you can click/tap directly. Notes sustain while a key is held (useful for organ/sustaining sounds), and repeated strikes of the same pitch show a quick retrigger accent so separate attacks are visible. Use the Keyboard buttons (Simple, Extended, Ultra (88-key)) to switch range up to full A0-C8. Use Full screen piano for larger playing view. In Simple mode, Octave jump buttons shift the visible one-octave window (for example C4-C5 to C5-C6); in Extended/Ultra they center the scroll view around the selected C octave. Computer keyboard input works across all keyboard views; in Simple view the visible octave auto-shifts when needed so mapped notes remain visible. You can also toggle "Show playback on keyboard" to light up keys during score playback. Optional Computer keyboard input lets you play from your laptop/PC keyboard using a US-layout default map; you can turn it on/off, open "Edit key map" to launch a fullscreen 88-key visual rebinding modal, and mappings are saved locally on your device. In Step mode, turning on Computer keyboard input auto-switches Chord grouping to Off by default for immediate single-note entry (you can still manually change it). On touch screens, long-press/context-menu gesture defaults are suppressed inside the virtual keyboard area while allowing multi-finger piano presses. In View mode, the keyboard controls remain enabled for preview-only playing, but they do not write notes to the composition, and the panel shows a "Preview only - no score input" hint badge. On mobile, the MIDI panel starts collapsed by default to preserve score area; tap Show to expand it.',
+    a: 'Use the MIDI Input panel in the bottom playback bar (standard notation mode). Select Step Input, then play notes from a connected MIDI device or the virtual piano. The virtual piano is shown as a real piano-style keyboard (white and black keys) that you can click/tap directly. Notes sustain while a key is held (useful for organ/sustaining sounds), and repeated strikes of the same pitch show a quick retrigger accent so separate attacks are visible. Use the Keyboard buttons (Simple, Extended, Ultra (88-key)) to switch range up to full A0-C8. Use Full screen piano for larger playing view. In Simple mode, Octave jump buttons shift the visible one-octave window (for example C4-C5 to C5-C6); in Extended/Ultra they center the scroll view around the selected C octave. Computer keyboard input works across all keyboard views; in Simple view the visible octave auto-shifts when needed so mapped notes remain visible. You can also toggle "Show playback on keyboard" to light up keys during score playback (including chord-symbol harmony when "Play Chords" is enabled). Parts you mute (staff or voice lane) or exclude with solo are omitted from keyboard highlights. Optional Computer keyboard input lets you play from your laptop/PC keyboard using a US-layout default map; you can turn it on/off, open "Edit key map" to launch a fullscreen 88-key visual rebinding modal, and mappings are saved locally on your device. In Step mode, turning on Computer keyboard input auto-switches Chord grouping to Off by default for immediate single-note entry (you can still manually change it). On touch screens, long-press/context-menu gesture defaults are suppressed inside the virtual keyboard area while allowing multi-finger piano presses. In View mode, the keyboard controls remain enabled for preview-only playing, but they do not write notes to the composition, and the panel shows a "Preview only - no score input" hint badge. On mobile, the MIDI panel starts collapsed by default to preserve score area; tap Show to expand it.',
   },
   {
     q: 'Can Step Input derive duration from key hold time?',
@@ -262,7 +284,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do I use Practice Playback mode?',
-    a: 'Use the bottom playback bar: set From/To for measure range, enable Loop, or click Loop Selection to loop the currently selected measure range. Turn on Metronome and Count in, then choose 1b or 2b for count-in length. You can also solo/mute staves in Score Settings > Volume.',
+    a: 'Use the bottom playback bar: set From/To for measure range, enable Loop, or click Loop Selection to loop the currently selected measure range. Turn on Metronome and Count in, then choose 1b or 2b for count-in length. Solo/mute staves in Score Settings > Volume and use per-lane M/S on voices; while playing, those choices update sound in real time for soundfont instruments. Staffs on the built-in synth fallback follow live staff-level mute/volume/solo only (lane M/S apply after you restart playback).',
   },
   {
     q: 'What is Compact Toolbar?',
@@ -492,6 +514,16 @@ export const HelpPage = () => {
               <div>
                 <h2 className="text-2xl font-bold text-sv-text mb-4">Editor Features</h2>
                 <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
+                    <h3 className="font-semibold text-sv-cyan mb-2">AI Composition Assistant</h3>
+                    <p className="text-sv-text-muted text-sm">
+                      In the Structure toolbar, the "AI Compose" panel offers three tools working from the currently selected staff.
+                      <strong className="text-sv-text"> Reharmonize</strong> — generates 3 alternative chord progressions and writes them as chord symbols above the staff; choose Classical, Jazz, Pop, or Modal style.
+                      <strong className="text-sv-text"> SATB Voicing</strong> — keeps your melody on the soprano staff and harmonizes each note with alto/tenor/bass from the chord symbols (or key-based chords if absent), with voice leading between chords.
+                      <strong className="text-sv-text"> Countermelody</strong> — creates a new melodic line (Upper Counterpoint, Lower Response, or Inner Voice) in contrary or complementary motion to the melody.
+                      Each tool generates 3 candidates labelled AI or Fallback depending on whether the music API (VITE_MUSIC_AI_API_KEY, e.g. Groq) returned suggestions. Apply any candidate instantly; all changes are undoable.
+                    </p>
+                  </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">MIDI Input + Virtual Piano</h3>
                     <p className="text-sv-text-muted text-sm">

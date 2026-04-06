@@ -6,6 +6,12 @@ import { durationToBeats, beatsToSeconds } from '../../utils/durationUtils';
 import { pitchToMidi, applyKeySignature, applyKeySignatureAndMeasureAccidentals } from '../../utils/noteUtils';
 import { usePlaybackStore, PlayingNoteRef } from '../../app/store/playbackStore';
 
+/**
+ * `PlayingNoteRef.voiceIndex` sentinel for chord-symbol playback: `noteIndex` holds MIDI
+ * for virtual-keyboard highlights only (not a score voice). The score renderer ignores these.
+ */
+const CHORD_PLAYBACK_HIGHLIGHT_VOICE = -1;
+
 // ── Sustain loop configuration ────────────────────────────────────────────────
 // Piano and guitar have a natural decay envelope — looping them causes an
 // audible re-attack artefact.  For sustaining instruments (organ, strings…)
@@ -86,12 +92,17 @@ interface PendingAudioEvent {
   freq: number;       // only used for fallback
   startTime: number;  // AudioContext absolute time
   playDuration: number;
+  /** Peak gain into the soundfont envelope (dynamics/articulation only; staff volume applied via live bus). */
   gain: number;
   velocity: number;
   instrument: string;
   shouldLoop: boolean;
   loopStart: number;
   staffIndex: number;
+  /** Lane for live mute/solo; null = chord-symbol playback (staff-level only). */
+  voiceIndex: number | null;
+  /** Same as `gain` for soundfont path; kept for clarity when splitting bus vs envelope. */
+  musicalGain: number;
   /** noteTime relative to Transport (only used for fallback) */
   transportTime: number;
 }
@@ -343,6 +354,15 @@ export class ToneScheduler {
   private fallbackSynths: Map<string, Tone.PolySynth> = new Map();
   /** Per-staff fallback synths (for playback with individual volume control) */
   private staffFallbackSynths: Map<number, Tone.PolySynth> = new Map();
+  /** Per-staff Tone.Gain after each staff PolySynth (live staff mute/volume on fallback path). */
+  private fallbackStaffOutGain: Map<number, Tone.Gain> = new Map();
+  /** Web Audio gains inserted per soundfont note for live staff/voice mute. */
+  private registeredLiveGains: Array<{
+    gainNode: GainNode;
+    staffIndex: number;
+    voiceIndex: number | null;
+    endTime: number;
+  }> = [];
   private isPlaying = false;
   /** All scheduled notes with their timing info (for highlights) */
   private scheduledNotes: ScheduledNote[] = [];
@@ -390,6 +410,63 @@ export class ToneScheduler {
   /** Share Tone.js's underlying AudioContext so timing is in sync */
   private getAC(): AudioContext {
     return Tone.getContext().rawContext as AudioContext;
+  }
+
+  /** Live staff volume + mute/solo bus multiplier (0–1) applied after note envelopes. */
+  private computeLiveBusGain(staffIndex: number, voiceIndex: number | null): number {
+    const store = usePlaybackStore.getState();
+    const staffVol = Math.max(0, Math.min(1, store.getStaffVolume(staffIndex) / 100));
+    if (store.isStaffEffectivelyMuted(staffIndex)) return 0;
+    if (voiceIndex === null) return staffVol;
+    if (store.isVoiceEffectivelyMuted(staffIndex, voiceIndex)) return 0;
+    return staffVol;
+  }
+
+  private registerLiveGain(gainNode: GainNode, staffIndex: number, voiceIndex: number | null, endTime: number): void {
+    this.registeredLiveGains.push({ gainNode, staffIndex, voiceIndex, endTime });
+  }
+
+  /** Update per-note and per-staff fallback gains from the playback store (every animation frame while playing). */
+  private updateLiveMixBuses(currentAcTime: number): void {
+    const ac = this.getAC();
+    const t = ac.currentTime;
+    for (const e of this.registeredLiveGains) {
+      const v = this.computeLiveBusGain(e.staffIndex, e.voiceIndex);
+      try {
+        e.gainNode.gain.setValueAtTime(v, t);
+      } catch {
+        // ignore
+      }
+    }
+    this.registeredLiveGains = this.registeredLiveGains.filter((e) => {
+      if (e.endTime > currentAcTime - 0.05) return true;
+      try {
+        e.gainNode.disconnect();
+      } catch {
+        // ignore
+      }
+      return false;
+    });
+
+    this.fallbackStaffOutGain.forEach((bus, staffIndex) => {
+      const v = this.computeLiveBusGain(staffIndex, null);
+      try {
+        bus.gain.value = v;
+      } catch {
+        // ignore
+      }
+    });
+  }
+
+  private clearRegisteredLiveGains(): void {
+    for (const e of this.registeredLiveGains) {
+      try {
+        e.gainNode.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    this.registeredLiveGains = [];
   }
 
   /**
@@ -466,8 +543,9 @@ export class ToneScheduler {
     midi: number,
     startTime: number,
     totalDuration: number,
-    gainValue: number,
+    envelopeGain: number,
     loopStartHint: number,
+    outputNode: AudioNode,
   ): boolean {
     try {
       const ac = this.getAC();
@@ -500,9 +578,9 @@ export class ToneScheduler {
       firstSrc.buffer = buffer;
       if (playbackRate !== 1) firstSrc.playbackRate.value = playbackRate;
       const firstGain = ac.createGain();
-      firstGain.gain.setValueAtTime(gainValue, segStart);
+      firstGain.gain.setValueAtTime(envelopeGain, segStart);
       firstSrc.connect(firstGain);
-      firstGain.connect(ac.destination);
+      firstGain.connect(outputNode);
       firstSrc.start(segStart, 0, Math.min(bufferLen, totalDuration + release));
       this.crossfadeNodes.push(firstSrc);
 
@@ -522,16 +600,16 @@ export class ToneScheduler {
         if (playbackRate !== 1) src.playbackRate.value = playbackRate;
         const gn = ac.createGain();
         src.connect(gn);
-        gn.connect(ac.destination);
+        gn.connect(outputNode);
 
         // Crossfade in
         gn.gain.setValueAtTime(0, segStart);
-        gn.gain.linearRampToValueAtTime(gainValue, segStart + xfade);
+        gn.gain.linearRampToValueAtTime(envelopeGain, segStart + xfade);
 
         if (isLast) {
           // Hold to end, then release.
           const tailEnd = segStart + Math.max(remaining, xfade);
-          gn.gain.setValueAtTime(gainValue, Math.max(segStart + xfade, tailEnd - 0.002));
+          gn.gain.setValueAtTime(envelopeGain, Math.max(segStart + xfade, tailEnd - 0.002));
           gn.gain.linearRampToValueAtTime(0, tailEnd + release);
           src.start(segStart, loopStart, Math.min(loopBody, remaining + release + xfade));
           this.crossfadeNodes.push(src);
@@ -539,7 +617,7 @@ export class ToneScheduler {
         } else {
           // Crossfade out near segment end so next segment can overlap cleanly.
           const segEnd = segStart + loopBody;
-          gn.gain.setValueAtTime(gainValue, segEnd - xfade - 0.002);
+          gn.gain.setValueAtTime(envelopeGain, segEnd - xfade - 0.002);
           gn.gain.linearRampToValueAtTime(0, segEnd);
           src.start(segStart, loopStart, loopBody);
           this.crossfadeNodes.push(src);
@@ -978,6 +1056,11 @@ export class ToneScheduler {
       return -1;
     };
 
+    /** Consecutive same-pitch notes form one sustained pitch if either note carries tie=true
+     *  (UI always sets the left note; some imports only flag the right note). */
+    const isTieLink = (a: Note, b: Note): boolean =>
+      a.pitch === b.pitch && (a.tie === true || b.tie === true);
+
     composition.staves.forEach((staff, sIdx) => {
       const numVoices = staff.measures.reduce((mx, m) => Math.max(mx, m.voices.length), 0);
       for (let vIdx = 0; vIdx < numVoices; vIdx++) {
@@ -987,27 +1070,40 @@ export class ToneScheduler {
           const lastNIdx = findLastNoteIndex(voice);
           if (lastNIdx < 0) continue;
           const lastEl = voice?.notes[lastNIdx];
-          if (!lastEl || !('pitch' in lastEl) || !(lastEl as Note).tie) continue;
+          if (!lastEl || !('pitch' in lastEl)) continue;
           const lastNote = lastEl as Note;
 
+          const nextOcc = occIdx + 1;
+          const nextMeasureIndex = playbackMeasureOrder[nextOcc];
+          const nextVoice = staff.measures[nextMeasureIndex]?.voices[vIdx];
+          const firstNIdx = findFirstNoteIndex(nextVoice);
+          if (firstNIdx < 0) continue;
+          const firstEl = nextVoice?.notes[firstNIdx];
+          if (!firstEl || !('pitch' in firstEl)) continue;
+          const firstNote = firstEl as Note;
+          if (!isTieLink(lastNote, firstNote)) continue;
+
           const originKey = `${sIdx}:${vIdx}:${occIdx}:${lastNIdx}`;
-          let nextOcc = occIdx + 1;
+          let scanOcc = nextOcc;
 
-          while (nextOcc < occurrenceCount) {
-            const nextMeasureIndex = playbackMeasureOrder[nextOcc];
-            const nextVoice = staff.measures[nextMeasureIndex]?.voices[vIdx];
-            const firstNIdx = findFirstNoteIndex(nextVoice);
-            if (firstNIdx < 0) break;
-            const firstEl = nextVoice?.notes[firstNIdx];
-            if (!firstEl || !('pitch' in firstEl) || (firstEl as Note).pitch !== lastNote.pitch) break;
+          while (scanOcc < occurrenceCount) {
+            const scanMeasureIndex = playbackMeasureOrder[scanOcc];
+            const scanVoice = staff.measures[scanMeasureIndex]?.voices[vIdx];
+            const fIdx = findFirstNoteIndex(scanVoice);
+            if (fIdx < 0) break;
+            const fEl = scanVoice?.notes[fIdx];
+            if (!fEl || !('pitch' in fEl)) break;
+            const chainFirst = fEl as Note;
+            // Re-validate pitch match against the note that started this cross-measure chain
+            if (chainFirst.pitch !== lastNote.pitch) break;
 
-            const extraSec = getElementDurationSec(firstEl as Note, effTempo(nextMeasureIndex));
+            const extraSec = getElementDurationSec(chainFirst as Note, effTempo(scanMeasureIndex));
             crossTieExtra.set(originKey, (crossTieExtra.get(originKey) ?? 0) + extraSec);
-            crossTieSkip.add(`${sIdx}:${vIdx}:${nextOcc}:${firstNIdx}`);
+            crossTieSkip.add(`${sIdx}:${vIdx}:${scanOcc}:${fIdx}`);
 
-            const hasMoreNotesAfter = nextVoice!.notes.slice(firstNIdx + 1).some((el) => 'pitch' in el);
-            if ((firstEl as Note).tie && !hasMoreNotesAfter) {
-              nextOcc++;
+            const hasMoreNotesAfter = scanVoice!.notes.slice(fIdx + 1).some((el) => 'pitch' in el);
+            if (chainFirst.tie === true && !hasMoreNotesAfter) {
+              scanOcc++;
             } else {
               break;
             }
@@ -1029,8 +1125,12 @@ export class ToneScheduler {
       if (!sfPlayer) {
         if (!this.staffFallbackSynths.has(staffIndex)) {
           const preset = SYNTH_PRESETS[effectiveInstrument] ?? SYNTH_PRESETS['piano'];
-          const synth = new Tone.PolySynth(Tone.Synth, preset).toDestination();
+          const synth = new Tone.PolySynth(Tone.Synth, preset);
+          const bus = new Tone.Gain(1);
+          bus.toDestination();
+          synth.connect(bus);
           this.staffFallbackSynths.set(staffIndex, synth);
+          this.fallbackStaffOutGain.set(staffIndex, bus);
         }
         fallback = this.staffFallbackSynths.get(staffIndex)!;
       }
@@ -1141,7 +1241,7 @@ export class ToneScheduler {
             if (tiedNotesToSkip > 0) {
               tiedNotesToSkip--;
               const beats = getElementPlaybackBeats(element as any);
-              if ('pitch' in element) {
+              if ('pitch' in element && !laneMuted) {
                 const skipNoteTime = measureStartTime + beatsToSeconds(measureTime, currentTempo);
                 this.scheduledNotes.push({
                   ref: { staffIndex, measureIndex, voiceIndex, noteIndex },
@@ -1158,7 +1258,7 @@ export class ToneScheduler {
             const refKey = `${staffIndex}:${voiceIndex}:${measureIndex}:${noteIndex}`;
             if (crossTieSkip.has(tieOccKey)) {
               const beats = getElementPlaybackBeats(element as any);
-              if ('pitch' in element) {
+              if ('pitch' in element && !laneMuted) {
                 const skipNoteTime = measureStartTime + beatsToSeconds(measureTime, currentTempo);
                 this.scheduledNotes.push({
                   ref: { staffIndex, measureIndex, voiceIndex, noteIndex },
@@ -1193,20 +1293,21 @@ export class ToneScheduler {
                 pedalDown = true;
               }
               
-              // Check if this note is tied to the next note (explicitly set)
+              // Tie: same pitch and tie flag on either side (left note is canonical in-editor;
+              // some imports flag only the right-hand note).
               const nextNote = noteIndex < voice.notes.length - 1 ? voice.notes[noteIndex + 1] : null;
-              const isTied = note.tie && nextNote && 
+              const isTied =
+                !!nextNote &&
                 'pitch' in nextNote &&
-                (nextNote as Note).pitch === note.pitch;
-              
+                isTieLink(note, nextNote as Note);
+
               // Check if this note is slurred to the previous note (explicitly set)
               const isSlurred = note.slur && noteIndex > 0 &&
                 'pitch' in voice.notes[noteIndex - 1] &&
                 (voice.notes[noteIndex - 1] as Note).pitch !== note.pitch;
               
-              // If tied, calculate total duration of all tied notes
-              // A tie chain continues only if each note in the chain has tie=true.
-              // Example: A(tie) → B(tie) → C(no tie) → D(same pitch): chain is A+B only.
+              // If tied, calculate total duration of all tied notes in this measure.
+              // Chain continues while each pair is a tie link (same pitch, tie on either note).
               let totalDurationSec = durationSec;
 
               // Add any cross-measure tie extension pre-computed above
@@ -1219,10 +1320,11 @@ export class ToneScheduler {
                 while (tiedIndex < voice.notes.length) {
                   const tiedEl = voice.notes[tiedIndex];
                   const prevTiedEl = voice.notes[prevTiedIndex];
-                  // Chain continues only if: (1) same pitch, AND (2) previous note has tie=true
-                  if ('pitch' in tiedEl && 'pitch' in prevTiedEl &&
-                      (tiedEl as Note).pitch === note.pitch &&
-                      (prevTiedEl as Note).tie) {
+                  if (
+                    'pitch' in tiedEl &&
+                    'pitch' in prevTiedEl &&
+                    isTieLink(prevTiedEl as Note, tiedEl as Note)
+                  ) {
                     totalDurationSec += getElementDurationSec(tiedEl as any, currentTempo);
                     prevTiedIndex = tiedIndex;
                     tiedIndex++;
@@ -1255,7 +1357,9 @@ export class ToneScheduler {
                 voiceIndex,
                 noteIndex,
               };
-              this.scheduledNotes.push({ ref: noteRef, startTime, endTime: startTime + durationSec });
+              if (!laneMuted) {
+                this.scheduledNotes.push({ ref: noteRef, startTime, endTime: startTime + durationSec });
+              }
               
               // Expression: make dynamics and articulations audible in playback.
               const hairpinGain = expressivePlayback ? hairpinGainMap.get(refKey) : undefined;
@@ -1300,18 +1404,21 @@ export class ToneScheduler {
                 if (note.grace) {
                   const graceFraction = note.grace === 'appoggiatura' ? 0.4 : 0.18;
                   const graceDuration = Math.max(0.035, Math.min(playDuration * graceFraction, 0.14));
+                  const gGrace = Math.max(0.04, noteGain * 0.92);
                   this.pendingAudio.push({
                     type: sfPlayer ? 'sf' : 'fallback',
                     midi,
                     freq,
                     startTime,
                     playDuration: graceDuration,
-                    gain: Math.max(0.04, noteGain * 0.92),
+                    gain: gGrace,
                     velocity: Math.max(0.05, velocity * 0.88),
                     instrument: effectiveInstrument,
                     shouldLoop: false,
                     loopStart: loopStartVal,
                     staffIndex,
+                    voiceIndex,
+                    musicalGain: gain > 0 ? Math.max(0.04, Math.min(1.5, gGrace / gain)) : gGrace,
                     transportTime: noteTime,
                   });
                 }
@@ -1329,18 +1436,21 @@ export class ToneScheduler {
                   let t = 0;
                   let hits = 0;
                   while (t < playDuration - 0.005 && hits < 64) {
+                    const gHit = Math.max(0.04, noteGain * 0.9);
                     this.pendingAudio.push({
                       type: sfPlayer ? 'sf' : 'fallback',
                       midi,
                       freq,
                       startTime: renderedStartTime + t,
                       playDuration: Math.min(hitDur, playDuration - t),
-                      gain: Math.max(0.04, noteGain * 0.9),
+                      gain: gHit,
                       velocity: Math.max(0.05, velocity * 0.9),
                       instrument: effectiveInstrument,
                       shouldLoop: false,
                       loopStart: loopStartVal,
                       staffIndex,
+                      voiceIndex,
+                      musicalGain: gain > 0 ? Math.max(0.04, Math.min(1.5, gHit / gain)) : gHit,
                       transportTime: noteTime + t,
                     });
                     t += tremoloStepSec;
@@ -1359,6 +1469,8 @@ export class ToneScheduler {
                     shouldLoop,
                     loopStart: loopStartVal,
                     staffIndex,
+                    voiceIndex,
+                    musicalGain: gain > 0 ? Math.max(0, Math.min(1.5, noteGain / gain)) : noteGain,
                     transportTime: noteTime,
                   });
                 }
@@ -1388,10 +1500,12 @@ export class ToneScheduler {
               // Parse chord symbol using Tonal.js
               const chord = Chord.get(chordSymbol.symbol);
               if (chord && chord.notes && chord.notes.length > 0) {
-                // Calculate start time for this chord (within the measure)
-                const chordBeatTime = beatsToSeconds(chordSymbol.beat, effectiveTempo);
-                const chordStartTime = currentMeasureStart + chordBeatTime;
-                
+                // Timeline offset from playback start (seconds), same basis as `noteTime` for pitched notes.
+                // Use this measure's tempo so chord changes align with local tempo marks.
+                const chordBeatTime = beatsToSeconds(chordSymbol.beat, currentTempo);
+                const chordTimelineSec = currentMeasureStart + chordBeatTime;
+                const chordAudioStart = now + chordTimelineSec;
+
                 // Play chord notes in a middle octave (octave 4)
                 const chordNotes = chord.notes.map((noteName: string) => {
                   // Convert note name (e.g., "C", "Eb") to pitch (e.g., "C4", "Eb4")
@@ -1400,28 +1514,47 @@ export class ToneScheduler {
                 }).filter((midi: number) => midi > 0);
 
                 if (chordNotes.length > 0) {
-                  // Play chord for 1 beat duration
-                  const chordDuration = beatsToSeconds(1, effectiveTempo);
-                  
+                  // Play chord for 1 beat at this measure's tempo
+                  const chordDuration = beatsToSeconds(1, currentTempo);
+                  const chordHighlightEnd = chordAudioStart + chordDuration;
+
                   chordNotes.forEach((midi: number) => {
                     const freq = 440 * Math.pow(2, (midi - 69) / 12);
                     const shouldLoop = !LOOP_DISABLED.has(effectiveInstrument);
                     const loopStartVal = LOOP_START[effectiveInstrument] ?? 0.08;
-                    
+
+                    const chordGain = gain * 0.7;
                     this.pendingAudio.push({
                       type: sfPlayer ? 'sf' : 'fallback',
                       midi,
                       freq,
-                      startTime: chordStartTime,
+                      // Absolute AudioContext time (must match pitched notes: `now + noteTime`)
+                      startTime: chordAudioStart,
                       playDuration: chordDuration,
-                      gain: gain * 0.7, // Slightly quieter for chords
-                      velocity: Math.max(0.08, Math.min(1, gain * 0.7)),
+                      gain: chordGain,
+                      velocity: Math.max(0.08, Math.min(1, chordGain)),
                       instrument: effectiveInstrument,
                       shouldLoop,
                       loopStart: loopStartVal,
                       staffIndex,
-                      transportTime: chordSymbol.beat,
+                      voiceIndex: null,
+                      musicalGain: gain > 0 ? Math.min(1.5, chordGain / gain) : 0.7,
+                      // Fallback PolySynth: same timeline as notes (`transportTime: noteTime`)
+                      transportTime: chordTimelineSec,
                     });
+
+                    if (!isMuted) {
+                      this.scheduledNotes.push({
+                        ref: {
+                          staffIndex,
+                          measureIndex,
+                          voiceIndex: CHORD_PLAYBACK_HIGHLIGHT_VOICE,
+                          noteIndex: midi,
+                        },
+                        startTime: chordAudioStart,
+                        endTime: chordHighlightEnd,
+                      });
+                    }
 
                     if (!sfPlayer) hasFallbackNotes = true;
                   });
@@ -1501,28 +1634,68 @@ export class ToneScheduler {
         const sfPlayer = this.sfPlayers.get(ev.instrument) ?? null;
         if (!sfPlayer) continue;
 
+        const playerOut = (sfPlayer as unknown as { out?: GainNode }).out ?? null;
+        const liveEnd = ev.startTime + ev.playDuration;
+
+        const attachLiveBus = (started: unknown): void => {
+          const node = started as AudioNode | undefined;
+          if (!node || !playerOut) return;
+          const liveGain = ac.createGain();
+          liveGain.gain.value = this.computeLiveBusGain(ev.staffIndex, ev.voiceIndex);
+          try {
+            node.disconnect();
+          } catch {
+            // ignore
+          }
+          node.connect(liveGain);
+          liveGain.connect(playerOut);
+          this.registerLiveGain(liveGain, ev.staffIndex, ev.voiceIndex, liveEnd);
+        };
+
         // Long sustains on loop-enabled instruments: prefer manual crossfade
         let scheduled = false;
         if (ev.shouldLoop && ev.playDuration >= 1.6) {
+          const liveGain = ac.createGain();
+          liveGain.gain.value = this.computeLiveBusGain(ev.staffIndex, ev.voiceIndex);
+          liveGain.connect(ac.destination);
           scheduled = this.scheduleCrossfadeSustain(
-            sfPlayer, ev.midi, ev.startTime, ev.playDuration, ev.gain, ev.loopStart
+            sfPlayer,
+            ev.midi,
+            ev.startTime,
+            ev.playDuration,
+            ev.musicalGain,
+            ev.loopStart,
+            liveGain,
           );
+          if (scheduled) {
+            this.registerLiveGain(liveGain, ev.staffIndex, ev.voiceIndex, liveEnd);
+          }
         }
 
         if (!scheduled) {
           const loopOpts = ev.shouldLoop ? { loop: true, loopStart: ev.loopStart } : {};
-          sfPlayer.start(
-            String(ev.midi) as unknown as Parameters<SoundfontPlayer['start']>[0],
-            ev.startTime,
-            { duration: ev.playDuration, gain: ev.gain, ...loopOpts } as any
-          );
+          if (playerOut) {
+            const started = sfPlayer.start(
+              String(ev.midi) as unknown as Parameters<SoundfontPlayer['start']>[0],
+              ev.startTime,
+              { duration: ev.playDuration, gain: ev.musicalGain, ...loopOpts } as any
+            );
+            attachLiveBus(started);
+          } else {
+            sfPlayer.start(
+              String(ev.midi) as unknown as Parameters<SoundfontPlayer['start']>[0],
+              ev.startTime,
+              { duration: ev.playDuration, gain: ev.gain, ...loopOpts } as any
+            );
+          }
         }
       } else {
-        // Fallback Tone.js synth
+        // Fallback Tone.js synth (staff/lane level is applied by fallbackStaffOutGain; velocity = musical only).
         const fallback = this.staffFallbackSynths.get(ev.staffIndex);
         if (fallback) {
+          const velMusical = Math.max(0.08, Math.min(1, ev.musicalGain));
           Tone.getTransport().schedule((audioTime) => {
-            fallback.triggerAttackRelease(ev.freq, ev.playDuration, audioTime, ev.velocity);
+            fallback.triggerAttackRelease(ev.freq, ev.playDuration, audioTime, velMusical);
           }, ev.transportTime);
         }
       }
@@ -1580,6 +1753,7 @@ export class ToneScheduler {
       this.drainPendingAudio();
 
       const currentTime = ac.currentTime;
+      this.updateLiveMixBuses(currentTime);
       const visualTime = currentTime + ToneScheduler.HIGHLIGHT_LEAD_SEC;
 
       // Auto-stop when all notes have finished playing (add 0.2s buffer for last note release)
@@ -1672,6 +1846,7 @@ export class ToneScheduler {
     if (ac.state === 'suspended') {
       ac.resume().catch(() => {});
     }
+    this.clearRegisteredLiveGains();
     this.sfPlayers.forEach((p) => { try { p.stop(); } catch {} });
     this.fallbackSynths.forEach((s) => { try { s.releaseAll(); } catch {} });
     // Stop any manually-scheduled crossfade sources
@@ -1680,6 +1855,8 @@ export class ToneScheduler {
     // Clean up per-staff synths (they'll be recreated on next play)
     this.staffFallbackSynths.forEach((s) => { try { s.dispose(); } catch {} });
     this.staffFallbackSynths.clear();
+    this.fallbackStaffOutGain.forEach((g) => { try { g.dispose(); } catch {} });
+    this.fallbackStaffOutGain.clear();
     Tone.getTransport().stop();
     Tone.getTransport().cancel();
     this.scheduledNotes = [];

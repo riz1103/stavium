@@ -1,13 +1,11 @@
 import { Composition, MusicElement, Note, Staff } from '../types/music';
 import { midiToPitch, pitchToMidi } from '../utils/noteUtils';
+import { chatCompletionText, isMusicAiConfigured } from './musicAiClient';
 
 export type ArrangementStyle = 'classical' | 'pop' | 'jazz' | 'gospel';
 export type ArrangementDifficulty = 'beginner' | 'intermediate' | 'advanced';
 export type ArrangementInstrumentation = 'satb-choir' | 'piano-duet' | 'string-section';
 type CandidateSource = 'ai' | 'heuristic';
-
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const MODEL = 'gemini-2.5-flash';
 
 interface ArrangementPartSpec {
   name: string;
@@ -196,11 +194,6 @@ const extractMelodyMidis = (sourceStaff: Staff): number[] => {
   return values;
 };
 
-const extractResponseText = (data: unknown): string => {
-  const candidate = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> })?.candidates?.[0];
-  return candidate?.content?.parts?.[0]?.text?.trim() ?? '';
-};
-
 const extractJson = (text: string): string | null => {
   if (!text) return null;
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
@@ -366,11 +359,11 @@ export async function generateArrangementCandidates(
   const parts = getParts(options.instrumentation, options.style, options.difficulty);
   const fallback = buildHeuristicCandidates(sourceStaff, parts, options.style, options.difficulty);
   const baseProfile = defaultProfileForStyle(options.style, options.difficulty);
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'your-gemini-api-key') {
+  if (!isMusicAiConfigured()) {
     return {
       candidates: fallback,
-      warning: 'AI key not configured. Showing smart fallback suggestions.',
+      warning:
+        'Music AI not configured. Add VITE_MUSIC_AI_API_KEY (Groq free tier: console.groq.com) or use smart fallback.',
     };
   }
 
@@ -404,27 +397,18 @@ Rules:
 `;
 
   try {
-    const res = await fetch(`${GEMINI_API_BASE}/models/${MODEL}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.9, maxOutputTokens: 900 },
-      }),
-    });
-    if (!res.ok) {
+    const text = await chatCompletionText(prompt, { temperature: 0.9, maxTokens: 900 });
+    if (text === null) {
       return {
         candidates: fallback,
-        warning: 'AI request failed. Showing smart fallback suggestions.',
+        warning: 'Music AI request failed. Showing smart fallback suggestions.',
       };
     }
-    const data = (await res.json()) as unknown;
-    const text = extractResponseText(data);
     const jsonText = extractJson(text);
     if (!jsonText) {
       return {
         candidates: fallback,
-        warning: 'AI response format was invalid. Showing fallback suggestions.',
+        warning: 'Music AI response was not valid JSON. Showing fallback suggestions.',
       };
     }
 

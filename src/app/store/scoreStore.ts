@@ -113,6 +113,9 @@ interface ScoreState {
   addChord: (staffIndex: number, measureIndex: number, chord: ChordSymbol) => void;
   removeChord: (staffIndex: number, measureIndex: number, chordIndex: number) => void;
   updateChord: (staffIndex: number, measureIndex: number, chordIndex: number, chord: Partial<ChordSymbol>) => void;
+  /** Batch-replace chord symbols for every measure of a staff in a single undo step.
+   *  Pass `undefined` for a measure to clear its chords. */
+  replaceStaffChords: (staffIndex: number, chordsByMeasure: (ChordSymbol[] | undefined)[]) => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -1434,6 +1437,26 @@ export const useScoreStore = create<ScoreState>((set, get) => ({
     
     measures[measureIndex] = measure;
     staff.measures = measures;
+    newStaves[staffIndex] = staff;
+
+    set({
+      composition: updateCompositionWithDates(composition, { staves: newStaves }),
+      canUndo: historyIndex >= 0,
+      canRedo: false,
+    });
+  },
+
+  replaceStaffChords: (staffIndex, chordsByMeasure) => {
+    const { composition } = get();
+    if (!composition) return;
+    saveToHistory(composition);
+
+    const newStaves = [...composition.staves];
+    const staff = { ...newStaves[staffIndex] };
+    staff.measures = staff.measures.map((m, mi) => {
+      const chords = chordsByMeasure[mi];
+      return { ...m, chords: chords && chords.length > 0 ? [...chords].sort((a, b) => a.beat - b.beat) : undefined };
+    });
     newStaves[staffIndex] = staff;
 
     set({

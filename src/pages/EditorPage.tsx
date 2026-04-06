@@ -31,6 +31,7 @@ import { ChordEditor } from '../components/toolbar/ChordEditor';
 import { MeasurePropertiesPanel } from '../components/toolbar/MeasurePropertiesPanel';
 import { StaffVolumeControls } from '../components/toolbar/StaffVolumeControls';
 import { AIArrangementPanel } from '../components/toolbar/AIArrangementPanel';
+import { AICompositionPanel } from '../components/toolbar/AICompositionPanel';
 import { PartExtractionPanel } from '../components/toolbar/PartExtractionPanel';
 import { ScoreReviewPanel } from '../components/review/ScoreReviewPanel';
 import { Measure } from '../types/music';
@@ -51,6 +52,14 @@ import {
   getFirstScoreOnboardingState,
   saveFirstScoreOnboardingState,
 } from '../services/onboardingService';
+import { sharedScheduler } from '../music/playback/toneScheduler';
+
+/** Shared by back navigation and editor unmount — stops transport, soundfonts, and playback UI state. */
+const stopEditorPlayback = () => {
+  sharedScheduler.setPlaybackCompleteCallback(null);
+  sharedScheduler.stop();
+  usePlaybackStore.getState().setState('stopped');
+};
 
 type MobileTab = 'notes' | 'expression' | 'structure' | 'settings';
 
@@ -840,7 +849,13 @@ export const EditorPage = () => {
     }
   };
 
-  const handleBack = () => navigate('/dashboard');
+  const handleBack = () => {
+    stopEditorPlayback();
+    navigate('/dashboard');
+  };
+
+  // Stop audio when leaving the editor by any route (unmount)
+  useEffect(() => () => stopEditorPlayback(), []);
   const handleDiscardLiveChanges = async () => {
     if (!composition?.id || !user?.uid) return;
     const confirmed = window.confirm(
@@ -1064,6 +1079,8 @@ export const EditorPage = () => {
                 {!isGregorianChant && <div className="hidden 2xl:block"><Sep /></div>}
             {!isGregorianChant && <AIArrangementPanel isReadOnly={isReadOnly} />}
                 <div className="hidden 2xl:block"><Sep /></div>
+            {!isGregorianChant && <AICompositionPanel isReadOnly={isReadOnly} />}
+                <div className="hidden 2xl:block"><Sep /></div>
             <PartExtractionPanel isReadOnly={isReadOnly} />
                 <div className="hidden 2xl:block"><Sep /></div>
             <ExportToolbar isReadOnly={false} onSnapshotEvent={persistRevisionSnapshot} />
@@ -1220,6 +1237,7 @@ export const EditorPage = () => {
           <MeasurePropertiesPanel />
         </div>
         {!isGregorianChant && <AIArrangementPanel isReadOnly={isReadOnly} />}
+        {!isGregorianChant && <AICompositionPanel isReadOnly={isReadOnly} />}
         <PartExtractionPanel isReadOnly={isReadOnly} />
         <StaffVolumeControls />
       </div>

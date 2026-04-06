@@ -1,6 +1,7 @@
 /**
  * Help Chat Service — AI assistant for Stavium using Google Gemini API.
- * Requires VITE_GEMINI_API_KEY in .env for AI features to work.
+ * Requires VITE_GEMINI_API_KEY in .env for the Help tab chat only.
+ * Music tools (AI Arrange / AI Compose) use musicAiClient + VITE_MUSIC_AI_API_KEY instead.
  */
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -83,7 +84,7 @@ To scan or import from PDF or scanned images:
     - in Simple mode, shift the visible one-octave window to the selected C range
     - in Extended/Ultra, center the scroll position around the selected C octave.
   - Computer keyboard mapping works in all keyboard views; in Simple view the visible octave auto-shifts as needed so mapped notes stay visible.
-  - Optional toggle: "Show playback on keyboard" highlights virtual piano keys while score playback is running.
+  - Optional toggle: "Show playback on keyboard" highlights virtual piano keys while score playback is running (including each note of chord-symbol playback when "Play Chords" is enabled). Muted staves, muted voice lanes, and parts excluded by staff or voice solo are not shown on the keyboard.
 - Optional toggle: "Computer keyboard input" enables note input from physical computer keys (US-layout default map).
   - "Edit key map" opens a fullscreen 88-key visual piano modal for rebinding; click a piano key, press a computer key, and mapping saves locally on that device/browser.
   - In Step mode, enabling "Computer keyboard input" auto-switches Chord grouping to Off by default for immediate single-note entry; users can still manually change grouping afterward.
@@ -134,6 +135,44 @@ To scan or import from PDF or scanned images:
 - Loop selected measures: click "Loop Selection" (uses current selected measure range) and/or enable "Loop"
 - Count-in + metronome: enable "Count in" and "Metronome", choose 1b or 2b count-in
 - Staff rehearsal focus: use Score Settings → Volume controls to mute/solo staves quickly
+- While playback is running, staff mute/solo, staff volume, voice-lane mute/solo (M/S on V1–V4), and chord-symbol audio follow those controls in real time when using loaded soundfonts. If a staff uses the built-in synth fallback instead, live updates apply per staff (staff mute/volume/solo); per-lane M/S for that staff are fixed until you stop and play again.
+
+## AI Composition Assistant (Phase 3)
+- In Edit mode, open Structure and find "AI Compose".
+- Three tools are available (tabs):
+
+### Reharmonize
+- Generates 3 alternative chord progressions for the selected melody staff.
+- Style options: Classical, Jazz, Pop, Modal.
+- Click "Generate 3 ideas" → 3 candidates appear (each with title + description + AI or Fallback badge).
+- Click "Apply chords" on any candidate to write chord symbols above the staff.
+- Applied chords are visible in the score and can be played back if "Play Chords" is enabled in the playback bar.
+- Individual chords can be removed or edited afterward using the Chord Editor in Note Expression.
+
+### SATB Voicing
+- Soprano follows the selected staff melody; alto, tenor, and bass are chord tones under each note (using chord symbols on the staff, or key-based chords if none are written).
+- Voice leading connects harmonies across the phrase; rests do not reset the voicing.
+- Click "Generate 3 ideas" → 3 voicing candidates: Smooth Voice Leading, Open Spacing, Mixed Texture.
+- Click "Apply SATB staves" to add or replace the 4 AI-generated staves in the score.
+- Applying replaces previously AI-generated staves (non-AI staves are preserved).
+
+### Countermelody
+- Creates a new melodic staff in contrary or complementary motion to the selected melody.
+- Three candidate types: Upper Counterpoint (high register, contrary motion), Lower Response (bass, fills gaps), Inner Voice (mid-range, smooth).
+- Click "Add to score" on any candidate to append it as a new staff.
+- Unlike SATB, each countermelody is added (appended) without removing existing AI staves.
+- Multiple countermelodies can be added in sequence.
+
+### AI Arrange (same Structure row, separate from AI Compose)
+- "AI Arrange" turns a melody staff into multiple arranged parts (SATB choir, piano duet, or string section presets).
+- It uses the same music LLM settings as AI Compose (see below), not the Help chat model.
+
+### Music LLM configuration (AI Compose + AI Arrange)
+- When VITE_MUSIC_AI_API_KEY is set, Stavium calls an OpenAI-compatible Chat Completions API (default base URL is Groq: https://api.groq.com/openai/v1 — free tier keys at https://console.groq.com ). Optional env vars: VITE_MUSIC_AI_BASE_URL, VITE_MUSIC_AI_MODEL.
+- Without that key, music tools use on-device heuristics (Tonal-based) and label candidates "Fallback".
+- The Help page "AI Assistant" chat tab still uses Google Gemini via VITE_GEMINI_API_KEY only.
+
+AI Compose and AI Arrange are not available in View mode or for Gregorian-chant scores.
 
 ## Version history timeline
 - Open "Timeline" from the Structure section
