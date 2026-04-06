@@ -90,6 +90,9 @@ const defaultFirstScoreProgress: FirstScoreProgress = {
 /** Section ids for collapsible desktop toolbars — expanding one collapses the others so the score stays visible. */
 const DESKTOP_TOOLBAR_SECTION_IDS = ['notes', 'structure', 'score', 'expression'] as const;
 
+/** When `stavium_toolbar_sections` is absent, collapse these so Notes & Rests is the only expanded row. */
+const DEFAULT_COLLAPSED_TOOLBAR_SECTION_IDS: readonly string[] = ['structure', 'score', 'expression'];
+
 const measureKey = (staffIndex: number, measureIndex: number) => `${staffIndex}:${measureIndex}`;
 const hashMeasure = (measure: Measure | undefined): string => JSON.stringify(measure ?? null);
 
@@ -139,8 +142,13 @@ export const EditorPage = () => {
   const [collapsedRows, setCollapsedRows] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem('stavium_toolbar_sections');
-      return new Set(stored ? JSON.parse(stored) : []);
-    } catch { return new Set(); }
+      if (stored === null) {
+        return new Set(DEFAULT_COLLAPSED_TOOLBAR_SECTION_IDS);
+      }
+      return new Set(JSON.parse(stored) as string[]);
+    } catch {
+      return new Set(DEFAULT_COLLAPSED_TOOLBAR_SECTION_IDS);
+    }
   });
   const toggleRow = (id: string) => {
     setCollapsedRows((prev) => {

@@ -16,6 +16,12 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'Desktop toolbar default (first visit)',
+    date: 'Apr 2026',
+    details:
+      'On medium and larger screens, the first time you use the editor in a browser (before any toolbar section preference is saved), only Notes & Rests starts expanded; Structure, Score Settings, and Note Expression start collapsed so more of the score is visible. After you open or collapse sections, that layout is saved in the browser.',
+  },
+  {
     title: 'Guided editor tour',
     date: 'Apr 2026',
     details:
@@ -132,7 +138,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'Why do other desktop toolbar sections close when I open one?',
-    a: 'On medium and larger screens, the editor uses collapsible rows for Notes & Rests, Structure, Score Settings, and Note Expression. Only one of those rows stays expanded at a time so the music stays on screen. Click a section header to expand it (others close automatically) or to collapse the one that is open. Section open/closed choices are saved in this browser. Phone layouts use bottom tabs instead.',
+    a: 'On medium and larger screens, the editor uses collapsible rows for Notes & Rests, Structure, Score Settings, and Note Expression. The first time you use the editor in this browser (before any section preference is saved), only Notes & Rests starts expanded. Expanding a collapsed section closes the others so one row stays expanded at a time; you can also collapse rows individually. Click a section header to expand it (others close automatically) or to collapse the one that is open. Section open/closed choices are saved in this browser. Phone layouts use bottom tabs instead.',
   },
   {
     q: 'How do I reharmonize my melody with new chords?',

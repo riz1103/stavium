@@ -45,7 +45,7 @@ To scan or import from PDF or scanned images:
 - Top header: Back button, Score Info (ℹ️), Help (?), title, Edit/View toggle, Undo/Redo, Save
 - On narrow/mobile viewports the header wraps: title is full-width; mobile Edit and the toolbar (hamburger) sit on a row; "Discard Unsaved Changes" and "Save" are on the next row (short label "Discard" on small screens). On medium+ screens Discard/Save align to the right with the full Discard label.
 - The main score canvas keeps a minimum height on small screens so the staff does not shrink below roughly one-third of the viewport; playback controls use slightly tighter padding on mobile.
-- Toolbar sections (collapsible, medium screens and up): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected). Expanding one section automatically collapses the others so the score stays visible on screen.
+- Toolbar sections (collapsible, medium screens and up): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected). On first visit in a browser (no saved section state), only Notes & Rests starts expanded. Expanding one section automatically collapses the others so the score stays visible on screen.
 - Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars) and a MIDI Input panel
 - On phone-sized viewports, the Notes / Expression / Structure / Score tab strip stays at the bottom of the editor; the active tab’s tool rows scroll above it when the panel is open.
 
