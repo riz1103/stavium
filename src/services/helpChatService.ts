@@ -29,8 +29,9 @@ To scan or import from PDF or scanned images:
 2. Select a .mid, .midi, .musicxml, .xml, or .mxl file
 3. The composition opens directly in the editor
 4. Imported polyphony maps into editable V1-V4 lanes per staff
-5. For scanned PDF/image imports, the selected scan voice split mode controls lane splitting behavior
-6. For scanned imports, secondary-lane filler rests used only for timing alignment are hidden for cleaner notation
+5. For direct MusicXML imports, voice lanes preserve source XML voice mapping (no scan-style heuristic lane reassignment), and empty/rest-only extra lanes are not rendered as additional visible voices
+6. For scanned PDF/image imports, the selected scan voice split mode controls lane splitting behavior
+7. For scanned imports, secondary-lane filler rests used only for timing alignment are hidden for cleaner notation
 
 ## Guided editor tour
 - From the Dashboard (Compositions), use the "Guided tour" button to open ${'/editor/tour'}.
@@ -237,6 +238,7 @@ AI Compose and AI Arrange are not available in View mode or for Gregorian-chant 
   - Grace-note styles add a short pre-note before the principal note
   - Tremolo slash counts retrigger short repeated attacks across the note span
   - Pedal start/end increases sustain while pedal is active
+  - Adjacent same-pitch notes retrigger normally unless an explicit tie is present on the left note
 
 ## Adding notes
 1. Select a duration in the Notes toolbar (whole, half, quarter, eighth, sixteenth, 32nd)

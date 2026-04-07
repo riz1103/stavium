@@ -1056,10 +1056,13 @@ export class ToneScheduler {
       return -1;
     };
 
-    /** Consecutive same-pitch notes form one sustained pitch if either note carries tie=true
-     *  (UI always sets the left note; some imports only flag the right note). */
-    const isTieLink = (a: Note, b: Note): boolean =>
-      a.pitch === b.pitch && (a.tie === true || b.tie === true);
+    /** Within a measure, sustain only when the LEFT note explicitly carries tie=true. */
+    const isInMeasureTieLink = (left: Note, right: Note): boolean =>
+      left.pitch === right.pitch && left.tie === true;
+
+    /** Across a measure boundary, sustain only when the left note explicitly carries tie=true. */
+    const isCrossMeasureTieLink = (left: Note, rightFirstInMeasure: Note): boolean =>
+      left.pitch === rightFirstInMeasure.pitch && left.tie === true;
 
     composition.staves.forEach((staff, sIdx) => {
       const numVoices = staff.measures.reduce((mx, m) => Math.max(mx, m.voices.length), 0);
@@ -1081,7 +1084,7 @@ export class ToneScheduler {
           const firstEl = nextVoice?.notes[firstNIdx];
           if (!firstEl || !('pitch' in firstEl)) continue;
           const firstNote = firstEl as Note;
-          if (!isTieLink(lastNote, firstNote)) continue;
+          if (!isCrossMeasureTieLink(lastNote, firstNote)) continue;
 
           const originKey = `${sIdx}:${vIdx}:${occIdx}:${lastNIdx}`;
           let scanOcc = nextOcc;
@@ -1293,13 +1296,12 @@ export class ToneScheduler {
                 pedalDown = true;
               }
               
-              // Tie: same pitch and tie flag on either side (left note is canonical in-editor;
-              // some imports flag only the right-hand note).
+              // Tie: within a measure, only explicit left-note tie continues the sound.
               const nextNote = noteIndex < voice.notes.length - 1 ? voice.notes[noteIndex + 1] : null;
               const isTied =
                 !!nextNote &&
                 'pitch' in nextNote &&
-                isTieLink(note, nextNote as Note);
+                isInMeasureTieLink(note, nextNote as Note);
 
               // Check if this note is slurred to the previous note (explicitly set)
               const isSlurred = note.slur && noteIndex > 0 &&
@@ -1323,7 +1325,7 @@ export class ToneScheduler {
                   if (
                     'pitch' in tiedEl &&
                     'pitch' in prevTiedEl &&
-                    isTieLink(prevTiedEl as Note, tiedEl as Note)
+                    isInMeasureTieLink(prevTiedEl as Note, tiedEl as Note)
                   ) {
                     totalDurationSec += getElementDurationSec(tiedEl as any, currentTempo);
                     prevTiedIndex = tiedIndex;

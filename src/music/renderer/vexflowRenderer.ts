@@ -1331,6 +1331,7 @@ export class VexFlowRenderer {
 
             const extraVoiceData = (measure.voices ?? [])
               .slice(1)
+              .filter((v) => v.notes.some((el) => 'pitch' in el))
               .map((v, extraIdx) => {
                 const extraTickables: any[] = [];
                 const extraDataIndices: number[] = [];
@@ -2513,6 +2514,7 @@ export class VexFlowRenderer {
 
               const extraVoiceData = (measure.voices ?? [])
                 .slice(1)
+                .filter((v) => v.notes.some((el) => 'pitch' in el))
                 .map((v, extraIdx) => {
                   const extraTickables: any[] = [];
                   v.notes.forEach((element) => {

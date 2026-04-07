@@ -16,6 +16,12 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'MusicXML Voice-Lane Fidelity Fix',
+    date: 'Apr 2026',
+    details:
+      'Direct MusicXML imports now preserve source voice-to-lane mapping instead of re-routing lanes heuristically, and rest-only phantom lanes are no longer rendered as extra voices. Playback tie interpretation was also tightened so adjacent same-pitch notes retrigger unless an explicit tie is present, reducing unintended "merged note" sustain.',
+  },
+  {
     title: 'Desktop toolbar default (first visit)',
     date: 'Apr 2026',
     details:
@@ -194,7 +200,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'Do repeats, D.S./D.C./coda, grace notes, tremolo, ottava, and pedal affect playback?',
-    a: 'Yes. Playback now follows repeat/endings and D.S./D.C./To Coda/Fine navigation flow, applies ottava transposition while active, renders grace-note timing before the principal note, simulates single-note tremolo by retriggering attacks, and extends sustain while pedal is active.',
+    a: 'Yes. Playback now follows repeat/endings and D.S./D.C./To Coda/Fine navigation flow, applies ottava transposition while active, renders grace-note timing before the principal note, simulates single-note tremolo by retriggering attacks, and extends sustain while pedal is active. Adjacent same-pitch notes retrigger normally unless an explicit tie is present.',
   },
   {
     q: 'How do I control measure spacing, system breaks, and page breaks for export?',
@@ -230,7 +236,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How are imported MIDI and MusicXML voices mapped now?',
-    a: 'Imports now map voice content directly into editable V1-V4 lanes per staff. This means imported polyphonic passages are no longer trapped in a render-only state and can be edited lane-by-lane.',
+    a: 'Imports map voice content directly into editable V1-V4 lanes per staff. For direct MusicXML files, Stavium now preserves the source voice lane mapping (instead of heuristic lane re-assignment), which keeps clean exports closer to their original notation and avoids added visual noise.',
   },
   {
     q: 'Why do scanned imports show fewer extra rests now?',

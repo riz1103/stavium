@@ -50,6 +50,20 @@ const DURATION_BY_BEATS: Array<{ beats: number; duration: NoteDuration }> = [
   { beats: 1 / 14, duration: 'septuplet-thirty-second' },
 ];
 
+const durationComplexity = (duration: NoteDuration): number => {
+  if (duration.startsWith('triplet-')) return 1;
+  if (duration.startsWith('quintuplet-')) return 2;
+  if (duration.startsWith('sextuplet-')) return 3;
+  if (duration.startsWith('septuplet-')) return 4;
+  if (duration.startsWith('dotted-')) return 5;
+  return 0; // plain values first (whole/half/quarter/eighth/...)
+};
+
+const DURATION_BY_BEATS_DESC = [...DURATION_BY_BEATS].sort((a, b) => {
+  if (a.beats !== b.beats) return b.beats - a.beats;
+  return durationComplexity(a.duration) - durationComplexity(b.duration);
+});
+
 function nearestDuration(beats: number): NoteDuration {
   let best = DURATION_BY_BEATS[0];
   let minDiff = Math.abs(beats - best.beats);
@@ -68,7 +82,7 @@ function decomposeBeats(beats: number): NoteDuration[] {
   let remain = Math.max(0, beats);
   const MIN = 1 / 14;
   while (remain >= MIN * 0.5) {
-    const pick = DURATION_BY_BEATS.find((d) => d.beats <= remain + 1e-6);
+    const pick = DURATION_BY_BEATS_DESC.find((d) => d.beats <= remain + 1e-6);
     if (!pick) break;
     out.push(pick.duration);
     remain -= pick.beats;
@@ -96,9 +110,10 @@ function keyFromFifths(fifths: number): string {
   return map[fifths] ?? 'C';
 }
 
-function clefFromMusicXml(sign?: string, line?: string): Staff['clef'] {
+function clefFromMusicXml(sign?: string, line?: string, octaveChange?: string): Staff['clef'] {
   const s = (sign ?? '').toUpperCase();
   if (s === 'F') return 'bass';
+  if (s === 'G' && String(octaveChange ?? '').trim() === '-1') return 'tenor';
   if (s === 'C') {
     if (line === '3') return 'alto';
     if (line === '4') return 'tenor';
@@ -677,7 +692,8 @@ async function importFromMusicXml(
 
         const clefSign = attrs.querySelector('clef > sign')?.textContent ?? undefined;
         const clefLine = attrs.querySelector('clef > line')?.textContent ?? undefined;
-        activeClef = clefFromMusicXml(clefSign, clefLine);
+        const clefOctaveChange = attrs.querySelector('clef > clef-octave-change')?.textContent ?? undefined;
+        activeClef = clefFromMusicXml(clefSign, clefLine, clefOctaveChange);
         if (mi === 0) staff.clef = activeClef;
       }
 
@@ -891,14 +907,18 @@ async function importFromMusicXml(
             // we keep timing from note durations and drop these noisy rest artifacts.
             return;
           }
-          const laneOrder = [
-            ...Array.from({ length: Math.max(0, activeLaneCount - preferredLane) }, (_, i) => preferredLane + i),
-            ...Array.from({ length: Math.min(preferredLane, activeLaneCount) }, (_, i) => i),
-          ];
-          let laneIdx =
-            laneOrder.find((idx) => event.timeDivs >= laneCursorDivs[idx]) ??
-            preferredLane;
-          laneIdx = Math.max(0, Math.min(activeLaneCount - 1, laneIdx));
+          let laneIdx = Math.max(0, Math.min(activeLaneCount - 1, preferredLane));
+          if (scanMode) {
+            // OCR scans can produce noisy/ambiguous pseudo-voices, so we may
+            // re-route events to the nearest free lane for cleaner engraving.
+            const laneOrder = [
+              ...Array.from({ length: Math.max(0, activeLaneCount - preferredLane) }, (_, i) => preferredLane + i),
+              ...Array.from({ length: Math.min(preferredLane, activeLaneCount) }, (_, i) => i),
+            ];
+            laneIdx =
+              laneOrder.find((idx) => event.timeDivs >= laneCursorDivs[idx]) ??
+              laneIdx;
+          }
           laneEvents[laneIdx].push(event);
           laneCursorDivs[laneIdx] = Math.max(laneCursorDivs[laneIdx], event.timeDivs + event.durationDivs);
         });
@@ -906,6 +926,11 @@ async function importFromMusicXml(
       outMeasure.voices = Array.from({ length: MAX_VOICE_LANES }, (_, laneIndex) => {
         const events = laneEvents[laneIndex] ?? [];
         const outVoice = { notes: [] as Array<Note | Rest> };
+        if (!scanMode && events.length === 0) {
+          // For direct MIDI/XML imports, keep unused lanes empty so the renderer
+          // does not draw phantom rest-only voices that clutter the staff.
+          return outVoice;
+        }
         let cursorDivs = 0;
         const hidePaddingRests = scanMode && laneIndex > 0;
         for (const evt of events.sort((a, b) => a.timeDivs - b.timeDivs)) {
