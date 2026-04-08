@@ -16,6 +16,12 @@ const HELP_LAST_UPDATED = 'Apr 2026';
 
 const WHATS_NEW_ITEMS = [
   {
+    title: 'Audio-to-Score Import (Queue + Polling)',
+    date: 'Apr 2026',
+    details:
+      'Imports now supports uploading one audio file (.wav, .mp3, .m4a, .flac, .ogg) and transcribing it to notation. Audio-to-score is in beta and may not be accurate—review and edit in the editor. Audio conversion runs as an async queued job and appears in Import Jobs with live status updates from Firebase. If the backend reports audio support is unavailable, Imports shows "Audio transcription not available on server".',
+  },
+  {
     title: 'MusicXML Voice-Lane Fidelity Fix',
     date: 'Apr 2026',
     details:
@@ -296,7 +302,11 @@ const FAQ_ITEMS = [
   },
   {
     q: 'What file formats can I import?',
-    a: 'Stavium supports MIDI (.mid, .midi), MusicXML (.xml, .musicxml, .mxl), and PDF/image scans. For MIDI and MusicXML, use the Import button on the Dashboard. For PDFs and scanned images, go to the OCR Imports page.',
+    a: 'Stavium supports MIDI (.mid, .midi), MusicXML (.xml, .musicxml, .mxl), PDF/image scans, and audio transcription uploads (.wav, .mp3, .m4a, .flac, .ogg). For MIDI and MusicXML, use the Import button on the Dashboard. For PDF/image scans and audio uploads, go to the Imports page. Audio transcription availability depends on backend health; if unavailable, Imports shows "Audio transcription not available on server".',
+  },
+  {
+    q: 'How do audio transcription imports work?',
+    a: 'Go to Imports and upload one audio file (.wav, .mp3, .m4a, .flac, .ogg). Audio-to-score is in beta and may not match the source accurately. Stavium queues an async audio conversion job, then you track progress in Import Jobs (Queued/Processing/Completed/Failed) via Firebase-backed updates, the same as PDF/image OCR jobs. When a job is completed, use "Download MusicXML" to save the raw XML as a .musicxml file for debugging/interoperability testing.',
   },
   {
     q: 'How do I export my composition?',
@@ -484,7 +494,7 @@ export const HelpPage = () => {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-sv-cyan mt-0.5">•</span>
-                    Import from MIDI, MusicXML, PDF, and scanned images
+                    Import from MIDI, MusicXML, PDF/image scans, and audio transcription uploads
                   </li>
                 </ul>
               </div>

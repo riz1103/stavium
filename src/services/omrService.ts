@@ -7,6 +7,7 @@ const OMR_API_BASE_URL = import.meta.env.VITE_OMR_API_BASE_URL || 'http://localh
 export interface HealthCheckResponse {
   status: string;
   message: string;
+  audio_transcription_available?: boolean;
 }
 
 export interface MusicXMLResponse {
@@ -60,6 +61,17 @@ export interface ApiError {
 }
 
 export type ConversionFormat = 'musicxml' | 'midi' | 'vexflow';
+export type AudioConversionFormat = 'musicxml' | 'midi' | 'vexflow';
+export type AudioConversionMode = 'high_accuracy';
+
+export interface QueuedTaskStatusResponse {
+  status: string;
+  message?: string;
+  error?: string;
+  result?: unknown;
+  data?: unknown;
+  [key: string]: unknown;
+}
 
 /**
  * Get Firebase ID token for authenticated user
@@ -114,6 +126,27 @@ export function validateImageFiles(files: File[]): void {
     if (file.size > maxSize) {
       throw new Error(`File ${file.name} exceeds 10MB limit`);
     }
+  }
+}
+
+/**
+ * Validate audio file before upload
+ */
+export function validateAudioFile(file: File): void {
+  if (!file) {
+    throw new Error('No audio file selected');
+  }
+
+  const allowedExtensions = ['.wav', '.mp3', '.m4a', '.flac', '.ogg'];
+  const lowerName = file.name.toLowerCase();
+  const isAllowed = allowedExtensions.some((ext) => lowerName.endsWith(ext));
+  if (!isAllowed) {
+    throw new Error('Unsupported audio format. Allowed: WAV, MP3, M4A, FLAC, OGG');
+  }
+
+  const maxSize = 25 * 1024 * 1024; // 25MB
+  if (file.size > maxSize) {
+    throw new Error('Audio file exceeds 25MB limit');
   }
 }
 
@@ -328,6 +361,116 @@ class OMRService {
     }
 
     return await response.json();
+  }
+
+  /**
+   * Queue an audio conversion asynchronously.
+   * Backend returns task ID in either `task_id` or `file_content`.
+   */
+  async queueAudioConversion(
+    file: File,
+    format: AudioConversionFormat = 'musicxml',
+    mode: AudioConversionMode = 'high_accuracy'
+  ): Promise<{ task_id: string }> {
+    validateAudioFile(file);
+    const token = await getFirebaseToken();
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const params = new URLSearchParams();
+    params.append('mode', mode);
+    const response = await fetch(`${this.baseURL}/api/convert/audio/${format}?${params.toString()}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      await handleApiError(response);
+    }
+
+    const data = (await response.json()) as Record<string, unknown>;
+    const taskId = (data.task_id as string) || (data.file_content as string);
+    if (!taskId || typeof taskId !== 'string') {
+      throw new Error('Audio conversion did not return a task ID');
+    }
+
+    return { task_id: taskId };
+  }
+
+  /**
+   * Get task status for queued conversion jobs.
+   */
+  async getTaskStatus(taskId: string): Promise<QueuedTaskStatusResponse> {
+    const token = await getFirebaseToken();
+    const response = await fetch(`${this.baseURL}/api/status/${taskId}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      await handleApiError(response);
+    }
+
+    return await response.json();
+  }
+
+  /**
+   * Poll task status until completion/failure or timeout.
+   */
+  async waitForTaskCompletion(
+    taskId: string,
+    options?: {
+      intervalMs?: number;
+      timeoutMs?: number;
+      onStatusChange?: (status: QueuedTaskStatusResponse) => void;
+    }
+  ): Promise<QueuedTaskStatusResponse> {
+    const intervalMs = options?.intervalMs ?? 2000;
+    const timeoutMs = options?.timeoutMs ?? 5 * 60 * 1000;
+    const start = Date.now();
+    let lastStatus: string | null = null;
+
+    while (Date.now() - start < timeoutMs) {
+      const status = await this.getTaskStatus(taskId);
+      if (status.status !== lastStatus) {
+        options?.onStatusChange?.(status);
+        lastStatus = status.status;
+      }
+
+      if (status.status === 'completed') {
+        return status;
+      }
+
+      if (status.status === 'failed') {
+        const errorMessage =
+          (typeof status.error === 'string' && status.error) ||
+          (typeof status.message === 'string' && status.message) ||
+          'Task failed';
+        throw new Error(errorMessage);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+
+    throw new Error('Task polling timed out');
+  }
+
+  /**
+   * Download conversion output for completed queued tasks.
+   */
+  async downloadTaskResult(taskId: string): Promise<Blob> {
+    const token = await getFirebaseToken();
+    const response = await fetch(`${this.baseURL}/api/download/${taskId}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      await handleApiError(response);
+    }
+
+    return await response.blob();
   }
 
   /**

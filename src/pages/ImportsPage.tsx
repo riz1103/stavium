@@ -38,6 +38,85 @@ function getFilename(job: ScannedJob): string {
   );
 }
 
+type ImportSourceKind = 'pdf' | 'image' | 'audio' | 'other';
+
+function getImportSourceKind(job: ScannedJob): ImportSourceKind {
+  const names = [
+    job.file_info?.filename,
+    ...(job.filenames?.length ? job.filenames : []),
+  ]
+    .filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+    .map((n) => n.toLowerCase());
+
+  const primary = names[0] || getFilename(job).toLowerCase();
+  const extOf = (path: string) =>
+    path.includes('.') ? path.slice(path.lastIndexOf('.')) : '';
+  const ext = extOf(primary);
+  const ft = (job.file_info?.file_type || '').toLowerCase();
+
+  const hasExt = (list: string[]) =>
+    names.some((n) => list.some((e) => n.endsWith(e)));
+
+  if (ft === 'pdf' || hasExt(['.pdf'])) return 'pdf';
+
+  const audioExts = ['.wav', '.mp3', '.m4a', '.flac', '.ogg'];
+  if (hasExt(audioExts) || ['wav', 'mp3', 'm4a', 'flac', 'ogg'].includes(ft)) {
+    return 'audio';
+  }
+
+  const imageExts = ['.jpg', '.jpeg', '.png', '.tiff', '.tif'];
+  if (
+    hasExt(imageExts) ||
+    ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'images'].includes(ft)
+  ) {
+    return 'image';
+  }
+
+  if (ext && audioExts.includes(ext)) return 'audio';
+  if (ext && imageExts.includes(ext)) return 'image';
+  if (ext === '.pdf') return 'pdf';
+
+  return 'other';
+}
+
+function ImportJobFileIcon({ job }: { job: ScannedJob }) {
+  const kind = getImportSourceKind(job);
+
+  if (kind === 'pdf') {
+    return (
+      <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    );
+  }
+
+  if (kind === 'audio') {
+    return (
+      <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+          d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12v-.28c0-.682.153-1.354.447-1.985.234-.847.958-1.354 1.938-1.354H6.75z" />
+      </svg>
+    );
+  }
+
+  if (kind === 'image') {
+    return (
+      <svg className="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+          d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className="w-5 h-5 text-sv-text-dim" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+        d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
 // ─── Time formatting helpers ──────────────────────────────────────────────────
 
 function formatEstimatedTime(seconds: number): string {
@@ -112,7 +191,7 @@ async function musicXmlToComposition(
   scanVoiceMode: ScanVoiceMode
 ): Promise<Composition> {
   const blob = new Blob([xmlContent], { type: 'application/xml' });
-  const file = new File([blob], filename.replace(/\.(pdf|jpg|jpeg|png|tiff|tif)$/i, '.musicxml') || 'import.musicxml', {
+  const file = new File([blob], filename.replace(/\.(pdf|jpg|jpeg|png|tiff|tif|wav|mp3|m4a|flac|ogg)$/i, '.musicxml') || 'import.musicxml', {
     type: 'application/xml',
   });
   return importCompositionFromFileWithOptions(file, undefined, { scanVoiceMode });
@@ -222,6 +301,9 @@ export const ImportsPage = () => {
   const [selectedPDF, setSelectedPDF] = useState<File | null>(null);
   const [pageRange, setPageRange] = useState<string>('');
   const [preprocess, setPreprocess] = useState(false);
+  const [uploadingStatus, setUploadingStatus] = useState<string>('Queueing conversion...');
+  const [audioAvailable, setAudioAvailable] = useState<boolean | null>(null);
+  const [audioHealthError, setAudioHealthError] = useState<string | null>(null);
   const [scanVoiceMode, setScanVoiceMode] = useState<ScanVoiceMode>('conservative');
   const [currentTime, setCurrentTime] = useState(new Date()); // For real-time progress updates
   const [navMenuOpen, setNavMenuOpen] = useState(false);
@@ -230,7 +312,9 @@ export const ImportsPage = () => {
   const fileInputRef      = useRef<HTMLInputElement>(null);
 
   // ── Avatar helpers ─────────────────────────────────────────────────────────
-  const photoURL    = user?.photoURL || (user as any)?.photoUrl;
+  const photoURL =
+    user?.photoURL ||
+    ((user as unknown as { photoUrl?: string } | null)?.photoUrl ?? undefined);
   const hasPhotoURL = photoURL && typeof photoURL === 'string' && photoURL.trim() !== '';
 
   const getInitials = (): string => {
@@ -265,6 +349,28 @@ export const ImportsPage = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // ── Backend health check (audio availability) ──────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    const checkHealth = async () => {
+      try {
+        const health = await omrService.healthCheck();
+        if (cancelled) return;
+        const audioEnabled = health.audio_transcription_available === true;
+        setAudioAvailable(audioEnabled);
+        setAudioHealthError(audioEnabled ? null : 'Audio transcription not available on server');
+      } catch {
+        if (cancelled) return;
+        setAudioAvailable(false);
+        setAudioHealthError('Audio transcription not available on server');
+      }
+    };
+    checkHealth();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ── Close avatar dropdown when clicking outside ────────────────────────────
   useEffect(() => {
     if (!avatarDropdownOpen) return;
@@ -289,30 +395,50 @@ export const ImportsPage = () => {
     return () => document.removeEventListener('click', handler);
   }, [navMenuOpen]);
 
+  const handleAudioUpload = useCallback(async (file: File) => {
+    if (audioAvailable !== true) {
+      throw new Error('Audio transcription not available on server');
+    }
+
+    setUploadingStatus('Queueing audio conversion...');
+    await omrService.queueAudioConversion(file, 'musicxml');
+  }, [audioAvailable]);
+
   // ── Upload logic ───────────────────────────────────────────────────────────
   const handleFiles = useCallback(async (files: File[]) => {
     if (!files.length) return;
     setUploadError(null);
     setUploading(true);
+    setUploadingStatus('Queueing conversion...');
     try {
       const imageExtensions = ['.jpg', '.jpeg', '.png', '.tiff', '.tif'];
+      const audioExtensions = ['.wav', '.mp3', '.m4a', '.flac', '.ogg'];
       const allImages = files.every((f) =>
         imageExtensions.some((ext) => f.name.toLowerCase().endsWith(ext))
       );
+      const allAudio = files.every((f) =>
+        audioExtensions.some((ext) => f.name.toLowerCase().endsWith(ext))
+      );
 
       if (allImages) {
+        setUploadingStatus('Queueing image conversion...');
         const pageNumbers = files.map((_, i) => i + 1);
         await omrService.queueImagesConversion(files, pageNumbers, preprocess);
         // Reset state after successful upload
         setSelectedPDF(null);
         setPageRange('');
+      } else if (allAudio) {
+        if (files.length !== 1) {
+          throw new Error('Please upload one audio file at a time (WAV, MP3, M4A, FLAC, OGG).');
+        }
+        await handleAudioUpload(files[0]);
       } else if (files.length === 1 && files[0].name.toLowerCase().endsWith('.pdf')) {
         // For PDFs, show the page range input instead of uploading immediately
         setSelectedPDF(files[0]);
         // Don't upload yet - wait for user to optionally set page range and click upload
       } else {
         throw new Error(
-          'Please upload a single PDF or one or more image files (JPEG, PNG, TIFF) for OCR conversion.'
+          'Please upload one PDF, one audio file (WAV, MP3, M4A, FLAC, OGG), or one/more image files (JPEG, PNG, TIFF).'
         );
       }
     } catch (err) {
@@ -320,13 +446,14 @@ export const ImportsPage = () => {
     } finally {
       setUploading(false);
     }
-  }, [preprocess]);
+  }, [handleAudioUpload, preprocess]);
 
   // ── Upload PDF with optional page range ────────────────────────────────────
   const handlePDFUpload = useCallback(async () => {
     if (!selectedPDF) return;
     setUploadError(null);
     setUploading(true);
+    setUploadingStatus('Queueing PDF conversion...');
     try {
       await omrService.queuePDFConversion(selectedPDF, pageRange || undefined, preprocess);
       // Success — the Firestore listener will automatically pick up the new job
@@ -413,12 +540,35 @@ export const ImportsPage = () => {
     }
   };
 
+  // ── Download raw MusicXML result ───────────────────────────────────────────
+  const handleDownloadMusicXML = async (job: ScannedJob) => {
+    try {
+      setActionLoading(job.id + '_xml');
+      const xmlContent = await fetchJobResult(job.id);
+
+      const filenameBase = getFilename(job).replace(/\.[^/.]+$/, '');
+      const downloadName = `${filenameBase || 'import'}.musicxml`;
+      const blob = new Blob([xmlContent], { type: 'application/xml' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = downloadName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Failed to download MusicXML:', err);
+      alert(err instanceof Error ? err.message : 'Failed to download MusicXML.');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // ── Download original file(s) ─────────────────────────────────────────────
   const handleDownloadOriginal = async (job: ScannedJob) => {
     try {
       setActionLoading(job.id + '_download');
-      
-      const raw = job as Record<string, unknown>;
       
       // Check if there are multiple files (images)
       const hasMultipleFiles = job.filenames && job.filenames.length > 1;
@@ -526,7 +676,6 @@ export const ImportsPage = () => {
         // If the first path fails, try alternative patterns
         if (job.file_info?.file_id) {
           const filename = getFilename(job);
-          const fileExtension = filename.split('.').pop()?.toLowerCase() || 'pdf';
           pathsToTry.push(`uploads/${job.file_info.file_id}/${filename}`);
           pathsToTry.push(`uploads/${filename}`);
         }
@@ -757,9 +906,31 @@ export const ImportsPage = () => {
           <div className="mb-6">
             <h2 className="text-2xl font-semibold text-sv-text">OCR Imports</h2>
             <p className="text-sm text-sv-text-muted mt-1">
-              Upload PDF or image files to convert sheet music via OCR. Jobs run in the background — check back for status updates.
+              Upload PDF/image scans for OCR queue jobs, or upload one audio file to transcribe directly into notation.
             </p>
           </div>
+
+          <div className="mb-6 p-3 rounded-lg bg-violet-500/10 border border-violet-500/25 flex items-start gap-3">
+            <span className="flex-shrink-0 mt-0.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-violet-200 bg-violet-500/20 border border-violet-400/30">
+              Beta
+            </span>
+            <p className="text-sm text-sv-text-muted leading-relaxed">
+              Audio-to-score is still in beta. Transcription may not match your recording accurately—review and edit the result in the editor.
+            </p>
+          </div>
+
+          {audioHealthError && (
+            <div className="mb-6 p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
+              <svg className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-amber-200 text-sm font-medium">Audio transcription unavailable</p>
+                <p className="text-amber-100/80 text-sm mt-0.5">Audio transcription not available on server</p>
+              </div>
+            </div>
+          )}
 
           {/* ── Upload drop zone ──────────────────────────────────────────────── */}
           <div
@@ -778,7 +949,7 @@ export const ImportsPage = () => {
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif"
+              accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.wav,.mp3,.m4a,.flac,.ogg"
               onChange={handleInputChange}
               className="hidden"
             />
@@ -787,8 +958,8 @@ export const ImportsPage = () => {
               {uploading ? (
                 <>
                   <div className="w-10 h-10 border-2 border-sv-border border-t-sv-cyan rounded-full animate-spin mb-4" />
-                  <p className="text-sv-text font-medium">Queueing conversion…</p>
-                  <p className="text-sv-text-muted text-sm mt-1">Your job will appear in the list below</p>
+                  <p className="text-sv-text font-medium">{uploadingStatus}</p>
+                  <p className="text-sv-text-muted text-sm mt-1">Your job will appear in the list below.</p>
                 </>
               ) : (
                 <>
@@ -802,7 +973,7 @@ export const ImportsPage = () => {
                     Drop files here or <span className="text-sv-cyan">click to browse</span>
                   </p>
                   <p className="text-sv-text-muted text-sm">
-                    PDF sheets or image scans (JPEG, PNG, TIFF) — max 10 MB per file
+                    PDF sheets, image scans (JPEG, PNG, TIFF), or one audio file (WAV, MP3, M4A, FLAC, OGG)
                   </p>
                 </>
               )}
@@ -998,7 +1169,11 @@ export const ImportsPage = () => {
               <div className="space-y-3 animate-fade-in">
                 {jobs.map((job) => {
                   const filename = getFilename(job);
-                  const isActioning = actionLoading === job.id || actionLoading === job.id + '_save' || actionLoading === job.id + '_download';
+                  const isActioning =
+                    actionLoading === job.id ||
+                    actionLoading === job.id + '_save' ||
+                    actionLoading === job.id + '_download' ||
+                    actionLoading === job.id + '_xml';
                   const isDeleting  = deletingId === job.id;
 
                   return (
@@ -1009,17 +1184,7 @@ export const ImportsPage = () => {
                       <div className="flex items-start gap-4">
                         {/* File icon */}
                         <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-sv-elevated border border-sv-border flex items-center justify-center">
-                          {job.file_info?.file_type === 'pdf' ? (
-                            <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                          ) : (
-                            <svg className="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                          )}
+                          <ImportJobFileIcon job={job} />
                         </div>
 
                         {/* Info */}
@@ -1162,6 +1327,26 @@ export const ImportsPage = () => {
                                     </svg>
                                   )}
                                   Save as Composition
+                                </button>
+
+                                <button
+                                  onClick={() => handleDownloadMusicXML(job)}
+                                  disabled={isActioning}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                                             bg-violet-500/10 border border-violet-500/30 text-violet-300
+                                             hover:bg-violet-500/20 hover:border-violet-500/50 transition-all
+                                             disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Download raw MusicXML result file"
+                                >
+                                  {isActioning && actionLoading === job.id + '_xml' ? (
+                                    <span className="w-3 h-3 border border-violet-300/30 border-t-violet-300 rounded-full animate-spin" />
+                                  ) : (
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                        d="M8 9l3 3-3 3m5 0h3M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                    </svg>
+                                  )}
+                                  Download MusicXML
                                 </button>
                               </>
                             )}
