@@ -54,7 +54,7 @@ For audio-to-score transcription:
 ## Editor layout
 - Top header: Back button, Score Info (ℹ️), Help (?), title, Edit/View toggle, Undo/Redo, Save
 - On narrow/mobile viewports the header wraps: title is full-width; mobile Edit and the toolbar (hamburger) sit on a row; "Discard Unsaved Changes" and "Save" are on the next row (short label "Discard" on small screens). On medium+ screens Discard/Save align to the right with the full Discard label.
-- The main score canvas keeps a minimum height on small screens so the staff does not shrink below roughly one-third of the viewport; playback controls use slightly tighter padding on mobile.
+- The main score canvas keeps a minimum height on small screens so the staff does not shrink below roughly one-third of the viewport; playback controls use slightly tighter padding on mobile. Practice playback mode hides the bottom editor tabs and expands the score further.
 - Toolbar sections (collapsible, medium screens and up): Notes & Rests, Structure, Score Settings, Note Expression (when a note is selected). On first visit in a browser (no saved section state), only Notes & Rests starts expanded. Expanding one section automatically collapses the others so the score stays visible on screen.
 - Bottom: Playback controls (Play/Pause/Stop, range From/To, Loop, Loop Selection, BPM, Play Chords, Expressive, Metronome, Count in, count-in bars) and a MIDI Input panel
 - On phone-sized viewports, the Notes / Expression / Structure / Score tab strip stays at the bottom of the editor; the active tab’s tool rows scroll above it when the panel is open.
@@ -136,7 +136,7 @@ For audio-to-score transcription:
 ## Multi-voice lanes (V1-V4)
 - In Notes, use Voices to pick V1, V2, V3, or V4 for editing.
 - Each lane has its own visibility toggle (show/hide).
-- Each lane has playback controls: M (mute) and S (solo).
+- Each lane has playback controls: M (mute) and S (solo), plus per-voice volume sliders in Practice playback layout. Solo is score-wide: only the soloed lane plays; all other lanes (including other staves) are silent until you clear solo.
 - Each lane remembers its own rhythm context (selected note duration and rest mode).
 - Use "Show all" in Voices to restore all lanes quickly.
 
@@ -156,13 +156,19 @@ For audio-to-score transcription:
 - If a user asks how to disable/re-enable tips, mention the checklist controls (Hide Tips / Show Tips).
 
 ## Practice Playback mode
-- Range playback: set From/To in the bottom bar
-- Loop selected measures: click "Loop Selection" (uses current selected measure range) and/or enable "Loop"
-- Count-in + metronome: enable "Count in" and "Metronome", choose 1b or 2b count-in
-- Expressive (on by default): applies dynamics (ppp–fff), crescendo/decrescendo hairpins, and articulation shaping; unmarked notes stay at mf; turn off for uniform level
-- Staff rehearsal focus: use Score Settings → Volume controls to mute/solo staves quickly
+- Click **Practice** in the bottom playback bar to toggle compact rehearsal layout (preference saved in browser).
+- Compact layout shows: Play/Pause/Stop, Start–End measure range, Loop, practice tempo (playback-only override), Metronome, Count-in (1b/2b), and per-voice volume sliders for lanes that contain notes (M mute, S solo).
+- Per-voice volume is relative mix within a staff (100% = full lane level); it stacks with per-staff Volume from Score Settings.
+- On mobile, practice mode hides the bottom editor tab strip and tool panel so the score uses most of the screen; desktop toolbars are also hidden until you exit practice mode.
+- Click the highlighted **Practice** button again to return to full playback controls (MIDI Input, Play Chords, Expressive, Loop Selection, status info).
+- Full mode extras:
+  - Range playback: set From/To in the bottom bar
+  - Loop selected measures: click "Loop Selection" (uses current selected measure range) and/or enable "Loop"
+  - Count-in + metronome: enable "Count in" and "Metronome", choose 1b or 2b count-in
+  - Expressive (on by default): applies dynamics (ppp–fff), crescendo/decrescendo hairpins, and articulation shaping; unmarked notes stay at mf; turn off for uniform level
+  - Staff rehearsal focus: use Score Settings → Volume controls to mute/solo staves quickly
 - Per-staff Volume is relative mix (100% = full level for that staff), not device media volume; playback uses makeup gain + compression/limiting for streaming-like loudness (not identical to every YouTube video) — also check OS volume and turn off Expressive if dynamics pull levels down
-- While playback is running, staff mute/solo, staff volume, voice-lane mute/solo (M/S on V1–V4), and chord-symbol audio follow those controls in real time when using loaded soundfonts. If a staff uses the built-in synth fallback instead, live updates apply per staff (staff mute/volume/solo); per-lane M/S for that staff are fixed until you stop and play again.
+- While playback is running, staff mute/solo, staff volume, voice-lane mute/solo/volume (M/S and sliders in practice mode), and chord-symbol audio follow those controls in real time when using loaded soundfonts. If a staff uses the built-in synth fallback instead, live updates apply per staff (staff mute/volume/solo); per-lane M/S for that staff are fixed until you stop and play again.
 
 ## AI Composition Assistant (Phase 3)
 - In Edit mode, open Structure and find "AI Compose".

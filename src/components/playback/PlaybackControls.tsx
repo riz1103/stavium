@@ -3,6 +3,7 @@ import { useScoreStore } from '../../app/store/scoreStore';
 import { usePlaybackStore } from '../../app/store/playbackStore';
 import { sharedScheduler } from '../../music/playback/toneScheduler';
 import { MidiInputPanel } from '../input/MidiInputPanel';
+import { PracticePlaybackBar } from './PracticePlaybackBar';
 
 export const PlaybackControls = ({ isReadOnly = false }: { isReadOnly?: boolean }) => {
   const composition = useScoreStore((state) => state.composition);
@@ -24,6 +25,10 @@ export const PlaybackControls = ({ isReadOnly = false }: { isReadOnly?: boolean 
   const setCountInEnabled = usePlaybackStore((state) => state.setCountInEnabled);
   const countInBars = usePlaybackStore((state) => state.countInBars);
   const setCountInBars = usePlaybackStore((state) => state.setCountInBars);
+  const practicePlaybackMode = usePlaybackStore((state) => state.practicePlaybackMode);
+  const setPracticePlaybackMode = usePlaybackStore((state) => state.setPracticePlaybackMode);
+  const playbackTempo = usePlaybackStore((state) => state.playbackTempo);
+  const setPlaybackTempo = usePlaybackStore((state) => state.setPlaybackTempo);
   const selectedMeasureIndex = useScoreStore((state) => state.selectedMeasureIndex);
   const measureSelectionStart = useScoreStore((state) => state.measureSelectionStart);
   const schedulerRef = useRef(sharedScheduler);
@@ -140,8 +145,52 @@ export const PlaybackControls = ({ isReadOnly = false }: { isReadOnly?: boolean 
     setLooping(true);
   };
 
+  if (practicePlaybackMode && composition) {
+    return (
+      <PracticePlaybackBar
+        isGregorianChant={!!isGregorianChant}
+        totalMeasures={totalMeasures}
+        measureOptions={measureOptions}
+        playbackStartMeasure={playbackStartMeasure}
+        playbackEndMeasure={playbackEndMeasure}
+        setPlaybackRange={setPlaybackRange}
+        isLooping={isLooping}
+        setLooping={setLooping}
+        isPlaying={isPlaying}
+        isPaused={isPaused}
+        isLoading={isLoading}
+        hasNotes={hasNotes}
+        playbackState={playbackState}
+        effectiveTempo={getEffectiveTempo(composition.tempo)}
+        playbackTempo={playbackTempo}
+        compositionTempo={composition.tempo}
+        setPlaybackTempo={setPlaybackTempo}
+        metronomeEnabled={metronomeEnabled}
+        setMetronomeEnabled={setMetronomeEnabled}
+        countInEnabled={countInEnabled}
+        setCountInEnabled={setCountInEnabled}
+        countInBars={countInBars}
+        setCountInBars={setCountInBars}
+        onPlay={handlePlay}
+        onPause={handlePause}
+        onStop={handleStop}
+        onReplay={handleReplay}
+        onExitPractice={() => setPracticePlaybackMode(false)}
+      />
+    );
+  }
+
   return (
     <div className="flex items-center gap-1.5 px-2 py-1.5 md:gap-2 md:px-4 md:py-2.5 flex-wrap">
+      {/* Practice mode toggle */}
+      <button
+        type="button"
+        onClick={() => setPracticePlaybackMode(true)}
+        className="flex-shrink-0 px-2 py-1 rounded-md text-xs border border-sv-border text-sv-text-muted hover:text-sv-cyan hover:border-sv-cyan/40 bg-sv-elevated transition-colors"
+        title="Switch to compact practice layout — voice volumes, range, and transport only"
+      >
+        Practice
+      </button>
       {/* Transport controls */}
       <div className="flex items-center gap-1">
         {/* Play / Resume */}

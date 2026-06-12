@@ -298,6 +298,7 @@ export const EditorPage = () => {
   const resetPlaybackTempo = usePlaybackStore((s) => s.setPlaybackTempo);
   const setPlaybackInstrument = usePlaybackStore((s) => s.setPlaybackInstrument);
   const playbackState = usePlaybackStore((s) => s.state);
+  const practicePlaybackMode = usePlaybackStore((s) => s.practicePlaybackMode);
   const [onboardingHydrated, setOnboardingHydrated] = useState(false);
   const [firstScoreDone, setFirstScoreDone] = useState(false);
   const [checklistDismissed, setChecklistDismissed] = useState(false);
@@ -1759,14 +1760,16 @@ export const EditorPage = () => {
         </div>
       </header>
 
-      {/* ── Desktop Toolbars ───────────────────────────────────────────────── */}
-      {desktopToolbar}
+      {/* ── Desktop Toolbars (hidden in practice playback mode to maximize score) ── */}
+      {!practicePlaybackMode && desktopToolbar}
 
       {/* Mobile: score + playback + tool shell share one flex column so bottom tabs stay in view; md:contents keeps desktop layout unchanged */}
       <div className="max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col max-md:overflow-hidden md:contents">
         {/* ── Score Canvas ──────────────────────────────────────────────────── */}
         <div
-          className="max-md:min-h-[18vh] max-md:flex-[3] overflow-hidden bg-sv-bg md:min-h-0 md:flex-1"
+          className={`max-md:min-h-[18vh] overflow-hidden bg-sv-bg md:min-h-0 md:flex-1 ${
+            practicePlaybackMode ? 'max-md:flex-[5]' : 'max-md:flex-[3]'
+          }`}
           data-tour-id="tour-score-canvas"
         >
           <ScoreEditor
@@ -1781,7 +1784,8 @@ export const EditorPage = () => {
           <PlaybackControls isReadOnly={isReadOnly} />
         </div>
 
-        {/* ── Mobile: scrollable tool panel + docked tab bar ─────────────────── */}
+        {/* ── Mobile: scrollable tool panel + docked tab bar (hidden in practice playback mode) ── */}
+        {!practicePlaybackMode && (
         <div className="md:hidden flex min-h-0 max-md:flex-[2] flex-col overflow-hidden border-t border-sv-border bg-sv-card">
           {toolbarOpen && (
             <div className="tool-panel-enter min-h-0 flex-1 overflow-y-auto overscroll-y-contain border-b border-sv-border bg-sv-card">
@@ -1829,6 +1833,7 @@ export const EditorPage = () => {
             })}
           </div>
         </div>
+        )}
       </div>
 
       <ScoreReviewPanel

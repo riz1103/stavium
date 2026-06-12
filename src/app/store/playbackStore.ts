@@ -32,6 +32,8 @@ interface PlaybackStateStore {
   /** Per-voice mute/solo state scoped by staff and voice lane. */
   voiceMuted: Record<string, boolean>; // `${staffIndex}:${voiceIndex}` → muted
   voiceSoloed: Record<string, boolean>; // `${staffIndex}:${voiceIndex}` → soloed
+  /** Per-voice volume (0-100), scoped by staff and voice lane. */
+  voiceVolumes: Record<string, number>; // `${staffIndex}:${voiceIndex}` → volume
   setStaffVolume: (staffIndex: number, volume: number) => void;
   setStaffMuted: (staffIndex: number, muted: boolean) => void;
   setStaffSoloed: (staffIndex: number, soloed: boolean) => void;
@@ -43,10 +45,13 @@ interface PlaybackStateStore {
   isStaffEffectivelyMuted: (staffIndex: number) => boolean;
   setVoiceMuted: (staffIndex: number, voiceIndex: number, muted: boolean) => void;
   setVoiceSoloed: (staffIndex: number, voiceIndex: number, soloed: boolean) => void;
+  setVoiceVolume: (staffIndex: number, voiceIndex: number, volume: number) => void;
+  getVoiceVolume: (staffIndex: number, voiceIndex: number) => number;
   clearVoiceSoloed: (staffIndex?: number) => void;
   isVoiceMuted: (staffIndex: number, voiceIndex: number) => boolean;
   isVoiceSoloed: (staffIndex: number, voiceIndex: number) => boolean;
   hasAnySoloedVoice: (staffIndex: number) => boolean;
+  hasAnySoloedVoiceGlobally: () => boolean;
   isVoiceEffectivelyMuted: (staffIndex: number, voiceIndex: number) => boolean;
   /** Playback tempo (can be changed even for view-only users, for playback/study purposes) */
   playbackTempo: number | null; // null means use composition tempo
@@ -73,6 +78,9 @@ interface PlaybackStateStore {
   setCountInEnabled: (enabled: boolean) => void;
   countInBars: 1 | 2;
   setCountInBars: (bars: 1 | 2) => void;
+  /** Compact practice layout: voice volumes, range, transport only — maximizes score on mobile. */
+  practicePlaybackMode: boolean;
+  setPracticePlaybackMode: (enabled: boolean) => void;
 }
 
 const serializeNoteRef = (ref: PlayingNoteRef): string =>
@@ -91,6 +99,14 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
   staffSoloed: {},
   voiceMuted: {},
   voiceSoloed: {},
+  voiceVolumes: {},
+  practicePlaybackMode: (() => {
+    try {
+      return localStorage.getItem('stavium_practice_playback') === '1';
+    } catch {
+      return false;
+    }
+  })(),
   playbackTempo: null,
   playbackInstruments: {},
   playbackStartMeasure: null,
@@ -169,18 +185,26 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
       };
     });
   },
+  setVoiceVolume: (staffIndex, voiceIndex, volume) => {
+    const key = voiceKey(staffIndex, voiceIndex);
+    const clamped = Math.max(0, Math.min(100, volume));
+    set((state) => ({
+      voiceVolumes: { ...state.voiceVolumes, [key]: clamped },
+    }));
+  },
+  getVoiceVolume: (staffIndex, voiceIndex) => {
+    const vol = get().voiceVolumes[voiceKey(staffIndex, voiceIndex)];
+    return vol !== undefined ? vol : 100;
+  },
   setVoiceSoloed: (staffIndex, voiceIndex, soloed) => {
     const key = voiceKey(staffIndex, voiceIndex);
     set((state) => {
-      const nextSolo = { ...state.voiceSoloed };
+      let nextSolo: Record<string, boolean>;
       if (soloed) {
-        // Single-solo behavior per staff: soloing one lane clears other solos.
-        Object.keys(nextSolo).forEach((k) => {
-          if (k.startsWith(`${staffIndex}:`)) nextSolo[k] = false;
-        });
-        nextSolo[key] = true;
+        // Single-solo across the whole score: only the selected lane is audible.
+        nextSolo = { [key]: true };
       } else {
-        nextSolo[key] = false;
+        nextSolo = { ...state.voiceSoloed, [key]: false };
       }
       // Soloing a lane should immediately unmute that same lane.
       const nextMute = { ...state.voiceMuted };
@@ -211,15 +235,13 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
     const entries = get().voiceSoloed;
     return Object.entries(entries).some(([key, enabled]) => enabled && key.startsWith(`${staffIndex}:`));
   },
+  hasAnySoloedVoiceGlobally: () => Object.values(get().voiceSoloed).some(Boolean),
   isVoiceEffectivelyMuted: (staffIndex, voiceIndex) => {
     const state = get();
     const key = voiceKey(staffIndex, voiceIndex);
     const explicitlyMuted = state.voiceMuted[key] ?? false;
     if (explicitlyMuted) return true;
-    const anySoloOnStaff = Object.entries(state.voiceSoloed).some(
-      ([k, enabled]) => enabled && k.startsWith(`${staffIndex}:`)
-    );
-    if (!anySoloOnStaff) return false;
+    if (!Object.values(state.voiceSoloed).some(Boolean)) return false;
     return !(state.voiceSoloed[key] ?? false);
   },
   setPlaybackTempo: (tempo) => set({ playbackTempo: tempo }),
@@ -249,4 +271,12 @@ export const usePlaybackStore = create<PlaybackStateStore>((set, get) => ({
   setMetronomeEnabled: (enabled) => set({ metronomeEnabled: enabled }),
   setCountInEnabled: (enabled) => set({ countInEnabled: enabled }),
   setCountInBars: (bars) => set({ countInBars: bars }),
+  setPracticePlaybackMode: (enabled) => {
+    try {
+      localStorage.setItem('stavium_practice_playback', enabled ? '1' : '0');
+    } catch {
+      // ignore
+    }
+    set({ practicePlaybackMode: enabled });
+  },
 }));

@@ -12,9 +12,15 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'faq', label: 'FAQ', icon: '❓' },
   { id: 'chat', label: 'AI Assistant', icon: '💬' },
 ];
-const HELP_LAST_UPDATED = 'Apr 2026';
+const HELP_LAST_UPDATED = 'Jun 2026';
 
 const WHATS_NEW_ITEMS = [
+  {
+    title: 'Practice playback layout',
+    date: 'Jun 2026',
+    details:
+      'Click Practice in the bottom playback bar to switch to a compact rehearsal layout: transport, measure range (Start–End), Loop, practice tempo, Metronome, Count-in, and per-voice volume sliders (V1–V4 lanes that contain notes, with M/S). On mobile, practice mode hides the bottom editor tabs and toolbars so the score uses most of the screen. Click the highlighted Practice button again to return to full playback controls (MIDI Input, Play Chords, Expressive, etc.). Your choice is remembered in the browser.',
+  },
   {
     title: 'Audio-to-Score Import (Queue + Polling)',
     date: 'Apr 2026',
@@ -340,7 +346,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do I use Practice Playback mode?',
-    a: 'Use the bottom playback bar: set From/To for measure range, enable Loop, or click Loop Selection to loop the currently selected measure range. Turn on Metronome and Count in, then choose 1b or 2b for count-in length. Enable Expressive (on by default) so dynamics, hairpins, and articulations shape playback; turn it off for a flatter level. Solo/mute staves in Score Settings > Volume and use per-lane M/S on voices; while playing, those choices update sound in real time for soundfont instruments. Staffs on the built-in synth fallback follow live staff-level mute/volume/solo only (lane M/S apply after you restart playback).',
+    a: 'Click Practice in the bottom playback bar for a compact layout aimed at rehearsing specific voices: per-voice volume sliders (only lanes with notes), Start/End measure range, Loop, practice tempo (temporary — does not change the saved score unless you edit Tempo in Score Settings), Metronome, and Count-in. Use M/S on each voice lane to mute or solo parts while practicing. On mobile, practice mode hides the bottom editor tabs and desktop toolbars so the score stays large; click Practice again (highlighted when active) to show full controls including MIDI Input, Play Chords, and Expressive. For staff-level mix, use Score Settings > Volume in full mode.',
   },
   {
     q: 'What is Compact Toolbar?',
@@ -646,7 +652,7 @@ export const HelpPage = () => {
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Practice Playback</h3>
                     <p className="text-sv-text-muted text-sm">
-                      Use measure range playback (From/To), Loop, and Loop Selection for rehearsal workflows. Enable Expressive for audible dynamics and hairpins, or turn it off for uniform level. Metronome and Count in (1 or 2 bars) help with entrances and repeated practice passes.
+                      Click Practice in the playback bar for a compact rehearsal UI: voice-lane volume (V1–V4 with notes), measure range, Loop, practice tempo, Metronome, and Count-in. On mobile this hides editor tabs so the score stays large. Full mode adds Loop Selection, Play Chords, Expressive, and MIDI Input.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">

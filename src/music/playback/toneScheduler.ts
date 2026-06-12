@@ -521,9 +521,14 @@ export class ToneScheduler {
     const store = usePlaybackStore.getState();
     const staffVol = Math.max(0, Math.min(1, store.getStaffVolume(staffIndex) / 100));
     if (store.isStaffEffectivelyMuted(staffIndex)) return 0;
-    if (voiceIndex === null) return staffVol;
+    if (voiceIndex === null) {
+      // Chord-symbol playback is staff-level; silence when isolating a voice lane.
+      if (store.hasAnySoloedVoiceGlobally()) return 0;
+      return staffVol;
+    }
     if (store.isVoiceEffectivelyMuted(staffIndex, voiceIndex)) return 0;
-    return staffVol;
+    const voiceVol = Math.max(0, Math.min(1, store.getVoiceVolume(staffIndex, voiceIndex) / 100));
+    return staffVol * voiceVol;
   }
 
   private registerLiveGain(gainNode: GainNode, staffIndex: number, voiceIndex: number | null, endTime: number): void {
@@ -1335,9 +1340,7 @@ export class ToneScheduler {
         // Each measure starts at its calculated time
         const measureStartTime = currentMeasureStart;
 
-        const hasAnyLaneSoloInMeasure = measure.voices.some((_, laneIdx) =>
-          playbackStore.isVoiceSoloed(staffIndex, laneIdx)
-        );
+        const anyVoiceSoloGlobally = playbackStore.hasAnySoloedVoiceGlobally();
 
         measure.voices.forEach((voice, voiceIndex) => {
           // Voice lanes are parallel timelines: each lane starts at beat 0.
@@ -1350,7 +1353,7 @@ export class ToneScheduler {
           const laneMuted =
             isMuted ||
             laneExplicitMuted ||
-            (hasAnyLaneSoloInMeasure && !laneSoloed);
+            (anyVoiceSoloGlobally && !laneSoloed);
           
           voice.notes.forEach((element, noteIndex) => {
             // Skip AUDIO for within-measure tie continuations, but still register them
@@ -1610,7 +1613,7 @@ export class ToneScheduler {
         });
 
         // ── Play chord symbols if enabled ──────────────────────────────────────
-        if (!isGregorianChant && playChords && measure.chords && measure.chords.length > 0) {
+        if (!isGregorianChant && playChords && !anyVoiceSoloGlobally && measure.chords && measure.chords.length > 0) {
           measure.chords.forEach((chordSymbol) => {
             try {
               // Parse chord symbol using Tonal.js
@@ -1806,12 +1809,21 @@ export class ToneScheduler {
           }
         }
       } else {
-        // Fallback Tone.js synth (staff/lane level is applied by fallbackStaffOutGain; velocity = musical only).
+        // Fallback Tone.js synth — apply lane mute/solo/volume at trigger time.
         const fallback = this.staffFallbackSynths.get(ev.staffIndex);
         if (fallback) {
           const velMusical = Math.max(0.08, Math.min(1, ev.musicalGain));
+          const staffIndex = ev.staffIndex;
+          const voiceIndex = ev.voiceIndex;
           Tone.getTransport().schedule((audioTime) => {
-            fallback.triggerAttackRelease(ev.freq, ev.playDuration, audioTime, velMusical);
+            const busGain = this.computeLiveBusGain(staffIndex, voiceIndex);
+            if (busGain <= 0.001) return;
+            fallback.triggerAttackRelease(
+              ev.freq,
+              ev.playDuration,
+              audioTime,
+              Math.max(0.05, Math.min(1, velMusical * busGain))
+            );
           }, ev.transportTime);
         }
       }
