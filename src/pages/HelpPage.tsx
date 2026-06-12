@@ -43,7 +43,7 @@ const WHATS_NEW_ITEMS = [
     title: 'Louder playback output',
     date: 'Jun 2026',
     details:
-      'Score playback, metronome clicks, and keyboard preview now run through a shared output boost so soundfonts read clearly on phone speakers and laptops. Per-staff Volume still controls relative mix between staves (100% = full level for that staff); raise your device media volume if you need more headroom. Expressive playback uses a wider dynamic and hairpin range so p/ff contrasts and articulations are easier to hear at the boosted level.',
+      'Score playback now runs through makeup gain plus gentle compression and limiting so levels sit closer to YouTube and other streaming apps (still below heavily mastered tracks). Per-staff Volume controls relative mix between staves (100% = full level for that staff); raise device media volume for more headroom. Expressive playback uses a wider dynamic range so p/ff contrasts remain audible at the boosted level.',
   },
   {
     title: 'Editor layout on small screens',
@@ -332,7 +332,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'Why is playback quiet even at 100% volume?',
-    a: 'Per-staff Volume in Score Settings is a mix control (100% = full level for that staff), not your phone or laptop media volume — raise device volume separately. Stavium applies output leveling so playback reads louder on small speakers; try headphones if the built-in speaker still feels soft. Turn off Expressive in the playback bar if dynamics markings are pulling levels down, and confirm instruments finished loading (soundfonts fetch on first play).',
+    a: 'Per-staff Volume in Score Settings is a mix control (100% = full level for that staff), not your phone or laptop media volume — raise device volume separately. Stavium applies makeup gain, compression, and limiting so playback sits closer to YouTube/streaming loudness, but an exact match depends on each video and your device speaker. Try headphones if the built-in speaker still feels soft. Turn off Expressive in the playback bar if dynamics markings are pulling levels down, and confirm instruments finished loading (soundfonts fetch on first play).',
   },
   {
     q: 'Why is playback silent or delayed?',

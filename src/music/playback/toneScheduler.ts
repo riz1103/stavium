@@ -137,8 +137,28 @@ const DYNAMIC_GAIN: Record<string, number> = {
   fff: 1.29,
 };
 
-/** Overall playback boost — soundfont samples and conservative dynamics run quiet at unity gain. */
-const MASTER_OUTPUT_GAIN = 1.55;
+/**
+ * Pre-compressor makeup gain. Soundfonts sit well below streaming loudness (~-14 LUFS);
+ * compression + limiting below lets us push level closer to YouTube/media apps without harsh clipping.
+ */
+const MASTER_OUTPUT_GAIN = 2.35;
+
+/** Soft-knee compressor settings (shared intent for Web Audio + Tone.js chains). */
+const MASTER_COMPRESSOR = {
+  threshold: -20,
+  ratio: 8,
+  knee: 10,
+  attack: 0.003,
+  release: 0.12,
+} as const;
+
+const MASTER_LIMITER = {
+  threshold: -3,
+  ratio: 20,
+  knee: 0,
+  attack: 0.001,
+  release: 0.05,
+} as const;
 
 /** Hairpin sweep depth (on the same scale as DYNAMIC_GAIN). */
 const HAIRPIN_SWELL_DELTA = 0.44;
@@ -408,6 +428,10 @@ export class ToneScheduler {
   private metronomeSynth: Tone.Synth | null = null;
   /** Shared Web Audio bus before `destination` (soundfont + crossfade sustain paths). */
   private masterGainNode: GainNode | null = null;
+  private masterCompressorNode: DynamicsCompressorNode | null = null;
+  private masterLimiterNode: DynamicsCompressorNode | null = null;
+  /** Entry point for Tone.js synths (fallback, metronome) — same gain + dynamics as soundfonts. */
+  private toneMasterIn: Tone.Gain | null = null;
   /** Optional completion callback used by UI for looping. */
   private onPlaybackComplete: (() => void) | null = null;
   /** Live hold-preview notes keyed by opaque id. */
@@ -423,27 +447,62 @@ export class ToneScheduler {
     return Tone.getContext().rawContext as AudioContext;
   }
 
-  /** Route soundfont / raw Web Audio output through a shared master gain. */
+  private applyDynamicsCompressor(
+    node: DynamicsCompressorNode,
+    settings: { threshold: number; ratio: number; knee: number; attack: number; release: number },
+  ): void {
+    node.threshold.value = settings.threshold;
+    node.knee.value = settings.knee;
+    node.ratio.value = settings.ratio;
+    node.attack.value = settings.attack;
+    node.release.value = settings.release;
+  }
+
+  /** Route soundfont / raw Web Audio output through gain → compressor → limiter → destination. */
   private getMasterGainNode(): GainNode {
     const ac = this.getAC();
     if (!this.masterGainNode) {
       this.masterGainNode = ac.createGain();
       this.masterGainNode.gain.value = MASTER_OUTPUT_GAIN;
-      this.masterGainNode.connect(ac.destination);
-      this.applyToneMasterOutputLevel();
+
+      this.masterCompressorNode = ac.createDynamicsCompressor();
+      this.applyDynamicsCompressor(this.masterCompressorNode, MASTER_COMPRESSOR);
+
+      this.masterLimiterNode = ac.createDynamicsCompressor();
+      this.applyDynamicsCompressor(this.masterLimiterNode, MASTER_LIMITER);
+
+      this.masterGainNode.connect(this.masterCompressorNode);
+      this.masterCompressorNode.connect(this.masterLimiterNode);
+      this.masterLimiterNode.connect(ac.destination);
+
       const master = this.masterGainNode;
       this.sfPlayers.forEach((player) => this.attachSoundfontToMaster(player, master));
     }
     return this.masterGainNode;
   }
 
-  /** Tone.js synths use `toDestination()` — boost via the Tone master output instead. */
-  private applyToneMasterOutputLevel(): void {
-    try {
-      Tone.getDestination().volume.value = 20 * Math.log10(MASTER_OUTPUT_GAIN);
-    } catch {
-      // ignore
+  /** Tone.js synths share the same makeup gain + compression as the soundfont master bus. */
+  private getToneMasterIn(): Tone.Gain {
+    if (!this.toneMasterIn) {
+      const limiter = new Tone.Limiter(-1);
+      limiter.toDestination();
+      const comp = new Tone.Compressor({
+        threshold: MASTER_COMPRESSOR.threshold,
+        ratio: MASTER_COMPRESSOR.ratio,
+        knee: MASTER_COMPRESSOR.knee,
+        attack: MASTER_COMPRESSOR.attack,
+        release: MASTER_COMPRESSOR.release,
+      }).connect(limiter);
+      this.toneMasterIn = new Tone.Gain(MASTER_OUTPUT_GAIN);
+      this.toneMasterIn.connect(comp);
     }
+    return this.toneMasterIn;
+  }
+
+  /** Call once after `Tone.start()` so both master chains exist before any audio routes. */
+  private initMasterOutput(): void {
+    this.getMasterGainNode();
+    this.getToneMasterIn();
   }
 
   private attachSoundfontToMaster(player: SoundfontPlayer, master?: GainNode): void {
@@ -709,7 +768,8 @@ export class ToneScheduler {
     if (this.fallbackSynths.has(name)) return this.fallbackSynths.get(name)!;
 
     const preset = SYNTH_PRESETS[name] ?? SYNTH_PRESETS['piano'];
-    const synth = new Tone.PolySynth(Tone.Synth, preset).toDestination();
+    const synth = new Tone.PolySynth(Tone.Synth, preset);
+    synth.connect(this.getToneMasterIn());
     this.fallbackSynths.set(name, synth);
     return synth;
   }
@@ -719,7 +779,8 @@ export class ToneScheduler {
     this.metronomeSynth = new Tone.Synth({
       oscillator: { type: 'square' },
       envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 },
-    }).toDestination();
+    });
+    this.metronomeSynth.connect(this.getToneMasterIn());
     return this.metronomeSynth;
   }
 
@@ -778,7 +839,7 @@ export class ToneScheduler {
     try {
       // Ensure AudioContext is started
       await Tone.start();
-      this.getMasterGainNode();
+      this.initMasterOutput();
       const ac = this.getAC();
       if (ac.state === 'suspended') await ac.resume();
 
@@ -823,7 +884,7 @@ export class ToneScheduler {
   ): Promise<string | null> {
     try {
       await Tone.start();
-      this.getMasterGainNode();
+      this.initMasterOutput();
       const ac = this.getAC();
       if (ac.state === 'suspended') await ac.resume();
 
@@ -915,7 +976,7 @@ export class ToneScheduler {
   ): Promise<void> {
     // Unlock AudioContext — must be called from a user gesture
     await Tone.start();
-    this.getMasterGainNode();
+    this.initMasterOutput();
 
     this.stop();
 
@@ -1183,7 +1244,7 @@ export class ToneScheduler {
           const preset = SYNTH_PRESETS[effectiveInstrument] ?? SYNTH_PRESETS['piano'];
           const synth = new Tone.PolySynth(Tone.Synth, preset);
           const bus = new Tone.Gain(1);
-          bus.toDestination();
+          bus.connect(this.getToneMasterIn());
           synth.connect(bus);
           this.staffFallbackSynths.set(staffIndex, synth);
           this.fallbackStaffOutGain.set(staffIndex, bus);
