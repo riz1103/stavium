@@ -159,7 +159,9 @@ For audio-to-score transcription:
 - Range playback: set From/To in the bottom bar
 - Loop selected measures: click "Loop Selection" (uses current selected measure range) and/or enable "Loop"
 - Count-in + metronome: enable "Count in" and "Metronome", choose 1b or 2b count-in
+- Expressive (on by default): applies dynamics (ppp–fff), crescendo/decrescendo hairpins, and articulation shaping; unmarked notes stay at mf; turn off for uniform level
 - Staff rehearsal focus: use Score Settings → Volume controls to mute/solo staves quickly
+- Per-staff Volume is relative mix (100% = full level for that staff), not device media volume; playback includes output leveling for phone/laptop speakers — also check OS volume and turn off Expressive if dynamics pull levels down
 - While playback is running, staff mute/solo, staff volume, voice-lane mute/solo (M/S on V1–V4), and chord-symbol audio follow those controls in real time when using loaded soundfonts. If a staff uses the built-in synth fallback instead, live updates apply per staff (staff mute/volume/solo); per-lane M/S for that staff are fixed until you stop and play again.
 
 ## AI Composition Assistant (Phase 3)

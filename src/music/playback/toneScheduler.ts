@@ -125,34 +125,43 @@ interface PlaybackOptions {
   countInBars?: number;
 }
 
+/** Absolute gain targets per dynamic marking; normalized around mf so unmarked notes stay the same level. */
 const DYNAMIC_GAIN: Record<string, number> = {
-  ppp: 0.35,
-  pp: 0.45,
-  p: 0.58,
-  mp: 0.72,
+  ppp: 0.24,
+  pp: 0.33,
+  p: 0.45,
+  mp: 0.62,
   mf: 0.86,
-  f: 1.0,
-  ff: 1.12,
-  fff: 1.22,
+  f: 0.99,
+  ff: 1.14,
+  fff: 1.29,
 };
+
+/** Overall playback boost — soundfont samples and conservative dynamics run quiet at unity gain. */
+const MASTER_OUTPUT_GAIN = 1.55;
+
+/** Hairpin sweep depth (on the same scale as DYNAMIC_GAIN). */
+const HAIRPIN_SWELL_DELTA = 0.44;
+const HAIRPIN_CRESCENDO_CAP = 1.38;
+const HAIRPIN_DECRESCENDO_FLOOR = 0.20;
 
 const articulationDurationMultiplier = (articulation?: string): number => {
   if (!articulation) return 1;
-  if (articulation === 'a.') return 0.58;
-  if (articulation === 'av') return 0.45;
-  if (articulation === '>') return 0.88;
-  if (articulation === '-') return 1.12;
-  if (articulation === '^') return 0.82;
-  if (articulation === 'a>') return 0.55;
+  if (articulation === 'a.') return 0.52;
+  if (articulation === 'av') return 0.38;
+  if (articulation === '>') return 0.85;
+  if (articulation === '-') return 1.14;
+  if (articulation === '^') return 0.78;
+  if (articulation === 'a>') return 0.50;
   return 1;
 };
 
 const articulationGainMultiplier = (articulation?: string): number => {
   if (!articulation) return 1;
-  if (articulation === '>') return 1.18;
-  if (articulation === '^') return 1.24;
-  if (articulation === 'a>') return 1.2;
-  if (articulation === 'a.' || articulation === 'av') return 0.95;
+  if (articulation === '>') return 1.30;
+  if (articulation === '^') return 1.36;
+  if (articulation === 'a>') return 1.28;
+  if (articulation === 'a.' || articulation === 'av') return 0.88;
   return 1;
 };
 
@@ -314,8 +323,8 @@ const buildHairpinGainMap = (
           const startGain = currentDynamicGain;
           const targetGain =
             note.hairpinStart === 'crescendo'
-              ? Math.min(1.35, startGain + 0.32)
-              : Math.max(0.35, startGain - 0.32);
+              ? Math.min(HAIRPIN_CRESCENDO_CAP, startGain + HAIRPIN_SWELL_DELTA)
+              : Math.max(HAIRPIN_DECRESCENDO_FLOOR, startGain - HAIRPIN_SWELL_DELTA);
           active = { startSeqIndex: seqIndex, startGain, targetGain };
         }
 
@@ -397,6 +406,8 @@ export class ToneScheduler {
   private static readonly HIGHLIGHT_LEAD_SEC = 0.02;
   /** Lightweight synth used for count-in + metronome clicks. */
   private metronomeSynth: Tone.Synth | null = null;
+  /** Shared Web Audio bus before `destination` (soundfont + crossfade sustain paths). */
+  private masterGainNode: GainNode | null = null;
   /** Optional completion callback used by UI for looping. */
   private onPlaybackComplete: (() => void) | null = null;
   /** Live hold-preview notes keyed by opaque id. */
@@ -410,6 +421,40 @@ export class ToneScheduler {
   /** Share Tone.js's underlying AudioContext so timing is in sync */
   private getAC(): AudioContext {
     return Tone.getContext().rawContext as AudioContext;
+  }
+
+  /** Route soundfont / raw Web Audio output through a shared master gain. */
+  private getMasterGainNode(): GainNode {
+    const ac = this.getAC();
+    if (!this.masterGainNode) {
+      this.masterGainNode = ac.createGain();
+      this.masterGainNode.gain.value = MASTER_OUTPUT_GAIN;
+      this.masterGainNode.connect(ac.destination);
+      this.applyToneMasterOutputLevel();
+      const master = this.masterGainNode;
+      this.sfPlayers.forEach((player) => this.attachSoundfontToMaster(player, master));
+    }
+    return this.masterGainNode;
+  }
+
+  /** Tone.js synths use `toDestination()` — boost via the Tone master output instead. */
+  private applyToneMasterOutputLevel(): void {
+    try {
+      Tone.getDestination().volume.value = 20 * Math.log10(MASTER_OUTPUT_GAIN);
+    } catch {
+      // ignore
+    }
+  }
+
+  private attachSoundfontToMaster(player: SoundfontPlayer, master?: GainNode): void {
+    const out = (player as unknown as { out?: GainNode }).out;
+    if (!out) return;
+    try {
+      out.disconnect();
+    } catch {
+      // ignore
+    }
+    out.connect(master ?? this.getMasterGainNode());
   }
 
   /** Live staff volume + mute/solo bus multiplier (0–1) applied after note envelopes. */
@@ -636,7 +681,11 @@ export class ToneScheduler {
   // ── Instrument loading ────────────────────────────────────────────────────
   /** Try to load a soundfont player for the instrument; returns null on failure */
   private async loadSoundfont(name: string): Promise<SoundfontPlayer | null> {
-    if (this.sfPlayers.has(name)) return this.sfPlayers.get(name)!;
+    if (this.sfPlayers.has(name)) {
+      const cached = this.sfPlayers.get(name)!;
+      this.attachSoundfontToMaster(cached);
+      return cached;
+    }
 
     const sfName = SOUNDFONT_MAP[name] ?? 'acoustic_grand_piano';
     const ac = this.getAC();
@@ -647,6 +696,7 @@ export class ToneScheduler {
         format: 'mp3',
       });
       this.sfPlayers.set(name, player);
+      this.attachSoundfontToMaster(player);
       return player;
     } catch (err) {
       console.warn(`[Soundfont] Failed to load "${name}", using synth fallback:`, err);
@@ -728,6 +778,7 @@ export class ToneScheduler {
     try {
       // Ensure AudioContext is started
       await Tone.start();
+      this.getMasterGainNode();
       const ac = this.getAC();
       if (ac.state === 'suspended') await ac.resume();
 
@@ -772,6 +823,7 @@ export class ToneScheduler {
   ): Promise<string | null> {
     try {
       await Tone.start();
+      this.getMasterGainNode();
       const ac = this.getAC();
       if (ac.state === 'suspended') await ac.resume();
 
@@ -863,6 +915,7 @@ export class ToneScheduler {
   ): Promise<void> {
     // Unlock AudioContext — must be called from a user gesture
     await Tone.start();
+    this.getMasterGainNode();
 
     this.stop();
 
@@ -1033,7 +1086,7 @@ export class ToneScheduler {
             startTime: now + metronomeMeasureStartSec + beatsToSeconds(beat, tempoAtMeasure),
             frequency: beat === 0 ? 1240 : 920,
             duration: 0.035,
-            velocity: beat === 0 ? 0.72 : 0.52,
+            velocity: beat === 0 ? 0.85 : 0.65,
           });
         }
         metronomeMeasureStartSec += beatsToSeconds(thisMeasureBeats, tempoAtMeasure);
@@ -1659,7 +1712,7 @@ export class ToneScheduler {
         if (ev.shouldLoop && ev.playDuration >= 1.6) {
           const liveGain = ac.createGain();
           liveGain.gain.value = this.computeLiveBusGain(ev.staffIndex, ev.voiceIndex);
-          liveGain.connect(ac.destination);
+          liveGain.connect(this.getMasterGainNode());
           scheduled = this.scheduleCrossfadeSustain(
             sfPlayer,
             ev.midi,

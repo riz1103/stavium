@@ -40,6 +40,12 @@ const WHATS_NEW_ITEMS = [
       'The Dashboard adds a "Guided tour" button that opens a safe demo editor at /editor/tour. You get a spotlight walkthrough plus hands-on steps: select quarter duration, place a note in measure 2, drag to change pitch, and press Play — Continue stays locked until each action succeeds. Add-note and drag-pitch steps collapse extra toolbars and dock the hint at the top so the staff stays usable. On small screens the tour highlights visible controls and can hide the bottom tool drawer for those steps. Save and cloud sync stay off. Step copy lives in src/tour/editorTourSteps.ts.',
   },
   {
+    title: 'Louder playback output',
+    date: 'Jun 2026',
+    details:
+      'Score playback, metronome clicks, and keyboard preview now run through a shared output boost so soundfonts read clearly on phone speakers and laptops. Per-staff Volume still controls relative mix between staves (100% = full level for that staff); raise your device media volume if you need more headroom. Expressive playback uses a wider dynamic and hairpin range so p/ff contrasts and articulations are easier to hear at the boosted level.',
+  },
+  {
     title: 'Editor layout on small screens',
     date: 'Apr 2026',
     details:
@@ -321,12 +327,20 @@ const FAQ_ITEMS = [
     a: 'Ctrl+Z (or Cmd+Z) undo, Ctrl+Y (or Cmd+Y) redo, and Ctrl+S (or Cmd+S) save. More shortcuts may be added in future updates.',
   },
   {
+    q: 'What does the Expressive playback toggle do?',
+    a: 'When Expressive is on (default), playback follows dynamics (ppp–fff), crescendo/decrescendo hairpins, and articulations (staccato shortens notes, accents hit harder). Unmarked notes stay at a comfortable mf level. Turn Expressive off for a more even, uniform level. Toggle it in the bottom playback bar next to Play Chords.',
+  },
+  {
+    q: 'Why is playback quiet even at 100% volume?',
+    a: 'Per-staff Volume in Score Settings is a mix control (100% = full level for that staff), not your phone or laptop media volume — raise device volume separately. Stavium applies output leveling so playback reads louder on small speakers; try headphones if the built-in speaker still feels soft. Turn off Expressive in the playback bar if dynamics markings are pulling levels down, and confirm instruments finished loading (soundfonts fetch on first play).',
+  },
+  {
     q: 'Why is playback silent or delayed?',
     a: 'Browsers require a user gesture before playing audio. Click the Play button once to start. Some instruments may need time to load (soundfonts). On first use, the app preloads instruments in the background.',
   },
   {
     q: 'How do I use Practice Playback mode?',
-    a: 'Use the bottom playback bar: set From/To for measure range, enable Loop, or click Loop Selection to loop the currently selected measure range. Turn on Metronome and Count in, then choose 1b or 2b for count-in length. Solo/mute staves in Score Settings > Volume and use per-lane M/S on voices; while playing, those choices update sound in real time for soundfont instruments. Staffs on the built-in synth fallback follow live staff-level mute/volume/solo only (lane M/S apply after you restart playback).',
+    a: 'Use the bottom playback bar: set From/To for measure range, enable Loop, or click Loop Selection to loop the currently selected measure range. Turn on Metronome and Count in, then choose 1b or 2b for count-in length. Enable Expressive (on by default) so dynamics, hairpins, and articulations shape playback; turn it off for a flatter level. Solo/mute staves in Score Settings > Volume and use per-lane M/S on voices; while playing, those choices update sound in real time for soundfont instruments. Staffs on the built-in synth fallback follow live staff-level mute/volume/solo only (lane M/S apply after you restart playback).',
   },
   {
     q: 'What is Compact Toolbar?',
@@ -632,7 +646,7 @@ export const HelpPage = () => {
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
                     <h3 className="font-semibold text-sv-cyan mb-2">Practice Playback</h3>
                     <p className="text-sv-text-muted text-sm">
-                      Use measure range playback (From/To), Loop, and Loop Selection for rehearsal workflows. Enable Metronome and Count in (1 or 2 bars) for tighter entrances and repeated practice passes.
+                      Use measure range playback (From/To), Loop, and Loop Selection for rehearsal workflows. Enable Expressive for audible dynamics and hairpins, or turn it off for uniform level. Metronome and Count in (1 or 2 bars) help with entrances and repeated practice passes.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-sv-card border border-sv-border">
